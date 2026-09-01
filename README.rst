@@ -1,258 +1,139 @@
-pianobar
-========
+Signalbox
+=========
 
-pianobar is a free/open-source, console-based client for the personalized
-online radio Pandora_.
+**A modern open-source terminal client for Pandora.**
 
-.. _Pandora: http://www.pandora.com
+Signalbox is an early-stage continuation and modernization of `pianobar`_, the
+console Pandora client created by Lars-Dominik Braun. It begins with pianobar's
+working implementation and preserved history, then aims to build a maintainable
+terminal application around that foundation.
 
-.. image:: https://6xq.net/pianobar/pianobar-screenshot.png
-    :target: https://6xq.net/pianobar/pianobar-screenshot.png
-    :alt: pianobar screenshot
+Signalbox is not yet a distinct end-user release. The current program still
+builds and runs as ``pianobar``; its behavior, configuration, and internal names
+remain unchanged while the project establishes a documented baseline.
 
-Features
---------
+.. _pianobar: https://github.com/PromyLOPh/pianobar
 
-- play and manage (create, add more music, delete, rename, ...) stations
-- rate songs and explain why they have been selected
-- upcoming songs/song history
-- customize keybindings and text output (see `configuration example`_)
-- remote control and eventcmd interface (send tracks to last.fm_, for example)
-- proxy support for listeners outside the USA
+Project status
+--------------
 
-.. _last.fm: https://www.last.fm
-.. _configuration example: https://github.com/PromyLOPh/pianobar/blob/master/contrib/config-example
+Development is at **Phase 1: identity and build cleanup**. The baseline is
+recorded by the tag ``upstream-baseline-2026-09-01`` and was verified on:
 
-Download
---------
+- macOS 26.6.2 on Apple Silicon (arm64)
+- Homebrew 6.0.21
+- Apple Clang 21.0.0
+- FFmpeg 9.0.1
 
-There are community provided packages available for most Linux distributions
-(see your distribution’s package manager), Mac OS X (via homebrew_)
-and \*BSD as well as a `native Windows port`_.
+That baseline compiled, launched, authenticated with Pandora, retrieved the
+account's stations, and played audio. See `docs/UPSTREAM.md`_ for provenance and
+validation details and `docs/ROADMAP.md`_ for planned work.
 
-.. _homebrew: http://brew.sh/
-.. _native Windows Port: https://github.com/thedmd/pianobar-windows
+.. _docs/UPSTREAM.md: docs/UPSTREAM.md
+.. _docs/ROADMAP.md: docs/ROADMAP.md
 
-The current pianobar release is 2024.12.21_ (sha256__, sign__). More recent and
-experimental code is available at GitHub_ and the local gitweb_. Older releases
-are available here:
+Current capabilities
+--------------------
 
-- 2022.04.01_ (sha256__, sign__)
-- 2020.11.28_ (sha256__, sign__)
-- 2020.04.05_ (sha256__, sign__)
-- 2019.02.14_ (sha256__, sign__)
-- 2019.01.25_ (sha256__, sign__)
-- 2018.06.22_ (sha256__, sign__)
-- 2017.08.30_ (sha256__, sign__)
-- 2016.06.02_ (sha256__, sign__)
-- 2015.11.22_ (sha256__, sign__)
-- 2014.09.28_ (sha256__, sign__)
-- 2014.06.08_ (sha256__, sign__)
-- 2013.09.15_ (sha256__, sign__)
-- 2013.05.19_ (sha256__, sign__)
-- 2012.12.01_ (sha256__, sign__)
-- 2012.09.07_ (sha256__, sign__)
-- 2012.06.24_ (sha256__, sign__)
-- 2012.05.06_ (sha256__, sign__)
-- 2012.04.24_ (sha256__, sign__)
-- 2012.01.10_ (sha256__, sign__)
-- 2011.12.11_ (sha256__, sign__)
-- 2011.11.11_ (sha256__, sign__)
-- 2011.11.09_ (sha256__, sign__)
-- 2011.09.22_ (sha256__, sign__)
-- 2011.07.09_ (sha256__, sign__)
-- 2011.04.27_ (sha256__, sign__)
-- 2011.04.10_ (sha256__, sign__)
-- 2011.01.24_ (sha256__)
-- 2010.11.06_ (sha1__)
-- 2010.10.07_ (sha1__)
-- 2010.08.21_ (sha1__)
+The current code inherits pianobar's console interface and supports:
 
-.. _2024.12.21: https://6xq.net/pianobar/pianobar-2024.12.21.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2024.12.21.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2024.12.21.tar.bz2.asc
-.. _2022.04.01: https://6xq.net/pianobar/pianobar-2022.04.01.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2022.04.01.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2022.04.01.tar.bz2.asc
-.. _2020.11.28: https://6xq.net/pianobar/pianobar-2020.11.28.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2020.11.28.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2020.11.28.tar.bz2.asc
-.. _snapshot: http://github.com/PromyLOPh/pianobar/tarball/master
-.. _GitHub: http://github.com/PromyLOPh/pianobar/
-.. _gitweb: https://6xq.net/git/lars/pianobar.git/
-.. _2020.04.05: https://6xq.net/pianobar/pianobar-2020.04.05.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2020.04.05.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2020.04.05.tar.bz2.asc
-.. _2019.02.14: https://6xq.net/pianobar/pianobar-2019.02.14.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2019.02.14.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2019.02.14.tar.bz2.asc
-.. _2019.01.25: https://6xq.net/pianobar/pianobar-2019.01.25.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2019.01.25.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2019.01.25.tar.bz2.asc
-.. _2018.06.22: https://6xq.net/pianobar/pianobar-2018.06.22.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2018.06.22.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2018.06.22.tar.bz2.asc
-.. _2017.08.30: https://6xq.net/pianobar/pianobar-2017.08.30.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2017.08.30.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2017.08.30.tar.bz2.asc
-.. _2016.06.02: https://6xq.net/pianobar/pianobar-2016.06.02.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2016.06.02.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2016.06.02.tar.bz2.asc
-.. _2015.11.22: https://6xq.net/pianobar/pianobar-2015.11.22.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2015.11.22.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2015.11.22.tar.bz2.asc
-.. _2014.09.28: https://6xq.net/pianobar/pianobar-2014.09.28.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2014.09.28.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2014.09.28.tar.bz2.asc
-.. _2014.06.08: https://6xq.net/pianobar/pianobar-2014.06.08.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2014.06.08.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2014.06.08.tar.bz2.asc
-.. _2013.09.15: https://6xq.net/pianobar/pianobar-2013.09.15.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2013.09.15.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2013.09.15.tar.bz2.asc
-.. _2013.05.19: https://6xq.net/pianobar/pianobar-2013.05.19.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2013.05.19.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2013.05.19.tar.bz2.asc
-.. _2012.12.01: https://6xq.net/pianobar/pianobar-2012.12.01.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2012.12.01.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2012.12.01.tar.bz2.asc
-.. _2012.09.07: https://6xq.net/pianobar/pianobar-2012.09.07.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2012.09.07.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2012.09.07.tar.bz2.asc
-.. _2012.06.24: https://6xq.net/pianobar/pianobar-2012.06.24.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2012.06.24.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2012.06.24.tar.bz2.asc
-.. _2012.05.06: https://6xq.net/pianobar/pianobar-2012.05.06.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2012.05.06.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2012.05.06.tar.bz2.asc
-.. _2012.04.24: https://6xq.net/pianobar/pianobar-2012.04.24.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2012.04.24.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2012.04.24.tar.bz2.asc
-.. _2012.01.10: https://6xq.net/pianobar/pianobar-2012.01.10.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2012.01.10.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2012.01.10.tar.bz2.asc
-.. _2011.12.11: https://6xq.net/pianobar/pianobar-2011.12.11.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.12.11.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.12.11.tar.bz2.asc
-.. _2011.11.11: https://6xq.net/pianobar/pianobar-2011.11.11.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.11.11.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.11.11.tar.bz2.asc
-.. _2011.11.09: https://6xq.net/pianobar/pianobar-2011.11.09.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.11.09.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.11.09.tar.bz2.asc
-.. _2011.09.22: https://6xq.net/pianobar/pianobar-2011.09.22.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.09.22.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.09.22.tar.bz2.asc
-.. _2011.07.09: https://6xq.net/pianobar/pianobar-2011.07.09.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.07.09.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.07.09.tar.bz2.asc
-.. _2011.04.27: https://6xq.net/pianobar/pianobar-2011.04.27.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.04.27.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.04.27.tar.bz2.asc
-.. _2011.04.10: https://6xq.net/pianobar/pianobar-2011.04.10.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.04.10.tar.bz2.sha256
-__ https://6xq.net/pianobar/pianobar-2011.04.10.tar.bz2.asc
-.. _2011.01.24: https://6xq.net/pianobar/pianobar-2011.01.24.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2011.01.24.tar.bz2.sha256
-.. _2010.11.06: https://6xq.net/pianobar/pianobar-2010.11.06.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2010.11.06.tar.bz2.sha1
-.. _2010.10.07: https://6xq.net/pianobar/pianobar-2010.10.07.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2010.10.07.tar.bz2.sha1
-.. _2010.08.21: https://6xq.net/pianobar/pianobar-2010.08.21.tar.bz2
-__ https://6xq.net/pianobar/pianobar-2010.08.21.tar.bz2.sha1
+- Pandora authentication and station playback
+- station selection, creation, renaming, deletion, and seed management
+- love, ban, tired, bookmark, and skip actions
+- song history and upcoming-track display
+- pause/resume and software volume control
+- configurable key bindings and output formats
+- proxy, FIFO remote-control, audio-pipe, and event-command interfaces
 
-Install
--------
+These are inherited capabilities, not a claim that Signalbox's planned
+interface is complete.
 
-You need the following software to build pianobar:
+Direction
+---------
 
-- GNU make
-- pthreads
-- libao
-- libcurl ≥ 7.32.0
-- gcrypt [1]_
-- json-c
-- ffmpeg ≤ 5.1 [2]_
-- UTF-8 console/locale
+Signalbox is intended to add:
 
-.. [1] with blowfish cipher enabled
-.. [2] required: demuxer mov, decoder aac, protocol http and filters volume,
-        aformat, aresample
+- a modern interactive TUI with station and now-playing views
+- playback progress, history, keyboard navigation, resize handling, and themes
+- macOS Now Playing, media keys, notifications, and Keychain integration
+- Linux MPRIS, desktop notifications, and secret-service integration
+- robust reconnect and error handling
+- a deliberate CLI/headless mode alongside the TUI
+- optional terminal album artwork where supported
+- Homebrew and Linux packaging, CI builds, and release artifacts
 
-Then type::
+macOS and Linux are the target platforms. Modern macOS on Apple Silicon is the
+only environment validated by the Signalbox project so far. Linux remains a
+first-class goal and pianobar has an established history there, but Signalbox
+has not yet recorded its own Linux validation matrix.
 
-	gmake clean && gmake
+Build from source on macOS
+--------------------------
 
-You can run the client directly from the source directory now::
+The verified build uses Homebrew packages and GNU Make. Install the current
+dependencies:
 
-	./pianobar
+.. code-block:: console
 
-Or install it to ``/usr/local`` by issuing::
+   brew install ffmpeg json-c libao libgcrypt pkgconf
 
-	gmake install
+Then build from the repository root:
 
-FAQ
----
+.. code-block:: console
 
-The audio output does not work as expected. What can I do?
-    pianobar uses libao and most problems are related to a broken libao
-    configuration. Have a look at issue `#167`_ for example.
-Can I donate money? Do you have a Flattr/Bitcoin/… account?
-    No, money is not necessary to continue working on pianobar. There are many
-    other ways to support pianobar: Reporting bugs, creating `cool stuff`_
-    based on pianobar, blogging about it and the most important one: Keeping
-    Pandora alive.
+   gmake clean && gmake
 
-.. _#167: https://github.com/PromyLOPh/pianobar/issues/167
-.. _cool stuff: `addons`_
+The build also requires pthreads and libcurl. They were available in the
+verified macOS environment; ``pkgconf`` must be able to locate all dependencies.
+No global installation is required.
 
-External projects
------------------
+Usage
+-----
 
-Addons
-++++++
+Until the executable is renamed in a dedicated change, start it from the source
+tree with:
 
-control-pianobar_
-    Scripts that interact with pianobar entirely through notification bubbles
-    and hotkeys
-pianobar.el_
-    Emacs interface for pianobar
-`pianobar-mediaplayer2`_
-    Control pianobar like any other media player through DBUS/MPRIS.
-PianobarNowPlayable_
-    Integrate pianobar with the Now Playing feature of macOS
+.. code-block:: console
 
-.. _control-pianobar: http://malabarba.github.io/control-pianobar/
-.. _pianobar.el: https://github.com/agrif/pianobar.el
-.. _pianobar-mediaplayer2: https://github.com/ryanswilson59/pianobar-mediaplayer2
-.. _PianobarNowPlayable: https://github.com/iDom818/PianobarNowPlayable
+   ./pianobar
 
-Clients
-+++++++
+On first run, enter Pandora credentials when prompted, then select a station.
+Press ``?`` for the current key bindings and ``q`` to quit. Existing pianobar
+configuration is read from ``$XDG_CONFIG_HOME/pianobar/config`` or
+``~/.config/pianobar/config``. The annotated `configuration example`_ documents
+available settings.
 
-pithos_
-	Python/GTK desktop client
-pianod_
-    Pandora UNIX daemon, based on pianobar
-Hermes_
-    Pandora Client for OS X
-`Remote pianobar`_
-    Fork of pianobar, which includes a HTTP server and serves a
-    Websocket-powered frontend for remote control.
+.. _configuration example: contrib/config-example
 
-.. _pithos: http://pithos.github.io/
-.. _pianod: http://deviousfish.com/pianod/
-.. _Hermes: http://hermesapp.org/
-.. _Remote pianobar: https://github.com/mr-light-show/remote-pianobar
+Development expectations
+------------------------
 
-Standalone devices
-++++++++++++++++++
+The repository is intentionally close to upstream today. Changes should remain
+small and reviewable, preserve attribution, and avoid mixing identity work with
+protocol or playback changes. Compatibility claims should be backed by a
+recorded build or runtime test. The current and proposed component boundaries
+are described in `docs/ARCHITECTURE.md`_.
 
-PandoraBar_
-    Beagleboard-based radio device running pianobar
-`Pandora’s Box`_
-    Raspberry Pi-based standalone devices running pianobar
+.. _docs/ARCHITECTURE.md: docs/ARCHITECTURE.md
 
-.. _PandoraBar: https://hackaday.com/2012/09/20/how-to-build-your-own-dedicated-pandora-radio/
-.. _Pandora’s Box: http://www.instructables.com/id/Pandoras-Box-An-Internet-Radio-player-made-with/
+Contributing
+------------
 
+Signalbox is at the stage where focused bug reports, platform build results,
+documentation corrections, and narrowly scoped patches are most useful. Before
+starting a substantial feature, open a discussion in the repository so its
+scope and architectural fit can be agreed. Include the platform and dependency
+versions used to test code changes, and keep unrelated cleanup in separate
+commits.
+
+License and attribution
+-----------------------
+
+Signalbox's inherited pianobar code is distributed under the **MIT License**, as
+stated in ``COPYING`` and the source-file headers. Copyright notices for
+Lars-Dominik Braun and other upstream contributors remain part of the source and
+must be preserved. The full upstream history is retained as an additional record
+of authorship and provenance.
+
+Pandora is a third-party service and trademark. Signalbox is an independent
+open-source project and is not affiliated with or endorsed by Pandora.
