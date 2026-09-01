@@ -8,9 +8,9 @@ console Pandora client created by Lars-Dominik Braun. It begins with pianobar's
 working implementation and preserved history, then aims to build a maintainable
 terminal application around that foundation.
 
-Signalbox is not yet a distinct end-user release. The current program still
-builds and runs as ``pianobar``; its behavior, configuration, and internal names
-remain unchanged while the project establishes a documented baseline.
+Signalbox is not yet a distinct end-user release. The current program builds
+and runs as ``signalbox`` while its inherited behavior, configuration paths,
+and internal names remain unchanged.
 
 .. _pianobar: https://github.com/PromyLOPh/pianobar
 
@@ -90,12 +90,11 @@ No global installation is required.
 Usage
 -----
 
-Until the executable is renamed in a dedicated change, start it from the source
-tree with:
+Start the executable from the source tree with:
 
 .. code-block:: console
 
-   ./pianobar
+   ./signalbox
 
 On first run, enter Pandora credentials when prompted, then select a station.
 Press ``?`` for the current key bindings and ``q`` to quit. Existing pianobar

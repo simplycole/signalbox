@@ -90,7 +90,7 @@ load_config(){
 }
 
 is_running(){
-        ps -u $(id -u) -o comm | grep -q "^pianobar$"
+        ps -u $(id -u) -o comm | grep -q "^signalbox$"
 }
 
 # Launch pianobar if it is not already running.
@@ -98,8 +98,8 @@ launch(){
         if ! is_running
         then
                 ensure_fifo true
-                echo "Pianobar not running, launching Pianobar"
-                nohup pianobar &>$OUT &disown
+                echo "Signalbox not running, launching Signalbox"
+                nohup signalbox &>$OUT &disown
                 sleep 1
         else
                 ensure_fifo
@@ -113,7 +113,7 @@ running(){
         do
         	sleep $CHECK_PERIOD
         done
-        echo "Pianobar died, quitting"
+        echo "Signalbox died, quitting"
         quit
 }
 
@@ -142,7 +142,7 @@ output(){
         # Sanity check: ensure pianobar's output can be read.
         if [ ! -f $OUT ]
         then
-                echo "pianobar does not seem to be outputting to $OUT, try killing it and starting $0 again"
+                echo "signalbox does not seem to be outputting to $OUT, try killing it and starting $0 again"
                 exit 2
         fi
 
@@ -183,7 +183,7 @@ ensure_fifo(){
         then
                 if [[ $1 ]]
                 then
-                        echo "Pianobar ctl fifo not present at $FIFO, creating"
+                        echo "Signalbox ctl fifo not present at $FIFO, creating"
                         mkfifo $FIFO
                         if [ ! -p $FIFO ]
                         then
@@ -191,7 +191,7 @@ ensure_fifo(){
                                 exit 1
                         fi
                 else
-                        echo "Pianobar ctl fifo not present at $FIFO, aborting"
+                        echo "Signalbox ctl fifo not present at $FIFO, aborting"
                         exit 1
                 fi
         fi
@@ -227,7 +227,7 @@ else
                                 launch
                                 shift ;;
                         *)
-                                echo "Pianobar not running, nothing executed"
+                                echo "Signalbox not running, nothing executed"
                                 exit 0
                                 ;;
                 esac

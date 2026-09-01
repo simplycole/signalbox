@@ -3,11 +3,11 @@
 echocmd="/bin/echo -n"
 ctlfile="$HOME/.config/pianobar/ctl"
 
-# pianobar running? echo would block otherwise
-ps -C 'pianobar' > /dev/null
+# signalbox running? echo would block otherwise
+ps -C 'signalbox' > /dev/null
 
 if [ $? -ne 0 ]; then
-	echo 'naughty.notify({title = "pianobar", text = "Not running"})' | awesome-client -
+	echo 'naughty.notify({title = "signalbox", text = "Not running"})' | awesome-client -
 	exit 1;
 fi
 

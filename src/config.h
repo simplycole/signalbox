@@ -2,6 +2,7 @@
 
 /* package name */
 #define PACKAGE "pianobar"
+#define PROGRAM_NAME "signalbox"
 
 #define VERSION "2024.12.21-dev"
 
@@ -48,4 +49,3 @@
 #else
 #define debug(...)
 #endif
-

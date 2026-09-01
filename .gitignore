@@ -3,7 +3,7 @@
 *.d
 # vim swap files
 .*.sw*
-pianobar
+signalbox
 libpiano.a
 libpiano.so*
 waitress-test

@@ -15,7 +15,7 @@ plans, not promises of a date or release.
 ## Phase 1 — Signalbox identity and build cleanup
 
 - [x] Establish the Signalbox project identity and initial documentation.
-- [ ] Rename the executable in a dedicated, compatibility-aware change.
+- [x] Rename the executable in a dedicated, compatibility-aware change.
 - [ ] Clarify build dependencies and supported feature combinations.
 - [ ] Clean up compiler warnings without obscuring behavior changes.
 - [ ] Add repeatable compatibility tests for supported macOS and Linux systems.

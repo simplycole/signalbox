@@ -1,6 +1,7 @@
 # makefile of pianobar
 
 PKG_CONFIG?=pkg-config
+PROGRAM:=signalbox
 PREFIX:=/usr/local
 BINDIR:=${PREFIX}/bin
 LIBDIR:=${PREFIX}/lib
@@ -79,13 +80,13 @@ ifeq (${V},1)
 	SILENTECHO:=@true
 endif
 
-# build pianobar
+# build signalbox
 ifeq (${DYNLINK},1)
-pianobar: ${PIANOBAR_OBJ} libpiano.so.0
+${PROGRAM}: ${PIANOBAR_OBJ} libpiano.so.0
 	${SILENTECHO} "  LINK  $@"
 	${SILENTCMD}${CC} -o $@ ${PIANOBAR_OBJ} -L. -lpiano ${ALL_LDFLAGS}
 else
-pianobar: ${PIANOBAR_OBJ} ${LIBPIANO_OBJ}
+${PROGRAM}: ${PIANOBAR_OBJ} ${LIBPIANO_OBJ}
 	${SILENTECHO} "  LINK  $@"
 	${SILENTCMD}${CC} -o $@ ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} ${ALL_LDFLAGS}
 endif
@@ -117,20 +118,20 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
-			${LIBPIANO_RELOBJ} pianobar libpiano.so* \
+			${LIBPIANO_RELOBJ} ${PROGRAM} pianobar libpiano.so* \
 			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
-all: pianobar
+all: ${PROGRAM}
 
 ifeq (${DYNLINK},1)
-install: pianobar install-libpiano
+install: ${PROGRAM} install-libpiano
 else
-install: pianobar
+install: ${PROGRAM}
 endif
 	install -d ${DESTDIR}${BINDIR}/
-	install -m755 pianobar ${DESTDIR}${BINDIR}/
+	install -m755 ${PROGRAM} ${DESTDIR}${BINDIR}/
 	install -d ${DESTDIR}${MANDIR}/man1/
-	install -m644 contrib/pianobar.1 ${DESTDIR}${MANDIR}/man1/
+	install -m644 contrib/signalbox.1 ${DESTDIR}${MANDIR}/man1/
 
 install-libpiano:
 	install -d ${DESTDIR}${LIBDIR}/
@@ -142,8 +143,8 @@ install-libpiano:
 	install -m644 src/libpiano/piano.h ${DESTDIR}${INCDIR}/
 
 uninstall:
-	$(RM) ${DESTDIR}/${BINDIR}/pianobar \
-	${DESTDIR}/${MANDIR}/man1/pianobar.1 \
+	$(RM) ${DESTDIR}/${BINDIR}/${PROGRAM} \
+	${DESTDIR}/${MANDIR}/man1/signalbox.1 \
 	${DESTDIR}/${LIBDIR}/libpiano.so.0.0.0 \
 	${DESTDIR}/${LIBDIR}/libpiano.so.0 \
 	${DESTDIR}/${LIBDIR}/libpiano.so \
