@@ -358,14 +358,19 @@ BarUiActCallback(BarUiActDeleteStation) {
 			 BarReadlineYesNo (false, &app->input));
 	if (confirmed) {
 		BarUiMsg (&app->settings, MSG_INFO, "Deleting station... ");
+		const bool deletingCurrent = selStation == app->curStation;
+		const bool deletingNext = selStation == app->nextStation;
 		const bool deleted = BarUiActDefaultPianoCall (PIANO_REQUEST_DELETE_STATION,
 				selStation);
-		if (deleted && selStation == app->curStation) {
-			drainPlaylist (app);
+		if (deleted && deletingNext) {
 			app->nextStation = NULL;
+		}
+		if (deleted && deletingCurrent) {
+			drainPlaylist (app);
 			/* XXX: usually we shoudn’t touch cur*, but DELETE_STATION destroys
 			 * station struct */
 			app->curStation = NULL;
+			SbUiModelSetStation (&app->uiModel, NULL);
 			selStation = NULL;
 		}
 		if (deleted) SbUiModelSetStations (&app->uiModel, app->ph.stations);
