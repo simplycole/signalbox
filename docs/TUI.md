@@ -255,9 +255,11 @@ Suggested breakpoints, to tune after prototypes:
 - **Large (80+ columns, 24+ rows):** stations left; a usable eight-row
   now-playing block right. At 30+ rows, UPCOMING uses the actual fetched queue
   count and at most four compact display rows; RECENT receives the remaining right-column rows and
-  grows naturally as terminal height increases. History entries prefer one
-  left-packed ``♥ Artist — Track · Album · Duration`` line and wrap metadata
-  only when width requires. Tab moves navigation focus between STATIONS and
+  grows naturally as terminal height increases. RECENT and UPCOMING entries
+  reserve a compact marker area and a fixed right-aligned duration field. They
+  prefer one left-packed ``♥ Artist — Track · Album`` line, and move the album
+  plus duration to a complete second line when width requires. Tab moves
+  navigation focus between STATIONS and
   RECENT; focused history has its own selection and scroll offset, a visible
   ``›``/``>`` marker, and no full-row reverse video. The permanent upcoming
   view is display-only; ``u`` opens its interactive browser and Enter opens

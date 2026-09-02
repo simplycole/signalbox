@@ -670,15 +670,22 @@ static int SbUiCursesTextWidth (const char *text) {
 	return width;
 }
 
+#define SB_TUI_ROW_MARKER_WIDTH 6
+#define SB_TUI_ROW_DURATION_WIDTH 8
+
+static bool SbUiCursesMetadataWraps (const char *artist, const char *title,
+		const char *album, const int width) {
+	const int metadataWidth = width - SB_TUI_ROW_MARKER_WIDTH -
+			SB_TUI_ROW_DURATION_WIDTH;
+	const int naturalWidth = SbUiCursesTextWidth (artist) + 3 +
+			SbUiCursesTextWidth (title) + 3 + SbUiCursesTextWidth (album);
+	return metadataWidth >= 6 && naturalWidth > metadataWidth;
+}
+
 static bool SbUiCursesHistoryWraps (const SbUiHistoryEntry *entry,
 		const int width) {
-	char duration[16];
-	SbUiCursesTime (duration, sizeof (duration), entry->duration);
-	/* Marker plus Artist + " — " + title + " · " + album + " · " + duration. */
-	return width < SbUiCursesTextWidth (entry->artist) +
-			SbUiCursesTextWidth (entry->title) +
-			SbUiCursesTextWidth (entry->album) +
-			SbUiCursesTextWidth (duration) + 15 && width >= 18;
+	return SbUiCursesMetadataWraps (entry->artist, entry->title, entry->album,
+			width);
 }
 
 static const char *SbUiCursesRatingMarker (const SbUiCursesData *data,
@@ -688,33 +695,82 @@ static const char *SbUiCursesRatingMarker (const SbUiCursesData *data,
 	return "   ";
 }
 
+static void SbUiCursesRowMain (const SbUiCursesData *data, WINDOW *window,
+		const int y, const int x, const int width, const char *artist,
+		const char *title) {
+	if (width <= 0) return;
+	const int separatorWidth = width >= 3 ? 3 : 0;
+	const int contentWidth = width - separatorWidth;
+	const int artistNatural = SbUiCursesTextWidth (artist);
+	const int titleNatural = SbUiCursesTextWidth (title);
+	int artistWidth = artistNatural;
+	int titleWidth = titleNatural;
+	if (artistWidth + titleWidth > contentWidth) {
+		artistWidth = contentWidth > 1 ? contentWidth / 2 : contentWidth;
+		titleWidth = contentWidth - artistWidth;
+	}
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+	SbUiCursesWPut (window, y, x, artistWidth, artist);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+	if (separatorWidth > 0) {
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesWPut (window, y, x + artistWidth, separatorWidth, " — ");
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	}
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+	SbUiCursesWPut (window, y, x + artistWidth + separatorWidth, titleWidth,
+			title);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+}
+
+static int SbUiCursesMetadataRow (const SbUiCursesData *data, WINDOW *window,
+		const int y, const int x, const int width, const char *artist,
+		const char *title, const char *album, const unsigned int seconds) {
+	if (width <= SB_TUI_ROW_MARKER_WIDTH + SB_TUI_ROW_DURATION_WIDTH) return 0;
+	char duration[16];
+	SbUiCursesTime (duration, sizeof (duration), seconds);
+	const bool wraps = SbUiCursesMetadataWraps (artist, title, album, width);
+	const int metadataX = x + SB_TUI_ROW_MARKER_WIDTH;
+	const int durationX = x + width - SB_TUI_ROW_DURATION_WIDTH;
+	const int metadataWidth = durationX - metadataX;
+	if (wraps) {
+		SbUiCursesRowMain (data, window, y, metadataX,
+				width - SB_TUI_ROW_MARKER_WIDTH, artist, title);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
+		SbUiCursesWPut (window, y + 1, metadataX, metadataWidth, album);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
+	} else {
+		const int artistTitleNatural = SbUiCursesTextWidth (artist) + 3 +
+				SbUiCursesTextWidth (title);
+		const int mainWidth = artistTitleNatural < metadataWidth ?
+				artistTitleNatural : metadataWidth;
+		SbUiCursesRowMain (data, window, y, metadataX, mainWidth, artist, title);
+		if (mainWidth + 3 <= metadataWidth) {
+			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+			SbUiCursesWPut (window, y, metadataX + mainWidth, 3, " · ");
+			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
+			SbUiCursesWPut (window, y, metadataX + mainWidth + 3,
+					metadataWidth - mainWidth - 3, album);
+			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
+		}
+	}
+	const int durationWidth = SbUiCursesTextWidth (duration);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_WARNING, 0);
+	SbUiCursesWPut (window, wraps ? y + 1 : y,
+			durationX + SB_TUI_ROW_DURATION_WIDTH - durationWidth,
+			durationWidth, duration);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_WARNING, 0);
+	return wraps ? 2 : 1;
+}
+
 static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 		WINDOW *window, const SbUiHistoryEntry *entry, const int y,
 		const int x, const int width, const bool selected) {
 	if (width <= 0) return 0;
-	char duration[16];
-	SbUiCursesTime (duration, sizeof (duration), entry->duration);
-	const bool wraps = SbUiCursesHistoryWraps (entry, width);
-	const int durationWidth = SbUiCursesTextWidth (duration);
-	const int artistNatural = SbUiCursesTextWidth (entry->artist);
-	const int titleNatural = SbUiCursesTextWidth (entry->title);
-	const int albumNatural = SbUiCursesTextWidth (entry->album);
-	const int firstAvailable = (wraps ? width : width - albumNatural -
-			durationWidth - 6) - 6;
-	const int contentAvailable = firstAvailable > 3 ? firstAvailable - 3 :
-			firstAvailable;
-	int artistWidth = artistNatural;
-	int trackWidth = titleNatural;
-	if (artistWidth + trackWidth > contentAvailable) {
-		artistWidth = contentAvailable > 1 ? contentAvailable / 2 :
-				(contentAvailable > 0 ? contentAvailable : 0);
-		trackWidth = contentAvailable > artistWidth ?
-				contentAvailable - artistWidth : 0;
-	}
 	const bool mainSelection = selected && window == stdscr;
 	/* Keep focus and rating fields reserved on every row, so selection never
 	 * shifts the music metadata. */
-	const int markerWidth = 2;
 	if (selected && !mainSelection) SbUiCursesWAttrOn (window, data,
 			SB_TUI_COLOR_SELECTED, A_REVERSE);
 	if (mainSelection) {
@@ -726,44 +782,14 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 			SB_TUI_COLOR_LOVED : entry->rating == PIANO_RATE_BAN ?
 			SB_TUI_COLOR_ERROR : SB_TUI_COLOR_MUTED;
 	SbUiCursesWAttrOn (window, data, markerRole, A_BOLD);
-	SbUiCursesWPut (window, y, x + markerWidth, 3,
+	SbUiCursesWPut (window, y, x + 2, 3,
 			SbUiCursesRatingMarker (data, entry->rating));
 	SbUiCursesWAttrOff (window, data, markerRole, A_BOLD);
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-	SbUiCursesWPut (window, y, x + markerWidth + 4, artistWidth, entry->artist);
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-	int column = x + markerWidth + 4 + artistWidth;
-	if (contentAvailable >= 3) {
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-		SbUiCursesWPut (window, y, column, 3, " — ");
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
-		column += 3;
-	}
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
-	SbUiCursesWPut (window, y, column, trackWidth, entry->title);
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
-	column += trackWidth;
-	const int metadataY = wraps ? y + 1 : y;
-	const int metadataX = wraps ? x + markerWidth + 4 : column + 3;
-	if (!wraps) {
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-		SbUiCursesWPut (window, y, column, 3, " · ");
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
-	}
-	const int albumWidth = wraps ? width - 2 - durationWidth - 3 : albumNatural;
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
-	SbUiCursesWPut (window, metadataY, metadataX, albumWidth, entry->album);
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-	SbUiCursesWPut (window, metadataY, metadataX + albumWidth, 3, " · ");
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_WARNING, 0);
-	SbUiCursesWPut (window, metadataY, metadataX + albumWidth + 3,
-			durationWidth, duration);
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_WARNING, 0);
+	const int rows = SbUiCursesMetadataRow (data, window, y, x, width,
+			entry->artist, entry->title, entry->album, entry->duration);
 	if (selected && !mainSelection) SbUiCursesWAttrOff (window, data,
 			SB_TUI_COLOR_SELECTED, A_REVERSE);
-	return wraps ? 2 : 1;
+	return rows;
 }
 
 static void SbUiCursesHistory (SbUiCursesData *data,
@@ -820,50 +846,11 @@ static void SbUiCursesUpcoming (const SbUiCursesData *data,
 	const PianoSong_t *song = model->song != NULL ? PianoListNextP (model->song) : NULL;
 	int row = 0;
 	PianoListForeachP (song) {
-		if (row >= height) break;
-		char duration[16];
-		SbUiCursesTime (duration, sizeof (duration), song->length);
-		const int durationWidth = SbUiCursesTextWidth (duration);
-		const int artistNatural = SbUiCursesTextWidth (song->artist);
-		const int titleNatural = SbUiCursesTextWidth (song->title);
-		const int albumNatural = SbUiCursesTextWidth (song->album);
-		const int available = width - durationWidth - 9;
-		int artistWidth = artistNatural, titleWidth = titleNatural;
-		int albumWidth = albumNatural;
-		if (artistWidth + titleWidth + albumWidth > available) {
-			artistWidth = available > 0 ? available / 3 : 0;
-			titleWidth = available > artistWidth ? available / 3 : 0;
-			albumWidth = available - artistWidth - titleWidth;
-			if (albumWidth < 0) albumWidth = 0;
-		}
-		int column = x;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_ARTIST, A_BOLD);
-		SbUiCursesPut (y + row, column, artistWidth, song->artist);
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_ARTIST, A_BOLD);
-		column += artistWidth;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
-		SbUiCursesPut (y + row, column, 3, " — ");
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
-		column += 3;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_TRACK, A_BOLD);
-		SbUiCursesPut (y + row, column, titleWidth, song->title);
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_TRACK, A_BOLD);
-		column += titleWidth;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
-		SbUiCursesPut (y + row, column, 3, " · ");
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
-		column += 3;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_ALBUM, 0);
-		SbUiCursesPut (y + row, column, albumWidth, song->album);
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_ALBUM, 0);
-		column += albumWidth;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
-		SbUiCursesPut (y + row, column, 3, " · ");
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, 0);
-		SbUiCursesPut (y + row, column + 3, durationWidth, duration);
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, 0);
-		row++;
+		const int cost = SbUiCursesMetadataWraps (song->artist, song->title,
+				song->album, width) ? 2 : 1;
+		if (row + cost > height) break;
+		row += SbUiCursesMetadataRow (data, stdscr, y + row, x, width,
+				song->artist, song->title, song->album, song->length);
 	}
 }
 
