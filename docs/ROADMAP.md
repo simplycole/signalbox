@@ -43,10 +43,11 @@ plans, not promises of a date or release.
   station highlighting.
 - [x] Route TUI station activation and prompt-free pause/resume, next, love,
   ban, and quit controls through named commands.
-- [ ] Add now-playing metadata, playback/rating state, volume, and low-frequency
+- [x] Add now-playing metadata, playback/rating state, volume, and low-frequency
   progress updates.
-- [ ] Present history, upcoming tracks, status, reconnects, errors, prompts, and
-  generated key help.
+- [x] Present bounded session history, expiring status/error notices, and
+  configured key help. Upcoming tracks, reconnect state, and interactive
+  prompts remain deferred.
 - [ ] Add semantic green, amber, monochrome, neutral, and high-contrast themes
   with `NO_COLOR` degradation and reduced motion.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before

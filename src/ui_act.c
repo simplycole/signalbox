@@ -683,6 +683,11 @@ BarUiActCallback(BarUiActBookmark) {
 BarUiActCallback(BarUiActVolDown) {
 	--app->settings.volume;
 	BarPlayerSetVolume (&app->player);
+	SbUiModelSetVolume (&app->uiModel, app->settings.volume);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, "Volume %d dB\n",
+				app->settings.volume);
+	}
 }
 
 /*	increase volume
@@ -690,6 +695,11 @@ BarUiActCallback(BarUiActVolDown) {
 BarUiActCallback(BarUiActVolUp) {
 	++app->settings.volume;
 	BarPlayerSetVolume (&app->player);
+	SbUiModelSetVolume (&app->uiModel, app->settings.volume);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, "Volume %d dB\n",
+				app->settings.volume);
+	}
 }
 
 /*	reset volume
@@ -697,6 +707,10 @@ BarUiActCallback(BarUiActVolUp) {
 BarUiActCallback(BarUiActVolReset) {
 	app->settings.volume = 0;
 	BarPlayerSetVolume (&app->player);
+	SbUiModelSetVolume (&app->uiModel, app->settings.volume);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, "Volume reset to 0 dB\n");
+	}
 }
 
 static const char *boolToYesNo (const bool value) {

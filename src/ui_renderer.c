@@ -11,6 +11,41 @@ static void SbUiModelChanged (SbUiModel *model) {
 	++model->generation;
 }
 
+static void SbUiModelCopyText (char *dest, const size_t size,
+		const char *source) {
+	if (source == NULL) {
+		dest[0] = '\0';
+	} else {
+		snprintf (dest, size, "%s", source);
+	}
+}
+
+static void SbUiModelRememberSong (SbUiModel *model) {
+	if (model->song == NULL) {
+		return;
+	}
+	const size_t moveCount = model->historyCount < SB_UI_HISTORY_MAX ?
+			model->historyCount : SB_UI_HISTORY_MAX - 1;
+	if (moveCount > 0) {
+		memmove (&model->history[1], &model->history[0],
+				moveCount * sizeof (model->history[0]));
+	}
+	SbUiHistoryEntry * const entry = &model->history[0];
+	memset (entry, 0, sizeof (*entry));
+	SbUiModelCopyText (entry->artist, sizeof (entry->artist),
+			model->song->artist);
+	SbUiModelCopyText (entry->title, sizeof (entry->title), model->song->title);
+	SbUiModelCopyText (entry->album, sizeof (entry->album), model->song->album);
+	const PianoStation_t * const station = model->songStation != NULL ?
+			model->songStation : model->station;
+	SbUiModelCopyText (entry->station, sizeof (entry->station),
+			station != NULL ? station->name : NULL);
+	entry->rating = model->song->rating;
+	if (model->historyCount < SB_UI_HISTORY_MAX) {
+		model->historyCount++;
+	}
+}
+
 void SbUiModelInit (SbUiModel *model) {
 	assert (model != NULL);
 	memset (model, 0, sizeof (*model));
@@ -31,8 +66,17 @@ void SbUiModelSetStation (SbUiModel *model, const PianoStation_t *station) {
 void SbUiModelSetSong (SbUiModel *model, const PianoSong_t *song,
 		const PianoStation_t *songStation) {
 	assert (model != NULL);
+	if (song != model->song) {
+		SbUiModelRememberSong (model);
+	}
 	model->song = song;
 	model->songStation = songStation;
+	SbUiModelChanged (model);
+}
+
+void SbUiModelSetVolume (SbUiModel *model, const int volumeDb) {
+	assert (model != NULL);
+	model->volumeDb = volumeDb;
 	SbUiModelChanged (model);
 }
 

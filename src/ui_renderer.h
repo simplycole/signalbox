@@ -14,6 +14,19 @@ typedef enum {
 	SB_UI_PLAYBACK_PAUSED,
 } SbUiPlaybackState;
 
+enum {
+	SB_UI_HISTORY_MAX = 10,
+	SB_UI_HISTORY_TEXT_MAX = 128,
+};
+
+typedef struct {
+	char artist[SB_UI_HISTORY_TEXT_MAX];
+	char title[SB_UI_HISTORY_TEXT_MAX];
+	char album[SB_UI_HISTORY_TEXT_MAX];
+	char station[SB_UI_HISTORY_TEXT_MAX];
+	PianoSongRating_t rating;
+} SbUiHistoryEntry;
+
 /* Renderer-facing view state. Canonical Piano objects remain owned by BarApp_t;
  * these pointers are borrowed and valid only while their canonical objects are. */
 typedef struct {
@@ -26,6 +39,12 @@ typedef struct {
 	unsigned int duration;
 	unsigned int elapsed;
 	SbUiPlaybackState playback;
+	/* Software-volume offset in decibels. ReplayGain is applied separately by
+	 * the player and is deliberately not presented as user volume. */
+	int volumeDb;
+	/* Owned display snapshots, newest first. These never borrow song pointers. */
+	SbUiHistoryEntry history[SB_UI_HISTORY_MAX];
+	size_t historyCount;
 	uint64_t generation;
 } SbUiModel;
 
@@ -58,6 +77,7 @@ void SbUiModelSetSong (SbUiModel *, const PianoSong_t *,
 		const PianoStation_t *);
 void SbUiModelSetProgress (SbUiModel *, unsigned int, unsigned int,
 		SbUiPlaybackState);
+void SbUiModelSetVolume (SbUiModel *, int);
 
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
 bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *);

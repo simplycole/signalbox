@@ -111,7 +111,7 @@ Start the executable from the source tree with:
 
    ./signalbox
 
-Classic mode remains the default. To launch the experimental Phase C1
+Classic mode remains the default. To launch the experimental Phase C2
 full-screen interface, use an interactive terminal and run:
 
 .. code-block:: console
@@ -122,9 +122,12 @@ The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
 it exits with a concise error instead of initializing curses otherwise. The
 shell opens immediately; credential prompts temporarily restore classic mode.
 The shell shows the real station list, distinct selected and active stations,
-now-playing metadata, playback state/progress, and status. Navigate with arrows
-or ``j``/``k``, press Enter to tune, and use the configured keys for
-pause/resume, next, love, ban, help, and quit. The inherited station-select key
+artist/title/album/station metadata, rating, signed-dB software volume,
+playback state and adaptive progress, transient status notices, and up to ten
+recent tracks from the current session. History is shown only when the terminal
+has room. Navigate with arrows or ``j``/``k``, press Enter to tune, and use the
+configured keys for pause/resume, next, love, ban, volume down/up/reset, help,
+and quit. The inherited station-select key
 shows browser guidance instead of opening a blocking prompt. Other modal
 actions remain deferred; use classic mode for the complete inherited interface.
 

@@ -415,6 +415,7 @@ static void BarMainLoop (BarApp_t *app) {
 			if (app->playlist != NULL) {
 				PianoSong_t *histsong = app->playlist;
 				app->playlist = PianoListNextP (app->playlist);
+				SbUiModelSetSong (&app->uiModel, NULL, NULL);
 				histsong->head.next = NULL;
 				BarUiHistoryPrepend (app, histsong);
 			}
@@ -508,6 +509,7 @@ int main (int argc, char **argv) {
 	BarSettingsInit (&app.settings);
 	BarSettingsRead (&app.settings);
 	SbUiModelInit (&app.uiModel);
+	SbUiModelSetVolume (&app.uiModel, app.settings.volume);
 	SbUiRendererInitClassic (&app.uiRenderer, &app.settings);
 	SbUiRendererSetActive (&app.uiRenderer);
 	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings)) {

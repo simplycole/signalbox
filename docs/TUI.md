@@ -1,8 +1,8 @@
 # Terminal UI architecture decision
 
-Status: architecture phases A and B and renderer Phase C1 are complete. The
-ncursesw shell is experimental and opt-in, with a usable station browser and
-core playback controls.
+Status: architecture phases A and B and renderer Phase C2 are complete. The
+ncursesw shell is experimental and opt-in, with a station browser, polished
+now-playing view, volume controls, transient notices, and session history.
 
 ## Decision
 
@@ -84,10 +84,12 @@ layout, mouse input, frame model, dirty state, or redraw scheduler.
 `BarApp_t` owns one `SbUiModel` and one `SbUiRenderer`. The model is a small
 renderer-facing projection containing borrowed current-station/current-song
 references, the optional real song station used by QuickMix formatting,
-elapsed/duration, playback state, and a generation counter. Pandora and player
-structures remain canonical; the model neither copies nor owns them.
+elapsed/duration, playback state, signed-dB software volume, and a generation
+counter. Pandora and player structures remain canonical. The exception is a
+bounded ten-row recent-history projection whose strings are copied when a song
+transitions away, avoiding pointers into objects with independent lifetimes.
 
-Phase C1 also borrows the canonical station-list head. The synchronous main
+Phase C2 also borrows the canonical station-list head. The synchronous main
 loop owns and serializes that list's lifetime; the renderer only traverses it
 for display and returns a borrowed selected pointer in an activation command.
 Selection index and scroll offset are renderer-local and do not increment the
@@ -109,10 +111,10 @@ state ownership.
 
 Prompts, selection lists, and readline cursor editing stay classic/direct
 because they are blocking interactions rather than passive model rendering.
-Event-command pipe output is serialization, not terminal UI. Player-thread
-errors remain on the inherited message path until structured notices can be
-queued to the main/UI thread; calling ncurses from those threads would be
-unsafe.
+Event-command pipe output is serialization, not terminal UI. Player/background
+messages copy text and severity under the renderer's notice mutex; they never
+call ncurses. The main/UI thread draws and expires them on its existing
+one-second cadence (four seconds normally, eight seconds for errors).
 
 ## Coupling to remove incrementally
 
@@ -366,15 +368,14 @@ and output-free headless startup without a TTY.
 ## Migration plan
 
 1. **Observation seam (partial):** current station/song/progress use the UI
-   model and classic renderer; player/background notices still need a safe
-   main-thread queue.
+   model and classic renderer; player/background notices use thread-safe
+   capture, while a general event queue remains future work.
 2. **Command seam (complete):** command IDs separate legacy key/FIFO decoding
    from action execution without changing bindings.
 3. **Application actions:** move service/player mutations and validation out of
    `BarUiAct*`; represent nested prompts as explicit states.
-4. **UI model (minimal phase complete):** expand the existing borrowed
-   current-view projection into safe station, queue, history, and notice
-   snapshots before a full-screen renderer consumes mutable lists.
+4. **UI model (C2 projection complete):** borrowed current state is augmented
+   by scalar playback/volume state and owned bounded history display rows.
 5. **Mode lifecycle:** define TUI/classic/headless selection; establish true
    non-interactive startup before curses becomes default.
 6. **ncursesw skeleton (complete):** opt-in alternate-screen lifecycle,
@@ -383,8 +384,11 @@ and output-free headless startup without a TTY.
    remains alongside broader terminal recovery testing.
 7. **Station browser (complete):** selection, scrolling, active station,
    responsive layout, and direct Enter activation.
-8. **Now playing:** metadata, playback/rating, volume, timed progress.
-9. **History/notices/help:** upcoming/history, errors, prompts, generated help.
+8. **Now playing (complete):** metadata, playback/rating, signed-dB volume,
+   wide-aware truncation, and timed adaptive progress.
+9. **History/notices/help (partial):** bounded history, timed status/error
+   notices, and configured help are complete; upcoming tracks, reconnect state,
+   and prompts remain.
 10. **Themes/accessibility:** semantic themes, `NO_COLOR`, high contrast,
     ASCII/monochrome, reduced motion.
 11. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,

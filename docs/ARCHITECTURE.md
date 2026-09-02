@@ -60,8 +60,10 @@ call sites are migrated incrementally.
 
 `SbUiModel` is view state, not a second application model. It borrows the
 canonical station list and current `PianoStation_t` and `PianoSong_t` objects
-owned by the application, and stores only the small playback projection needed
-to render progress: duration, elapsed time, and playing/paused state. A monotonically
+owned by the application, and stores the small playback projection needed
+to render progress: duration, elapsed time, playing/paused state, and signed-dB
+software volume. Ten owned, bounded recent-track display rows are copied when
+the current song transitions away, avoiding dangling libpiano pointers. A monotonically
 increasing generation records updates for a future invalidation-driven
 renderer. It does not own or copy Pandora lists or objects. The synchronous
 main loop serializes their lifetime; renderer-local selection and scrolling do
@@ -70,9 +72,10 @@ not mutate the model.
 The renderer has an `init`/`render`/input/notice/`shutdown` lifecycle. Its
 classic synchronous line backend preserves
 configured prefixes, postfixes, formats, ANSI erase-line behavior, flushing,
-and carriage-return progress. Phase C1 adds an opt-in ncursesw backend that
+and carriage-return progress. Phase C2's opt-in ncursesw backend
 owns its `SCREEN`, maps ordinary keys through the shared command table, stores
-legacy notices for the status line, redraws on `KEY_RESIZE`, and calls
+captures notices under a mutex for the status line, expires normal notices
+after four seconds and errors after eight, redraws on `KEY_RESIZE`, and calls
 `endwin()` during normal shutdown. It owns station selection and scrolling,
 keeps the active station independent, and sends Enter activation plus audited
 prompt-free playback actions through named commands. ncurses types remain
@@ -88,9 +91,8 @@ with nested prompts remain disabled in curses.
 Blocking prompts and selection/readline editing intentionally remain on the
 classic path. Event-command serialization remains machine-facing direct
 output, and fatal/developer diagnostics remain at their existing layers.
-Player-thread errors also remain classic direct messages: safely feeding them
-to a full-screen renderer requires a main-thread event/notice queue, which is
-outside this no-new-threading phase.
+Player-thread messages only update mutex-protected notice state and never call
+ncurses. The main thread performs all rendering on the existing refresh cadence.
 
 ### Settings and configuration: `src/settings.c`, `src/settings.h`
 
@@ -147,8 +149,8 @@ platform code in the protocol layer.
 
 ### TUI layer
 
-The future interactive mode should be a consumer of application state. It will
-own layout, station and now-playing panes, progress display, navigation, themes,
+The interactive mode is a consumer of application state. It owns layout,
+station, now-playing and recent panes, progress display, navigation, themes,
 resize behavior, accessible reduced/non-animated behavior, and human-readable
 status and error presentation. It must not become the only way to operate the
 application.

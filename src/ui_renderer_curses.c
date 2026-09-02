@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE_EXTENDED 1
 #include "config.h"
 
 #include <assert.h>
@@ -7,16 +8,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <wchar.h>
 
 #include <curses.h>
 
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
 
+typedef enum {
+	SB_UI_NOTICE_INFO = 0,
+	SB_UI_NOTICE_STATUS,
+	SB_UI_NOTICE_WARNING,
+	SB_UI_NOTICE_ERROR,
+} SbUiNoticeSeverity;
+
 typedef struct {
 	SCREEN *screen;
 	pthread_mutex_t statusLock;
 	char status[256];
+	SbUiNoticeSeverity statusSeverity;
+	time_t statusExpires;
 	bool helpVisible;
 	bool colors;
 	bool selectionInitialized;
@@ -26,20 +38,58 @@ typedef struct {
 
 static const SbUiRendererOps cursesOps;
 
+static SbUiNoticeSeverity SbUiCursesNoticeSeverity (const BarUiMsg_t type) {
+	if (type == MSG_ERR) return SB_UI_NOTICE_ERROR;
+	if (type == MSG_QUESTION) return SB_UI_NOTICE_WARNING;
+	if (type == MSG_PLAYING || type == MSG_TIME) return SB_UI_NOTICE_STATUS;
+	return SB_UI_NOTICE_INFO;
+}
+
 static const char *SbUiCursesText (const char *text) {
 	return text != NULL && *text != '\0' ? text : "--";
 }
 
 static void SbUiCursesPut (const int y, const int x, const int width,
 		const char *text) {
-	if (width > 0) {
-		mvaddnstr (y, x, SbUiCursesText (text), width);
+	if (width <= 0) return;
+	const char *source = SbUiCursesText (text);
+	wchar_t wide[512];
+	mbstate_t state;
+	memset (&state, 0, sizeof (state));
+	const size_t converted = mbsrtowcs (wide, &source,
+			(sizeof (wide) / sizeof (*wide)) - 1, &state);
+	if (converted == (size_t) -1) {
+		mvaddnstr (y, x, text != NULL ? text : "--", width);
+		return;
 	}
+	wide[converted] = L'\0';
+	int cells = 0;
+	size_t keep = 0;
+	while (keep < converted) {
+		const int charWidth = wcwidth (wide[keep]);
+		if (charWidth < 0 || cells + charWidth > width) break;
+		cells += charWidth;
+		keep++;
+	}
+	if (keep < converted && width >= 2) {
+		while (keep > 0 && cells > width - 1) {
+			const int charWidth = wcwidth (wide[--keep]);
+			if (charWidth > 0) cells -= charWidth;
+		}
+		wide[keep++] = L'\u2026';
+	}
+	wide[keep] = L'\0';
+	mvaddnwstr (y, x, wide, (int) keep);
 }
 
 static void SbUiCursesTime (char *dest, const size_t size,
 		const unsigned int seconds) {
-	snprintf (dest, size, "%02u:%02u", seconds / 60, seconds % 60);
+	if (seconds >= 3600) {
+		snprintf (dest, size, "%u:%02u:%02u", seconds / 3600,
+				(seconds / 60) % 60, seconds % 60);
+	} else {
+		snprintf (dest, size, "%02u:%02u", seconds / 60, seconds % 60);
+	}
 }
 
 static char SbUiCursesKey (const SbUiRenderer *renderer,
@@ -54,13 +104,21 @@ static char SbUiCursesKey (const SbUiRenderer *renderer,
 }
 
 static void SbUiCursesFooter (const SbUiRenderer *renderer, char *footer,
-		const size_t size) {
+		const size_t size, const int width) {
+	if (width < 76) {
+		snprintf (footer, size, "j/k select  Enter tune  %c pause  %c next  %c help  %c quit",
+				SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
+				SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
+				SbUiCursesKey (renderer, SB_UI_CMD_HELP),
+				SbUiCursesKey (renderer, SB_UI_CMD_QUIT));
+		return;
+	}
 	snprintf (footer, size,
-			"j/k stations  Enter tune  %c pause  %c next  %c love  %c ban  %c help  %c quit",
+			"j/k stations  Enter tune  %c pause  %c next  %c/%c volume  %c help  %c quit",
 			SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
 			SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
-			SbUiCursesKey (renderer, SB_UI_CMD_LOVE),
-			SbUiCursesKey (renderer, SB_UI_CMD_BAN),
+			SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_DOWN),
+			SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_UP),
 			SbUiCursesKey (renderer, SB_UI_CMD_HELP),
 			SbUiCursesKey (renderer, SB_UI_CMD_QUIT));
 }
@@ -157,22 +215,91 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 
 static void SbUiCursesProgress (const SbUiModel *model, const int y,
 		const int x, const int width) {
-	if (width < 18) {
+	char elapsed[16], duration[16];
+	if (model->duration == 0) {
+		strcpy (elapsed, "--:--");
+		strcpy (duration, "--:--");
+	} else {
+		SbUiCursesTime (elapsed, sizeof (elapsed), model->elapsed);
+		SbUiCursesTime (duration, sizeof (duration), model->duration);
+	}
+	char times[40];
+	snprintf (times, sizeof (times), "%s / %s", elapsed, duration);
+	const int timeWidth = (int) strlen (times);
+	if (width < timeWidth + 5) {
+		SbUiCursesPut (y, x, width, times);
 		return;
 	}
-	const int barWidth = width - 15;
+	const int barWidth = width - timeWidth - 3;
+	unsigned int played = model->elapsed;
+	if (model->duration > 0 && played > model->duration) {
+		played = model->duration;
+	}
 	const unsigned int filled = model->duration > 0 ?
-			(unsigned int) ((unsigned long long) model->elapsed * barWidth /
+			(unsigned int) ((unsigned long long) played * (unsigned int) barWidth /
 			model->duration) : 0;
-	char elapsed[16], duration[16];
-	SbUiCursesTime (elapsed, sizeof (elapsed), model->elapsed);
-	SbUiCursesTime (duration, sizeof (duration), model->duration);
 	mvaddch (y, x, '[');
 	for (int i = 0; i < barWidth; i++) {
 		addch ((unsigned int) i < filled ? '=' : '-');
 	}
 	addch (']');
-	mvprintw (y, x + barWidth + 3, "%s / %s", elapsed, duration);
+	SbUiCursesPut (y, x + barWidth + 3, timeWidth, times);
+}
+
+static const char *SbUiCursesPlayback (const SbUiModel *model) {
+	if (model->playback == SB_UI_PLAYBACK_PLAYING) return "Playing";
+	if (model->playback == SB_UI_PLAYBACK_PAUSED) return "Paused";
+	return "Waiting";
+}
+
+static void SbUiCursesNowPlaying (const SbUiModel *model, const int y,
+		const int x, const int height, const int width) {
+	if (height <= 0) return;
+	attron (A_BOLD);
+	SbUiCursesPut (y, x, width,
+			model->song != NULL ? model->song->artist : NULL);
+	if (height > 1) SbUiCursesPut (y + 1, x, width,
+			model->song != NULL ? model->song->title : NULL);
+	attroff (A_BOLD);
+	if (height > 2) {
+		char line[320];
+		snprintf (line, sizeof (line), "Album: %s",
+				model->song != NULL ? SbUiCursesText (model->song->album) : "--");
+		SbUiCursesPut (y + 2, x, width, line);
+	}
+	if (height > 3) {
+		const PianoStation_t * const station = model->songStation != NULL ?
+				model->songStation : model->station;
+		char line[320];
+		snprintf (line, sizeof (line), "Station: %s",
+				station != NULL ? SbUiCursesText (station->name) : "--");
+		SbUiCursesPut (y + 3, x, width, line);
+	}
+	if (height > 5) SbUiCursesProgress (model, y + 5, x, width);
+	if (height > 6) {
+		char state[128];
+		snprintf (state, sizeof (state), "%s   Volume %+d dB   %s",
+				SbUiCursesPlayback (model), model->volumeDb,
+				SbUiCursesRating (model->song));
+		SbUiCursesPut (y + 6, x, width, state);
+	}
+}
+
+static void SbUiCursesHistory (const SbUiModel *model, const int y,
+		const int x, const int height, const int width) {
+	if (height <= 0) return;
+	if (model->historyCount == 0) {
+		SbUiCursesPut (y, x, width, "No previous tracks this session");
+		return;
+	}
+	const size_t rows = model->historyCount < (size_t) height ?
+			model->historyCount : (size_t) height;
+	for (size_t i = 0; i < rows; i++) {
+		char line[SB_UI_HISTORY_TEXT_MAX * 2 + 8];
+		snprintf (line, sizeof (line), "%s — %s", model->history[i].artist,
+				model->history[i].title);
+		SbUiCursesPut (y + (int) i, x, width, line);
+	}
 }
 
 static void SbUiCursesFrame (const SbUiRenderer *renderer,
@@ -182,7 +309,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	getmaxyx (stdscr, rows, cols);
 	erase ();
 	char footer[256];
-	SbUiCursesFooter (renderer, footer, sizeof (footer));
+	SbUiCursesFooter (renderer, footer, sizeof (footer), cols);
 
 	if (rows < 15 || cols < 50) {
 		box (stdscr, 0, 0);
@@ -213,19 +340,44 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	attron (A_BOLD);
 	SbUiCursesPut (statusY, 2, 8, "STATUS");
 	attroff (A_BOLD);
-	const char *playback = "Waiting";
-	if (model->playback == SB_UI_PLAYBACK_PLAYING) {
-		playback = "Playing";
-	} else if (model->playback == SB_UI_PLAYBACK_PAUSED) {
-		playback = "Paused";
-	}
-	SbUiCursesPut (statusY, 11, 9, playback);
+	SbUiCursesPut (statusY, 11, 9, SbUiCursesPlayback (model));
 	pthread_mutex_lock (&data->statusLock);
-	SbUiCursesPut (statusY, 21, cols - 23, data->status);
+	if (data->statusExpires != 0 && time (NULL) >= data->statusExpires) {
+		data->status[0] = '\0';
+		data->statusExpires = 0;
+	}
+	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
+			data->status[0] != '\0') {
+		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ? 2 : 3;
+		attron (A_BOLD | (data->colors ? COLOR_PAIR (pair) : 0));
+	}
+	SbUiCursesPut (statusY, 21, cols - 23,
+			data->status[0] != '\0' ? data->status : "Ready");
+	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
+			data->status[0] != '\0') {
+		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ? 2 : 3;
+		attroff (A_BOLD | (data->colors ? COLOR_PAIR (pair) : 0));
+	}
 	pthread_mutex_unlock (&data->statusLock);
 	SbUiCursesPut (footerY, 2, cols - 4, footer);
 
-	if (cols >= 80 && rows >= 20) {
+	if (cols >= 100 && rows >= 24) {
+		const int split = cols / 3;
+		mvvline (3, split, ACS_VLINE, statusY - 4);
+		const int historyY = statusY - 5;
+		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
+		attron (A_BOLD);
+		SbUiCursesPut (4, 2, split - 3, "STATIONS");
+		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
+		SbUiCursesPut (historyY, split + 2, cols - split - 4, "RECENT");
+		attroff (A_BOLD);
+		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
+		const int rightX = split + 2;
+		const int rightWidth = cols - rightX - 2;
+		SbUiCursesNowPlaying (model, 6, rightX, historyY - 8, rightWidth);
+		SbUiCursesHistory (model, historyY + 1, rightX,
+				statusY - historyY - 2, rightWidth);
+	} else if (cols >= 80 && rows >= 20) {
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
 		attron (A_BOLD);
@@ -233,18 +385,8 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
 		attroff (A_BOLD);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
-		const int rightX = split + 2;
-		const int rightWidth = cols - rightX - 2;
-		SbUiCursesPut (6, rightX, rightWidth,
-				model->song != NULL ? model->song->artist : NULL);
-		attron (A_BOLD);
-		SbUiCursesPut (8, rightX, rightWidth,
-				model->song != NULL ? model->song->title : NULL);
-		attroff (A_BOLD);
-		SbUiCursesPut (10, rightX, rightWidth,
-				model->song != NULL ? model->song->album : NULL);
-		SbUiCursesPut (11, rightX, rightWidth, SbUiCursesRating (model->song));
-		SbUiCursesProgress (model, 12, rightX, rightWidth);
+		SbUiCursesNowPlaying (model, 6, split + 2, statusY - 7,
+				cols - split - 4);
 	} else {
 		attron (A_BOLD);
 		SbUiCursesPut (4, 2, cols - 4, "STATION");
@@ -256,21 +398,12 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		attron (A_BOLD);
 		SbUiCursesPut (dividerY + 1, 2, cols - 4, "NOW PLAYING");
 		attroff (A_BOLD);
-		SbUiCursesPut (dividerY + 2, 2, cols - 4,
-				model->song != NULL ? model->song->artist : NULL);
-		SbUiCursesPut (dividerY + 3, 2, cols - 4,
-				model->song != NULL ? model->song->title : NULL);
-		if (dividerY + 5 < statusY - 1) {
-			SbUiCursesPut (dividerY + 4, 2, cols - 4,
-					SbUiCursesRating (model->song));
-			SbUiCursesProgress (model, dividerY + 5, 2, cols - 4);
-		} else {
-			SbUiCursesProgress (model, dividerY + 4, 2, cols - 4);
-		}
+		SbUiCursesNowPlaying (model, dividerY + 2, 2,
+				statusY - dividerY - 3, cols - 4);
 	}
 
 	if (data->helpVisible) {
-		const int height = 13;
+		const int height = 15;
 		const int width = cols < 64 ? cols - 6 : 58;
 		WINDOW * const help = newwin (height, width, (rows - height) / 2,
 				(cols - width) / 2);
@@ -289,9 +422,15 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					SbUiCursesKey (renderer, SB_UI_CMD_LOVE));
 			mvwprintw (help, 8, 2, "%c                ban song",
 					SbUiCursesKey (renderer, SB_UI_CMD_BAN));
-			mvwprintw (help, 9, 2, "%c                quit",
+			mvwprintw (help, 9, 2, "%c                volume down",
+					SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_DOWN));
+			mvwprintw (help, 10, 2, "%c                volume up",
+					SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_UP));
+			mvwprintw (help, 11, 2, "%c                reset volume (0 dB)",
+					SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_RESET));
+			mvwprintw (help, 12, 2, "%c                quit",
 					quitKey != BAR_KS_DISABLED ? quitKey : '-');
-			mvwprintw (help, 10, 2, "%c                close help",
+			mvwprintw (help, 13, 2, "%c                close help",
 					helpKey != BAR_KS_DISABLED ? helpKey : '-');
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
@@ -383,7 +522,9 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		if (command == SB_UI_CMD_QUIT || command == SB_UI_CMD_TOGGLE_PAUSE ||
 				command == SB_UI_CMD_PLAY || command == SB_UI_CMD_PAUSE ||
 				command == SB_UI_CMD_SKIP || command == SB_UI_CMD_LOVE ||
-				command == SB_UI_CMD_BAN) {
+				command == SB_UI_CMD_BAN || command == SB_UI_CMD_VOLUME_DOWN ||
+				command == SB_UI_CMD_VOLUME_UP ||
+				command == SB_UI_CMD_VOLUME_RESET) {
 			return (SbUiCommandEvent) {command, NULL};
 		}
 	}
@@ -392,11 +533,15 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 
 static void SbUiCursesMessage (SbUiRenderer *renderer, const BarUiMsg_t type,
 		const char *format, va_list fmtargs) {
-	(void) type;
 	SbUiCursesData * const data = renderer->data;
 	pthread_mutex_lock (&data->statusLock);
 	vsnprintf (data->status, sizeof (data->status), format, fmtargs);
 	data->status[strcspn (data->status, "\r\n")] = '\0';
+	data->statusSeverity = SbUiCursesNoticeSeverity (type);
+	/* Errors remain visible longer; all other messages are concise transient
+	 * notices. The main thread expires them during its existing 1 Hz redraw. */
+	data->statusExpires = time (NULL) +
+			(data->statusSeverity == SB_UI_NOTICE_ERROR ? 8 : 4);
 	pthread_mutex_unlock (&data->statusLock);
 }
 
@@ -441,6 +586,8 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 		return false;
 	}
 	strcpy (data->status, "Ready");
+	data->statusSeverity = SB_UI_NOTICE_INFO;
+	data->statusExpires = time (NULL) + 4;
 	cbreak ();
 	noecho ();
 	keypad (stdscr, TRUE);
@@ -452,6 +599,8 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 		use_default_colors ();
 #endif
 		init_pair (1, COLOR_GREEN, -1);
+		init_pair (2, COLOR_RED, -1);
+		init_pair (3, COLOR_YELLOW, -1);
 		data->colors = true;
 	}
 	renderer->ops = &cursesOps;
