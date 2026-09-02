@@ -72,13 +72,16 @@ NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
 
 ifeq ($(shell uname),Darwin)
 	CREDENTIAL_LDFLAGS:=-framework Security -framework CoreFoundation
+else ifeq ($(shell $(PKG_CONFIG) --exists libsecret-1 && echo yes),yes)
+	CREDENTIAL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libsecret-1) -DHAVE_LIBSECRET
+	CREDENTIAL_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libsecret-1)
 endif
 
 # combine all flags
 ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
 			${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} \
 			${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} \
-			${LIBAO_CFLAGS} ${NCURSESW_CFLAGS}
+			${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} ${CREDENTIAL_CFLAGS}
 ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \

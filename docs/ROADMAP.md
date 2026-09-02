@@ -99,7 +99,8 @@ plans, not promises of a date or release.
 
 - [ ] Implement MPRIS control and metadata.
 - [ ] Add desktop notifications.
-- [ ] Integrate with secret-service/keyring providers.
+- [x] Integrate with secret-service/keyring providers through optional
+  libsecret support; runtime validation across selected desktops remains.
 - [ ] Validate builds and runtime behavior across selected distributions.
 
 ## Phase 5 — Packaging and releases

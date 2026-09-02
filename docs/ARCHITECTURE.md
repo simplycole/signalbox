@@ -198,10 +198,11 @@ pianobar configuration.
 Authentication calls a narrow load/store/delete/availability interface keyed
 by service `org.signalbox.pandora` and Pandora email. macOS implements it with
 Security.framework's `SecItem` APIs and updates an existing generic-password
-item rather than accumulating duplicates. Non-macOS builds currently return
-unavailable, allowing session-only TUI login and unchanged explicit classic
-configuration. A future Linux implementation can use optional Secret Service;
-a native Windows build can implement the same interface with Credential
+item rather than accumulating duplicates. Linux uses libsecret synchronously
+when the optional `libsecret-1` development package is present and fails closed
+when no Secret Service provider is reachable. Builds without a native backend
+retain session-only TUI login and unchanged explicit classic configuration. A
+native Windows build can implement the same interface with Credential
 Manager `CredRead`, `CredWrite`, and `CredDelete` without exposing Windows
 headers to shared authentication code.
 

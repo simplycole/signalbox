@@ -49,8 +49,8 @@ Highlights
 - Native TUI flows for station creation, rename/delete, QuickMix, genres,
   seeds, feedback, bookmarks, and station modes
 - Configurable bindings with an in-app, responsive, scrollable HELP overlay
-- Secure saved credentials through macOS Keychain; plaintext is never written
-  by the TUI
+- Secure saved credentials through macOS Keychain or Linux Secret Service;
+  plaintext is never written by the TUI
 - Classic UI, FIFO remote control, audio pipe, proxy, and event-command
   compatibility inherited from pianobar
 
@@ -119,7 +119,7 @@ Debian / Ubuntu
 
    sudo apt-get install build-essential libao-dev libavcodec-dev \
      libavfilter-dev libavformat-dev libavutil-dev libcurl4-gnutls-dev \
-     libgcrypt20-dev libjson-c-dev libncursesw5-dev pkg-config
+     libgcrypt20-dev libjson-c-dev libncursesw5-dev libsecret-1-dev pkg-config
    make
 
 Launch the current full-screen interface:
@@ -151,12 +151,12 @@ Signalbox reads ``$XDG_CONFIG_HOME/signalbox/config`` (normally
 ``$XDG_CONFIG_HOME/pianobar/config`` is used as a compatibility fallback; files
 are never merged or migrated automatically.
 
-In TUI mode, macOS passwords can be stored in Keychain under
-``org.signalbox.pandora``. Only the selected account email is written to
-Signalbox's mode-``0600`` account file. Linux secure storage is the next
-platform integration and currently fails closed rather than writing plaintext.
-Explicit ``password`` and ``password_command`` settings remain supported for
-compatibility.
+In TUI mode, passwords can be stored in macOS Keychain or a Linux Secret
+Service provider such as GNOME Keyring/KWallet. Linux support is compiled when
+``libsecret-1`` is available and fails closed when the service cannot be
+reached. Only the selected account email is written to Signalbox's
+mode-``0600`` account file. Explicit ``password`` and ``password_command``
+settings remain supported for compatibility.
 
 pianobar lineage
 ----------------
@@ -177,7 +177,7 @@ Roadmap
 
 Near-term work is deliberately platform-first:
 
-1. Linux Secret Service/keyring-backed credentials
+1. Linux Secret Service runtime validation across selected desktops
 2. Windows portability boundaries and a Credential Manager backend
 3. Classic/FIFO/headless compatibility validation, then making the TUI the
    interactive default

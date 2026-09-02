@@ -36,6 +36,7 @@ jobs:
             libgcrypt20-dev \
             libjson-c-dev \
             libncursesw5-dev \
+            libsecret-1-dev \
             pkg-config
 
       - name: Validate contrib script syntax

@@ -31,6 +31,17 @@ static CFMutableDictionaryRef SbCredentialQuery (const char *service,
 	CFRelease (accountValue);
 	return query;
 }
+#elif defined(HAVE_LIBSECRET)
+#include <libsecret/secret.h>
+
+static const SecretSchema sbCredentialSchema = {
+	"org.signalbox.Credential", SECRET_SCHEMA_NONE,
+	{
+		{"service", SECRET_SCHEMA_ATTRIBUTE_STRING},
+		{"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
+		{NULL, 0},
+	}
+};
 #endif
 
 void SbCredentialClear (void *data, size_t size) {
@@ -47,6 +58,8 @@ void SbCredentialFreeSecret (char *secret) {
 
 bool SbCredentialBackendAvailable (void) {
 #ifdef __APPLE__
+	return true;
+#elif defined(HAVE_LIBSECRET)
 	return true;
 #else
 	return false;
@@ -81,6 +94,18 @@ SbCredentialStatus SbCredentialLoad (const char *service, const char *account,
 	CFRelease (data);
 	*secretOut = secret;
 	return SB_CREDENTIAL_OK;
+#elif defined(HAVE_LIBSECRET)
+	GError *error = NULL;
+	gchar *secret = secret_password_lookup_sync (&sbCredentialSchema, NULL,
+			&error, "service", service, "account", account, NULL);
+	if (error != NULL) {
+		g_error_free (error);
+		return SB_CREDENTIAL_ERROR;
+	}
+	if (secret == NULL) return SB_CREDENTIAL_NOT_FOUND;
+	*secretOut = strdup (secret);
+	secret_password_free (secret);
+	return *secretOut != NULL ? SB_CREDENTIAL_OK : SB_CREDENTIAL_ERROR;
 #else
 	(void) service; (void) account;
 	return SB_CREDENTIAL_UNAVAILABLE;
@@ -110,6 +135,13 @@ SbCredentialStatus SbCredentialStore (const char *service, const char *account,
 	}
 	CFRelease (update); CFRelease (data); CFRelease (query);
 	return status == errSecSuccess ? SB_CREDENTIAL_OK : SB_CREDENTIAL_ERROR;
+#elif defined(HAVE_LIBSECRET)
+	GError *error = NULL;
+	const gboolean stored = secret_password_store_sync (&sbCredentialSchema,
+			SECRET_COLLECTION_DEFAULT, "Signalbox Pandora account", secret,
+			NULL, &error, "service", service, "account", account, NULL);
+	if (error != NULL) g_error_free (error);
+	return stored ? SB_CREDENTIAL_OK : SB_CREDENTIAL_ERROR;
 #else
 	(void) service; (void) account; (void) secret;
 	return SB_CREDENTIAL_UNAVAILABLE;
@@ -126,6 +158,20 @@ SbCredentialStatus SbCredentialDelete (const char *service,
 	CFRelease (query);
 	if (status == errSecItemNotFound) return SB_CREDENTIAL_NOT_FOUND;
 	return status == errSecSuccess ? SB_CREDENTIAL_OK : SB_CREDENTIAL_ERROR;
+#elif defined(HAVE_LIBSECRET)
+	GError *error = NULL;
+	gchar *secret = secret_password_lookup_sync (&sbCredentialSchema, NULL,
+			&error, "service", service, "account", account, NULL);
+	if (error != NULL) {
+		g_error_free (error);
+		return SB_CREDENTIAL_ERROR;
+	}
+	if (secret == NULL) return SB_CREDENTIAL_NOT_FOUND;
+	secret_password_free (secret);
+	const gboolean removed = secret_password_clear_sync (&sbCredentialSchema,
+			NULL, &error, "service", service, "account", account, NULL);
+	if (error != NULL) g_error_free (error);
+	return removed ? SB_CREDENTIAL_OK : SB_CREDENTIAL_ERROR;
 #else
 	(void) service; (void) account;
 	return SB_CREDENTIAL_UNAVAILABLE;
