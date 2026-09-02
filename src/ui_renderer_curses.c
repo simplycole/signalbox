@@ -622,7 +622,11 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 	for (size_t band = 0; band < bandCount; band++) {
 		const int barX = origin + (int) band * bandPitch;
 		labelWidth[band] = SbUiCursesTextWidth (labels[band]);
-		labelX[band] = barX + (barWidth - labelWidth[band]) / 2;
+		const int barCenter = 2 * barX + barWidth;
+		const int idealLeft = barCenter - labelWidth[band];
+		labelX[band] = idealLeft / 2;
+		/* Resolve half-cell ties to the right instead of leaving a left bias. */
+		if (idealLeft > 0 && idealLeft % 2 != 0) labelX[band]++;
 		if (labelX[band] < x) labelX[band] = x;
 		if (labelX[band] + labelWidth[band] > x + width)
 			labelX[band] = x + width - labelWidth[band];
