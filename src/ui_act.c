@@ -387,6 +387,7 @@ BarUiActCallback(BarUiActExplain) {
 
 	assert (selSong != NULL);
 
+	memset (&reqData, 0, sizeof (reqData));
 	reqData.song = selSong;
 
 	BarUiMsg (&app->settings, MSG_INFO, "Receiving explanation... ");
@@ -394,7 +395,9 @@ BarUiActCallback(BarUiActExplain) {
 		if (reqData.retExplain == NULL) {
 			BarUiMsg (&app->settings, MSG_ERR, "No explanation provided.\n");
 		} else {
-			BarUiMsg (&app->settings, MSG_INFO, "%s\n", reqData.retExplain);
+			if (app->useTui) SbUiRendererTextModal (&app->uiRenderer,
+					&app->uiModel, "WHY THIS SONG?", reqData.retExplain);
+			else BarUiMsg (&app->settings, MSG_INFO, "%s\n", reqData.retExplain);
 			free (reqData.retExplain);
 		}
 	}
@@ -507,6 +510,11 @@ BarUiActCallback(BarUiActSongInfo) {
 	assert (selStation != NULL);
 	assert (selSong != NULL);
 
+	if (app->useTui) {
+		SbUiRendererSongDetails (&app->uiRenderer, &app->uiModel, selSong,
+				selStation, 0);
+		return;
+	}
 	BarUiPrintStation (&app->settings, selStation);
 	/* print real station if quickmix */
 	BarUiPrintSong (&app->settings, selSong,
@@ -704,7 +712,21 @@ BarUiActCallback(BarUiActPrintUpcoming) {
 	PianoSong_t * const nextSong = PianoListNextP (selSong);
 	if (nextSong != NULL) {
 		if (app->useTui) {
-			(void) BarUiTuiSelectSong (app, nextSong, "UPCOMING TRACKS");
+			PianoSong_t *song = BarUiTuiSelectSong (app, nextSong,
+					"UPCOMING TRACKS");
+			if (song != NULL) {
+				PianoStation_t *station = PianoFindStationById (app->ph.stations,
+						song->stationId);
+				if (station == NULL) station = selStation;
+				const char *actions[] = {"Song details", "Why this song?",
+						"Create station", "Bookmark song or artist"};
+				const SbUiCommand commands[] = {SB_UI_CMD_INFO, SB_UI_CMD_EXPLAIN,
+						SB_UI_CMD_CREATE_STATION_FROM_SONG, SB_UI_CMD_BOOKMARK};
+				const int selected = SbUiRendererSelectList (&app->uiRenderer,
+						&app->uiModel, "UPCOMING TRACK", actions, 4);
+				if (selected >= 0) BarUiDispatchCommand (app, commands[selected],
+						station, song, false, BAR_DC_UNDEFINED);
+			}
 		} else {
 			BarUiListSongs (app, nextSong, NULL);
 		}
@@ -830,7 +852,8 @@ BarUiActCallback(BarUiActQuit) {
 	BarUiDoSkipSong (&app->player);
 }
 
-static void BarUiActHistorySong (BarApp_t *app, PianoSong_t *histSong) {
+static void BarUiActHistorySong (BarApp_t *app, PianoSong_t *histSong,
+		const time_t playedAt) {
 	char buf[2];
 	if (histSong == NULL) return;
 	SbUiCommand command;
@@ -843,15 +866,18 @@ static void BarUiActHistorySong (BarApp_t *app, PianoSong_t *histSong) {
 	}
 
 	if (app->useTui) {
-		const char *actions[] = {"Song information", "Create station",
+		const char *actions[] = {"Song details", "Why this song?", "Create station",
 				"Bookmark song or artist"};
-		const SbUiCommand commands[] = {SB_UI_CMD_INFO,
+		const SbUiCommand commands[] = {SB_UI_CMD_INFO, SB_UI_CMD_EXPLAIN,
 				SB_UI_CMD_CREATE_STATION_FROM_SONG, SB_UI_CMD_BOOKMARK};
 		const int selected = SbUiRendererSelectList (&app->uiRenderer,
-				&app->uiModel, "HISTORY ACTION", actions, 3);
+				&app->uiModel, "HISTORY ACTION", actions, 4);
 		if (selected >= 0) {
-			BarUiDispatchCommand (app, commands[selected], songStation,
-					histSong, false, BAR_DC_UNDEFINED);
+			if (commands[selected] == SB_UI_CMD_INFO)
+				SbUiRendererSongDetails (&app->uiRenderer, &app->uiModel,
+						histSong, songStation, playedAt);
+			else BarUiDispatchCommand (app, commands[selected], songStation,
+						histSong, false, BAR_DC_UNDEFINED);
 		}
 		return;
 	}
@@ -871,13 +897,15 @@ static void BarUiActHistorySong (BarApp_t *app, PianoSong_t *histSong) {
 }
 
 void BarUiActHistorySelected (BarApp_t *app, const size_t index) {
-	BarUiActHistorySong (app, PianoListGetP (app->songHistory, index));
+	BarUiActHistorySong (app, PianoListGetP (app->songHistory, index),
+			index < app->uiModel.historyCount ? app->uiModel.history[index].playedAt : 0);
 }
 
 /*	song history
  */
 BarUiActCallback(BarUiActHistory) {
 	PianoSong_t *histSong;
+	time_t playedAt = 0;
 
 	if (app->songHistory != NULL) {
 		if (app->useTui) {
@@ -885,10 +913,12 @@ BarUiActCallback(BarUiActHistory) {
 					&app->uiModel);
 			histSong = selected >= 0 ? PianoListGetP (app->songHistory,
 					(size_t) selected) : NULL;
+			if (selected >= 0 && (size_t) selected < app->uiModel.historyCount)
+				playedAt = app->uiModel.history[selected].playedAt;
 		} else {
 			histSong = BarUiSelectSong (app, app->songHistory, &app->input);
 		}
-		BarUiActHistorySong (app, histSong);
+		BarUiActHistorySong (app, histSong, playedAt);
 	} else {
 		BarUiMsg (&app->settings, MSG_INFO,
 				(!app->useTui && app->settings.history == 0) ? "History disabled.\n" :

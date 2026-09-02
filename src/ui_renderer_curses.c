@@ -274,9 +274,9 @@ static const char *SbUiCursesRating (const SbUiCursesData *data,
 	if (song == NULL) return "Rating: Neutral";
 	switch (song->rating) {
 		case PIANO_RATE_LOVE: return data->unicodeSymbols ?
-				"Rating: ♥ Loved" : "Rating: + Loved";
+				"Rating: ♥ Loved" : "Rating: <3 Loved";
 		case PIANO_RATE_BAN: return data->unicodeSymbols ?
-				"Rating: × Banned" : "Rating: - Banned";
+				"Rating: </3 Banned" : "Rating: </3 Banned";
 		case PIANO_RATE_TIRED: return "Rating: Tired";
 		default: return "Rating: Neutral";
 	}
@@ -570,14 +570,14 @@ static bool SbUiCursesHistoryWraps (const SbUiHistoryEntry *entry,
 	return width < SbUiCursesTextWidth (entry->artist) +
 			SbUiCursesTextWidth (entry->title) +
 			SbUiCursesTextWidth (entry->album) +
-			SbUiCursesTextWidth (duration) + 11 && width >= 18;
+			SbUiCursesTextWidth (duration) + 15 && width >= 18;
 }
 
 static const char *SbUiCursesRatingMarker (const SbUiCursesData *data,
 		const PianoSongRating_t rating) {
-	if (rating == PIANO_RATE_LOVE) return data->unicodeSymbols ? "♥" : "+";
-	if (rating == PIANO_RATE_BAN) return data->unicodeSymbols ? "×" : "-";
-	return " ";
+	if (rating == PIANO_RATE_LOVE) return data->unicodeSymbols ? "♥  " : "<3 ";
+	if (rating == PIANO_RATE_BAN) return "</3";
+	return "   ";
 }
 
 static int SbUiCursesHistoryRow (const SbUiCursesData *data,
@@ -592,7 +592,7 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 	const int titleNatural = SbUiCursesTextWidth (entry->title);
 	const int albumNatural = SbUiCursesTextWidth (entry->album);
 	const int firstAvailable = (wraps ? width : width - albumNatural -
-			durationWidth - 6) - 2;
+			durationWidth - 6) - 6;
 	const int contentAvailable = firstAvailable > 3 ? firstAvailable - 3 :
 			firstAvailable;
 	int artistWidth = artistNatural;
@@ -603,18 +603,28 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 		trackWidth = contentAvailable > artistWidth ?
 				contentAvailable - artistWidth : 0;
 	}
-	if (selected) SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SELECTED,
-			A_REVERSE);
+	const bool mainSelection = selected && window == stdscr;
+	/* Keep focus and rating fields reserved on every row, so selection never
+	 * shifts the music metadata. */
+	const int markerWidth = 2;
+	if (selected && !mainSelection) SbUiCursesWAttrOn (window, data,
+			SB_TUI_COLOR_SELECTED, A_REVERSE);
+	if (mainSelection) {
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SELECTED, A_BOLD);
+		SbUiCursesWPut (window, y, x, 1, data->unicodeSymbols ? "›" : ">");
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SELECTED, A_BOLD);
+	}
 	const SbTuiColorRole markerRole = entry->rating == PIANO_RATE_LOVE ?
 			SB_TUI_COLOR_LOVED : entry->rating == PIANO_RATE_BAN ?
 			SB_TUI_COLOR_ERROR : SB_TUI_COLOR_MUTED;
 	SbUiCursesWAttrOn (window, data, markerRole, A_BOLD);
-	SbUiCursesWPut (window, y, x, 1, SbUiCursesRatingMarker (data, entry->rating));
+	SbUiCursesWPut (window, y, x + markerWidth, 3,
+			SbUiCursesRatingMarker (data, entry->rating));
 	SbUiCursesWAttrOff (window, data, markerRole, A_BOLD);
 	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-	SbUiCursesWPut (window, y, x + 2, artistWidth, entry->artist);
+	SbUiCursesWPut (window, y, x + markerWidth + 4, artistWidth, entry->artist);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-	int column = x + 2 + artistWidth;
+	int column = x + markerWidth + 4 + artistWidth;
 	if (contentAvailable >= 3) {
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
 		SbUiCursesWPut (window, y, column, 3, " — ");
@@ -626,7 +636,7 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
 	column += trackWidth;
 	const int metadataY = wraps ? y + 1 : y;
-	const int metadataX = wraps ? x + 2 : column + 3;
+	const int metadataX = wraps ? x + markerWidth + 4 : column + 3;
 	if (!wraps) {
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
 		SbUiCursesWPut (window, y, column, 3, " · ");
@@ -643,8 +653,8 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 	SbUiCursesWPut (window, metadataY, metadataX + albumWidth + 3,
 			durationWidth, duration);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_WARNING, 0);
-	if (selected) SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SELECTED,
-			A_REVERSE);
+	if (selected && !mainSelection) SbUiCursesWAttrOff (window, data,
+			SB_TUI_COLOR_SELECTED, A_REVERSE);
 	return wraps ? 2 : 1;
 }
 
@@ -686,6 +696,66 @@ static void SbUiCursesHistory (SbUiCursesData *data,
 		used += SbUiCursesHistoryRow (data, stdscr, &model->history[i],
 				rowY, x, width, data->focus == SB_TUI_FOCUS_RECENT &&
 				i == data->recentSelected);
+	}
+}
+
+static size_t SbUiCursesUpcomingCount (const SbUiModel *model) {
+	size_t count = 0;
+	const PianoSong_t *song = model->song != NULL ? PianoListNextP (model->song) : NULL;
+	PianoListForeachP (song) count++;
+	return count;
+}
+
+static void SbUiCursesUpcoming (const SbUiCursesData *data,
+		const SbUiModel *model, const int y, const int x, const int height,
+		const int width) {
+	const PianoSong_t *song = model->song != NULL ? PianoListNextP (model->song) : NULL;
+	int row = 0;
+	PianoListForeachP (song) {
+		if (row >= height) break;
+		char duration[16];
+		SbUiCursesTime (duration, sizeof (duration), song->length);
+		const int durationWidth = SbUiCursesTextWidth (duration);
+		const int artistNatural = SbUiCursesTextWidth (song->artist);
+		const int titleNatural = SbUiCursesTextWidth (song->title);
+		const int albumNatural = SbUiCursesTextWidth (song->album);
+		const int available = width - durationWidth - 9;
+		int artistWidth = artistNatural, titleWidth = titleNatural;
+		int albumWidth = albumNatural;
+		if (artistWidth + titleWidth + albumWidth > available) {
+			artistWidth = available > 0 ? available / 3 : 0;
+			titleWidth = available > artistWidth ? available / 3 : 0;
+			albumWidth = available - artistWidth - titleWidth;
+			if (albumWidth < 0) albumWidth = 0;
+		}
+		int column = x;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_ARTIST, A_BOLD);
+		SbUiCursesPut (y + row, column, artistWidth, song->artist);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_ARTIST, A_BOLD);
+		column += artistWidth;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesPut (y + row, column, 3, " — ");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
+		column += 3;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_TRACK, A_BOLD);
+		SbUiCursesPut (y + row, column, titleWidth, song->title);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_TRACK, A_BOLD);
+		column += titleWidth;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesPut (y + row, column, 3, " · ");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
+		column += 3;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_ALBUM, 0);
+		SbUiCursesPut (y + row, column, albumWidth, song->album);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_ALBUM, 0);
+		column += albumWidth;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesPut (y + row, column, 3, " · ");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, 0);
+		SbUiCursesPut (y + row, column + 3, durationWidth, duration);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, 0);
+		row++;
 	}
 }
 
@@ -769,7 +839,11 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
 		const int nowPlayingHeight = 8;
-		const int historyY = 6 + nowPlayingHeight + 1;
+		const size_t upcomingCount = SbUiCursesUpcomingCount (model);
+		const int upcomingRows = upcomingCount > 0 && rows >= 30 ?
+				(int) (upcomingCount < 4 ? upcomingCount : 4) : 0;
+		const int upcomingY = 6 + nowPlayingHeight + 1;
+		const int historyY = upcomingY + (upcomingRows > 0 ? upcomingRows + 2 : 0);
 		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
@@ -778,19 +852,28 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
+		if (upcomingRows > 0) {
+			char upcomingTitle[64];
+			snprintf (upcomingTitle, sizeof (upcomingTitle), "UPCOMING %zu",
+					upcomingCount);
+			SbUiCursesPut (upcomingY, split + 2, cols - split - 4,
+					upcomingTitle);
+		}
 		char historyTitle[64];
 		snprintf (historyTitle, sizeof (historyTitle), "RECENT %zu",
 				model->historyCount);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
-				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD | A_REVERSE : 0);
+				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD : 0);
 		SbUiCursesPut (historyY, split + 2, cols - split - 4, historyTitle);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION,
-				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD | A_REVERSE : 0);
+				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD : 0);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
 		const int rightWidth = cols - rightX - 2;
 		SbUiCursesNowPlaying (data, model, 6, rightX, nowPlayingHeight, rightWidth);
+		if (upcomingRows > 0) SbUiCursesUpcoming (data, model, upcomingY + 1,
+				rightX, upcomingRows, rightWidth);
 		SbUiCursesHistory (data, model, historyY + 1, rightX,
 				statusY - historyY - 2, rightWidth);
 	} else if (cols >= 80 && rows >= 20) {
@@ -1148,6 +1231,87 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 		else if (key == '\n' || key == '\r' || key == KEY_ENTER)
 			return (int) selected;
 	}
+}
+
+void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
+		const char *title, const char *text) {
+	if (!SbUiRendererIsCurses (renderer)) return;
+	size_t offset = 0;
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		int rows, cols;
+		getmaxyx (stdscr, rows, cols);
+		(void) cols;
+		SbUiCursesData * const data = renderer->data;
+		WINDOW *window = SbUiCursesModal (data, title,
+				"Up/Down or j/k scroll; Esc or Enter closes", rows < 24 ? rows - 2 : 22);
+		if (window == NULL) continue;
+		int wh, ww;
+		getmaxyx (window, wh, ww);
+		const int lineWidth = ww - 4;
+		char copy[2048];
+		snprintf (copy, sizeof (copy), "%s", text != NULL ? text : "No information available.");
+		const char *lines[128];
+		size_t lineCount = 0;
+		char *cursor = copy;
+		while (*cursor != '\0' && lineCount < sizeof (lines) / sizeof (*lines)) {
+			while (*cursor == ' ' || *cursor == '\n') cursor++;
+			if (*cursor == '\0') break;
+			lines[lineCount++] = cursor;
+			char *end = cursor;
+			char *lastSpace = NULL;
+			int cells = 0;
+			while (*end != '\0' && *end != '\n' && cells < lineWidth) {
+				if (*end == ' ') lastSpace = end;
+				end++; cells++;
+			}
+			if (*end == '\0') break;
+			char *cut = (*end == '\n' || cells < lineWidth) ? end :
+					(lastSpace != NULL ? lastSpace : end);
+			*cut = '\0';
+			cursor = cut + 1;
+		}
+		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
+		if (offset >= lineCount) offset = lineCount > 0 ? lineCount - 1 : 0;
+		for (size_t i = 0; i < visible && offset + i < lineCount; i++)
+			mvwaddnstr (window, 5 + (int) i, 2, lines[offset + i], lineWidth);
+		wrefresh (window);
+		const int key = wgetch (window);
+		delwin (window);
+		if (key == 27 || key == '\n' || key == '\r' || key == KEY_ENTER) {
+			SbUiCursesFrame (renderer, model);
+			return;
+		}
+		if ((key == KEY_UP || key == 'k') && offset > 0) offset--;
+		else if ((key == KEY_DOWN || key == 'j') && offset + visible < lineCount)
+			offset++;
+	}
+}
+
+void SbUiRendererSongDetails (SbUiRenderer *renderer, const SbUiModel *model,
+		const PianoSong_t *song, const PianoStation_t *station,
+		const time_t playedAt) {
+	if (!SbUiRendererIsCurses (renderer) || song == NULL) return;
+	char duration[16], played[64] = "";
+	SbUiCursesTime (duration, sizeof (duration), song->length);
+	if (playedAt != (time_t) 0) {
+		struct tm local;
+		if (localtime_r (&playedAt, &local) != NULL)
+			strftime (played, sizeof (played), "%Y-%m-%d %H:%M:%S", &local);
+	}
+	SbUiCursesData * const data = renderer->data;
+	const char *rating = SbUiCursesRating (data, song);
+	char details[1600];
+	snprintf (details, sizeof (details),
+			"Artist: %s\nTrack: %s\nAlbum: %s\nStation: %s\nLength: %s\n%s%s%s%s%s",
+			song->artist != NULL ? song->artist : "--",
+			song->title != NULL ? song->title : "--",
+			song->album != NULL ? song->album : "--",
+			station != NULL && station->name != NULL ? station->name : "--",
+			duration, rating, played[0] != '\0' ? "\nPlayed: " : "",
+			played, song->detailUrl != NULL ? "\nDetails: " : "",
+			song->detailUrl != NULL ? song->detailUrl : "");
+	SbUiRendererTextModal (renderer, model, "SONG DETAILS", details);
 }
 
 /* The checked array is caller-owned scratch state.  Canonical station flags
@@ -1516,7 +1680,8 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		if (command == SB_UI_CMD_QUIT || command == SB_UI_CMD_TOGGLE_PAUSE ||
 				command == SB_UI_CMD_PLAY || command == SB_UI_CMD_PAUSE ||
 				command == SB_UI_CMD_SKIP || command == SB_UI_CMD_LOVE ||
-				command == SB_UI_CMD_BAN || command == SB_UI_CMD_VOLUME_DOWN ||
+				command == SB_UI_CMD_BAN || command == SB_UI_CMD_INFO ||
+				command == SB_UI_CMD_EXPLAIN || command == SB_UI_CMD_VOLUME_DOWN ||
 				command == SB_UI_CMD_VOLUME_UP ||
 				command == SB_UI_CMD_VOLUME_RESET ||
 				command == SB_UI_CMD_ADD_MUSIC ||
@@ -1700,7 +1865,7 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	strcpy (data->status, "Ready");
 	data->statusSeverity = SB_UI_NOTICE_INFO;
 	data->statusExpires = time (NULL) + 4;
-	data->unicodeSymbols = wcwidth (L'♥') == 1 && wcwidth (L'×') == 1;
+	data->unicodeSymbols = wcwidth (L'♥') == 1 && wcwidth (L'›') == 1;
 	cbreak ();
 	noecho ();
 	keypad (stdscr, TRUE);

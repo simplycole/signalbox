@@ -48,8 +48,11 @@ plans, not promises of a date or release.
 - [x] Present full-session in-memory history, a height-responsive semantic
   RECENT view, and a newest-first scrollable history modal with preserved song
   actions. History is session-only and is freed rather than persisted. Add expiring status/error notices,
-  request retry/recovery state, and configured key help. Upcoming tracks remain
-  deferred.
+  request retry/recovery state, and configured key help.
+- [x] Add a responsive, display-only UPCOMING pane backed by the fetched
+  playlist, useful Enter actions, native song-details and explanation modals,
+  fixed-width ``♥``/``</3`` ratings, and subtle RECENT focus markers. Queue
+  promotion remains deferred because no safe reorder API exists.
 - [x] Add native TUI create/search, rename, and delete prompts with bounded
   editing, confirmation, and result selection; retain classic startup
   credential and account-settings prompts.

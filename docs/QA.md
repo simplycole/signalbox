@@ -135,15 +135,19 @@ response bodies. Review the diagnostic log before sharing it anyway.
   143, and 219 columns and back to a narrow layout. **Expected:** RECENT focus
   is visible, every session entry is reachable, selection remains valid, a new
   track does not yank an actively browsed selection, wide rows stay left-packed,
-  and wrapped rows are complete. Enter opens the existing history action menu.
+  and wrapped rows are complete. Focus uses ``›``/``>`` without reversing the
+  entire row. Enter opens the history action menu.
   **Account:** SAFE/read-only if actions are cancelled. **Real account:** Yes.
-- **Action:** After several tracks, press `h`, browse, open Song information,
+- **Action:** After several tracks, press `h`, browse, open Song details,
   and cancel other history actions. **Expected:** session history is ordered,
   selection is stable, info matches the chosen track, and nested Esc returns
   cleanly. **Account:** SAFE/read-only only when Create/Bookmark are cancelled.
   **Real account:** Yes. **Cleanup:** None.
-- **Action:** Press `u` and browse the queue. **Expected:** only upcoming tracks
-  appear and Esc closes without changing the queue. **Account:** SAFE/read-only.
+- **Action:** Press `u`, browse the queue, and press Enter. **Expected:** only
+  upcoming tracks appear; Enter opens Song details/Why/Create/Bookmark actions;
+  Esc closes without changing the queue. At 80x30 or larger the main pane shows
+  the actual queue count and up to four compact rows. **Account:** SAFE/read-only
+  when network actions are cancelled.
   **Real account:** Yes. **Cleanup:** None.
 
 ## I. Search/create

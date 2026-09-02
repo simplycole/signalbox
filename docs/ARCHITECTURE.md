@@ -107,6 +107,12 @@ The curses renderer owns only RECENT focus, selection, and scroll indexes. An
 Enter event carries the selected index back to the main loop, which resolves it
 against canonical history and reuses the existing history action flow.
 
+The permanent UPCOMING projection borrows nodes following the current playlist
+head only while the single-threaded main loop renders. Interactive selection
+pauses that loop, and its action/details modal completes before playback can
+detach a node. Signalbox does not relink the playlist: libpiano has no
+queue-promotion request or ownership contract for client-side reordering.
+
 Favorites are keyed only by Pandora station ID and stored in
 `$XDG_CONFIG_HOME/signalbox/favorites` by writing a temporary file and renaming
 it. This local state contains no credentials or station metadata and does not

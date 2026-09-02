@@ -113,6 +113,10 @@ bool SbUiRendererConfirm (SbUiRenderer *, const SbUiModel *,
 int SbUiRendererSelectList (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *const *, size_t);
 int SbUiRendererSelectHistory (SbUiRenderer *, const SbUiModel *);
+void SbUiRendererSongDetails (SbUiRenderer *, const SbUiModel *,
+		const PianoSong_t *, const PianoStation_t *, time_t);
+void SbUiRendererTextModal (SbUiRenderer *, const SbUiModel *,
+		const char *, const char *);
 bool SbUiRendererToggleList (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *const *, bool *, size_t);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);

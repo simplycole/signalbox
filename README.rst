@@ -135,12 +135,14 @@ artist/title/album/station metadata, rating, signed-dB software volume,
 playback state and adaptive progress, transient status notices, and a RECENT
 view that left-packs rating, artist, track, album, and duration as
 ``♥ Artist — Track · Album · 05:18`` when width permits. Loved tracks use
-``♥`` and banned tracks use ``×``; terminals without safe single-cell glyphs
-fall back to ``+`` and ``-``. Narrower history rows use a two-line metadata
+``♥`` and banned tracks use ``</3`` in a fixed-width marker field; terminals
+without a safe Unicode heart fall back to ``<3``. Narrower history rows use a two-line metadata
 fallback, and the view never draws a partial entry. Its count is the total
 full-session history, not a display cap. Press ``Tab`` to focus RECENT, browse
 the full session with arrows or ``j``/``k``, Page Up/Page Down, and Home/End,
-and press Enter for the selected track's existing history actions. Press ``h`` for
+and press Enter for native details, Pandora's explanation, station creation, or
+bookmarks. Focus uses a ``›`` (or ``>``) marker rather than reversing the row.
+Press ``h`` for
 the newest-first session-history modal; navigate it with arrows or ``j``/``k``,
 Page Up/Page Down, and Home/End, then press Enter for the existing song actions
 or Esc to close it. History is held only in memory and clears when Signalbox
@@ -153,8 +155,11 @@ station seed/feedback/mode lists. Destructive operations use explicit
 confirmations. The inherited station-select key
 shows browser guidance instead of opening a blocking prompt. Other modal
 actions involving account settings and startup credentials remain classic-only;
-use classic mode for the complete inherited interface. The upcoming modal
-browses the already-fetched queue and deliberately adds no queue mutations.
+use classic mode for the complete inherited interface. At 80 columns by 30
+rows or larger, a compact UPCOMING section shows up to four rows from the actual
+already-fetched queue while leaving remaining space to RECENT. The ``u`` modal
+browses that same queue; Enter opens details and existing safe song actions.
+It deliberately adds no queue mutations.
 The inherited feedback semantics remain unchanged: ``+`` submits a Love rating;
 ``-`` submits a Ban rating and, when that successful ban targets the current
 song, skips it.
