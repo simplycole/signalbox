@@ -64,8 +64,10 @@ plans, not promises of a date or release.
 - [x] Add the C5 large-library station view: default A-Z, original and
   favorites-first modes, local ID-based favorites, incremental filtering,
   compact count/sort headers, and numeric jump with temporary row numbers.
-  Numeric jump uses `#`; `G` remains Genres. Recent-activation ordering remains
-  deferred.
+  Numeric jump uses `#` and isolates number-row/keypad input from normal command
+  dispatch; `G` remains Genres. RECENT includes album and snapshotted duration
+  in a compact one-line layout with a width-driven two-line fallback.
+  Recent-activation ordering remains deferred.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and

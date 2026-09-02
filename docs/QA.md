@@ -111,6 +111,14 @@ response bodies. Review the diagnostic log before sharing it anyway.
   SAFE/read-only if all mutation modals are cancelled. **Real account:** Yes.
   **Cleanup:** Press Esc in every mutation modal.
 
+- **Action:** With a filter and non-default sort active, press `#`, `4`, and
+  Enter using the number row; repeat with the physical numeric keypad. Also try
+  `0`, an out-of-range number, empty Enter, a long digit sequence, Backspace,
+  Delete, and keypad navigation with Num Lock changed. **Expected:** valid input
+  selects that one-based row in the visible list; invalid input reports out of
+  range; unsupported keypad codes remain in jump mode and never quit or invoke
+  another command. **Account:** SAFE/local. **Real account:** Yes.
+
 ## G. Themes / NO_COLOR
 
 - **Action:** Launch separate sessions with `--theme phosphor`, `amber`, `mono`,

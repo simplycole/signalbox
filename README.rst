@@ -133,7 +133,9 @@ shell opens immediately; credential prompts temporarily restore classic mode.
 The shell shows the real station list, distinct selected and active stations,
 artist/title/album/station metadata, rating, signed-dB software volume,
 playback state and adaptive progress, transient status notices, and a RECENT
-view that expands to show as many previous tracks as the terminal height allows.
+view that shows artist, track, album, and duration on one compact line when
+width permits. Narrower history rows use a two-line metadata fallback, and the
+view expands to show as many complete entries as the terminal height allows.
 Its count is the total full-session history, not a display cap. Press ``h`` for
 the newest-first session-history modal; navigate it with arrows or ``j``/``k``,
 Page Up/Page Down, and Home/End, then press Enter for the existing song actions
@@ -157,6 +159,9 @@ current mode. Press ``f`` to toggle a selected station as a Signalbox-local
 favorite, ``/`` for an incremental case-insensitive substring filter, and
 ``#`` to jump to a one-based row in the current sorted and filtered view.
 Jump mode temporarily shows row numbers; normal browsing never does.
+Number-row digits and xterm-style application-keypad digits are accepted;
+keypads exposed as navigation keys are ignored safely while jump mode remains
+open. Unsupported keypad sequences are consumed without dispatching commands.
 ``G`` remains the configured Genres command.
 
 On first run, enter Pandora credentials when prompted. TUI mode starts with the

@@ -174,6 +174,10 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 
 static void SbUiCursesTime (char *dest, const size_t size,
 		const unsigned int seconds) {
+	if (seconds == 0) {
+		snprintf (dest, size, "--:--");
+		return;
+	}
 	if (seconds >= 3600) {
 		snprintf (dest, size, "%u:%02u:%02u", seconds / 3600,
 				(seconds / 60) % 60, seconds % 60);
@@ -530,12 +534,47 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 	}
 }
 
-static void SbUiCursesHistoryRow (const SbUiCursesData *data,
+static int SbUiCursesTextWidth (const char *text) {
+	if (text == NULL || *text == '\0') return 2;
+	wchar_t wide[SB_UI_HISTORY_TEXT_MAX];
+	mbstate_t state;
+	memset (&state, 0, sizeof (state));
+	const char *source = text;
+	const size_t converted = mbsrtowcs (wide, &source,
+			(sizeof (wide) / sizeof (*wide)) - 1, &state);
+	if (converted == (size_t) -1) return (int) strlen (text);
+	int width = 0;
+	for (size_t i = 0; i < converted; i++) {
+		const int cells = wcwidth (wide[i]);
+		if (cells > 0) width += cells;
+	}
+	return width;
+}
+
+static bool SbUiCursesHistoryWraps (const SbUiHistoryEntry *entry,
+		const int width) {
+	char duration[16];
+	SbUiCursesTime (duration, sizeof (duration), entry->duration);
+	/* Artist + " — " + title + " · " + album + " · " + duration. */
+	return width < SbUiCursesTextWidth (entry->artist) +
+			SbUiCursesTextWidth (entry->title) +
+			SbUiCursesTextWidth (entry->album) +
+			SbUiCursesTextWidth (duration) + 9;
+}
+
+static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 		WINDOW *window, const SbUiHistoryEntry *entry, const int y,
 		const int x, const int width, const bool selected) {
-	if (width <= 0) return;
+	if (width <= 0) return 0;
+	char duration[16];
+	SbUiCursesTime (duration, sizeof (duration), entry->duration);
+	const bool wraps = SbUiCursesHistoryWraps (entry, width);
+	const int metadataWidth = SbUiCursesTextWidth (duration) + 3;
+	const int albumWidth = wraps ? width - 2 - metadataWidth :
+			SbUiCursesTextWidth (entry->album);
+	const int firstWidth = wraps ? width : width - albumWidth - metadataWidth - 6;
 	const int separatorWidth = width >= 8 ? 3 : 1;
-	const int contentWidth = width - separatorWidth;
+	const int contentWidth = firstWidth - separatorWidth;
 	const int artistWidth = contentWidth > 1 ? contentWidth / 2 : contentWidth;
 	const int trackWidth = contentWidth - artistWidth;
 	if (selected) SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SELECTED,
@@ -551,8 +590,25 @@ static void SbUiCursesHistoryRow (const SbUiCursesData *data,
 	SbUiCursesWPut (window, y, x + artistWidth + separatorWidth,
 			trackWidth, entry->title);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+	const int metadataY = wraps ? y + 1 : y;
+	const int metadataX = wraps ? x + 2 : x + firstWidth + 3;
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesWPut (window, metadataY, metadataX - (wraps ? 0 : 3),
+			wraps ? 0 : 3, " · ");
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
+	SbUiCursesWPut (window, metadataY, metadataX, albumWidth, entry->album);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesWPut (window, metadataY, metadataX + albumWidth, 3, " · ");
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_WARNING, 0);
+	SbUiCursesWPut (window, metadataY, metadataX + albumWidth + 3,
+			metadataWidth - 3, duration);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_WARNING, 0);
 	if (selected) SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SELECTED,
 			A_REVERSE);
+	return wraps ? 2 : 1;
 }
 
 static void SbUiCursesHistory (const SbUiCursesData *data,
@@ -563,11 +619,13 @@ static void SbUiCursesHistory (const SbUiCursesData *data,
 		SbUiCursesPut (y, x, width, "No previous tracks this session");
 		return;
 	}
-	const size_t rows = model->historyCount < (size_t) height ?
-			model->historyCount : (size_t) height;
-	for (size_t i = 0; i < rows; i++) {
-		SbUiCursesHistoryRow (data, stdscr, &model->history[i],
-				y + (int) i, x, width, false);
+	int used = 0;
+	for (size_t i = 0; i < model->historyCount; i++) {
+		const int cost = SbUiCursesHistoryWraps (&model->history[i], width) ? 2 : 1;
+		if (used + cost > height) break;
+		const int rowY = y + used;
+		used += SbUiCursesHistoryRow (data, stdscr, &model->history[i],
+				rowY, x, width, false);
 	}
 }
 
@@ -645,7 +703,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	pthread_mutex_unlock (&data->statusLock);
 	SbUiCursesFooterDraw (data, footerY, 2, cols - 4, footer);
 
-	if (cols >= 100 && rows >= 24) {
+	if (cols >= 80 && rows >= 24) {
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
 		const int nowPlayingHeight = 8;
@@ -968,23 +1026,38 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 		if (window == NULL) continue;
 		int wh, ww;
 		getmaxyx (window, wh, ww);
-		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
+		const int availableRows = wh > 6 ? wh - 6 : 1;
+		const int entryWidth = ww - 10;
 		if (selected < offset) offset = selected;
-		if (selected >= offset + visible) offset = selected - visible + 1;
-		const size_t maxOffset = count > visible ? count - visible : 0;
-		if (offset > maxOffset) offset = maxOffset;
-		for (size_t row = 0; row < visible && offset + row < count; row++) {
+		for (;;) {
+			int selectedRows = 0;
+			for (size_t i = offset; i <= selected; i++) {
+				selectedRows += SbUiCursesHistoryWraps (&model->history[i],
+						entryWidth) ? 2 : 1;
+			}
+			if (selectedRows <= availableRows || offset == selected) break;
+			offset++;
+		}
+		int usedRows = 0;
+		size_t visible = 0;
+		for (size_t row = 0; offset + row < count; row++) {
+			const size_t index = offset + row;
+			const int cost = SbUiCursesHistoryWraps (&model->history[index],
+					entryWidth) ? 2 : 1;
+			if (usedRows + cost > availableRows) break;
 			char played[8] = "--:--";
 			struct tm local;
-			if (model->history[offset + row].playedAt != (time_t) 0 &&
-					localtime_r (&model->history[offset + row].playedAt, &local) != NULL) {
+			if (model->history[index].playedAt != (time_t) 0 &&
+					localtime_r (&model->history[index].playedAt, &local) != NULL) {
 				strftime (played, sizeof (played), "%H:%M", &local);
 			}
 			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-			SbUiCursesWPut (window, 5 + (int) row, 2, 5, played);
+			SbUiCursesWPut (window, 5 + usedRows, 2, 5, played);
 			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
-			SbUiCursesHistoryRow (data, window, &model->history[offset + row],
-					5 + (int) row, 8, ww - 10, offset + row == selected);
+			const int rowY = 5 + usedRows;
+			usedRows += SbUiCursesHistoryRow (data, window, &model->history[index],
+					rowY, 8, entryWidth, index == selected);
+			visible++;
 		}
 		wrefresh (window);
 		const int key = wgetch (window);
@@ -1109,6 +1182,21 @@ static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
 	SbUiCursesFrame (renderer, model);
 }
 
+static bool SbUiCursesNormalizeNumericInput (const int key,
+		const int *sequence, const size_t sequenceLength, char *digit) {
+	if (key >= '0' && key <= '9') {
+		*digit = (char) key;
+		return true;
+	}
+	/* xterm-compatible application keypad: ESC O p through ESC O y. */
+	if (key == 27 && sequenceLength == 2 && sequence[0] == 'O' &&
+			sequence[1] >= 'p' && sequence[1] <= 'y') {
+		*digit = (char) ('0' + sequence[1] - 'p');
+		return true;
+	}
+	return false;
+}
+
 static void SbUiCursesJump (SbUiRenderer *renderer, const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	char digits[16] = "";
@@ -1124,23 +1212,80 @@ static void SbUiCursesJump (SbUiRenderer *renderer, const SbUiModel *model) {
 			clearok (stdscr, TRUE);
 			continue;
 		}
-		if (key == 27) break;
+		if (key == 27) {
+			/* Some macOS terminals emit application-keypad digits as ESC O p..y,
+			 * even when the terminfo entry does not teach ncurses those strings.
+			 * Consume the whole sequence here so none of it can become a normal
+			 * application command.  A bare Esc remains cancel. */
+			int sequence[8];
+			size_t sequenceLength = 0;
+			wtimeout (stdscr, 35);
+			while (sequenceLength < sizeof (sequence) / sizeof (sequence[0])) {
+				const int next = getch ();
+				if (next == ERR) break;
+				sequence[sequenceLength++] = next;
+				char digit;
+				if (SbUiCursesNormalizeNumericInput (key, sequence,
+						sequenceLength, &digit)) break;
+			}
+			wtimeout (stdscr, 1000);
+			if (sequenceLength == 0) {
+				tuiDebugPrint ("jump_input code=27 class=cancel length=%zu value=%s\n",
+						strlen (digits), digits);
+				break;
+			}
+			char digit;
+			if (SbUiCursesNormalizeNumericInput (key, sequence, sequenceLength,
+					&digit)) {
+				const size_t length = strlen (digits);
+				if (length + 1 < sizeof (digits)) {
+					digits[length] = digit;
+					digits[length + 1] = '\0';
+				}
+				tuiDebugPrint ("jump_input code=27 sequence=O%c class=digit digit=%c length=%zu value=%s\n",
+						sequence[1], digit, strlen (digits), digits);
+			} else {
+				tuiDebugPrint ("jump_input code=27 class=ignored-special sequence_length=%zu length=%zu value=%s\n",
+						sequenceLength, strlen (digits), digits);
+			}
+			continue;
+		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
-			const unsigned long target = strtoul (digits, NULL, 10);
-			if (target > 0 && target <= data->browser.visibleCount) {
-				data->selectedIndex = (size_t) target - 1;
+			size_t target = 0;
+			bool valid = digits[0] != '\0';
+			for (const char *p = digits; valid && *p != '\0'; p++) {
+				const unsigned int digit = (unsigned int) (*p - '0');
+				if (target > (SIZE_MAX - digit) / 10) valid = false;
+				else target = target * 10 + digit;
+			}
+			if (valid && target > 0 && target <= data->browser.visibleCount) {
+				data->selectedIndex = target - 1;
 				SbUiCursesLocalNotice (data, "Station selected");
 			} else {
 				SbUiCursesLocalNotice (data, "Station number is out of range");
 			}
+			tuiDebugPrint ("jump_input code=%d class=confirm valid=%s length=%zu value=%s\n",
+					key, valid ? "yes" : "no", strlen (digits), digits);
 			break;
 		}
 		const size_t length = strlen (digits);
-		if ((key == KEY_BACKSPACE || key == 127 || key == 8) && length > 0) {
+		if ((key == KEY_BACKSPACE || key == KEY_DC || key == 127 || key == 8) &&
+				length > 0) {
 			digits[length - 1] = '\0';
-		} else if (key >= '0' && key <= '9' && length + 1 < sizeof (digits)) {
-			digits[length] = (char) key;
+			tuiDebugPrint ("jump_input code=%d class=backspace length=%zu value=%s\n",
+					key, strlen (digits), digits);
+		} else {
+			char digit;
+			if (SbUiCursesNormalizeNumericInput (key, NULL, 0, &digit) &&
+					length + 1 < sizeof (digits)) {
+			digits[length] = digit;
 			digits[length + 1] = '\0';
+			tuiDebugPrint ("jump_input code=%d class=digit length=%zu value=%s\n",
+					key, strlen (digits), digits);
+			} else {
+			tuiDebugPrint ("jump_input code=%d class=ignored-special length=%zu value=%s\n",
+					key, length, digits);
+			}
 		}
 	}
 	data->jumpMode = false;

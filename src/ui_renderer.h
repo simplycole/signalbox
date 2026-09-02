@@ -32,6 +32,7 @@ typedef struct {
 	char title[SB_UI_HISTORY_TEXT_MAX];
 	char album[SB_UI_HISTORY_TEXT_MAX];
 	char station[SB_UI_HISTORY_TEXT_MAX];
+	unsigned int duration;
 	PianoSongRating_t rating;
 	time_t playedAt;
 } SbUiHistoryEntry;

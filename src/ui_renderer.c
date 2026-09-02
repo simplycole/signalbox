@@ -57,6 +57,7 @@ static void SbUiModelRememberSong (SbUiModel *model) {
 			model->songStation : model->station;
 	SbUiModelCopyText (entry->station, sizeof (entry->station),
 			station != NULL ? station->name : NULL);
+	entry->duration = model->duration != 0 ? model->duration : model->song->length;
 	entry->rating = model->song->rating;
 	entry->playedAt = time (NULL);
 	model->historyCount++;

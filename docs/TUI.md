@@ -227,11 +227,12 @@ while keeping quit/playback controls usable.
 
 Suggested breakpoints, to tune after prototypes:
 
-- **Large (about 100+ columns, 24+ rows):** stations left; a usable eight-row
+- **Large (80+ columns, 24+ rows):** stations left; a usable eight-row
   now-playing block right; RECENT receives the remaining right-column rows and
-  grows naturally as terminal height increases.
-- **Medium (about 70–99 columns):** station/now-playing split; collapse history
-  to a count or overlay; shorten secondary metadata.
+  grows naturally as terminal height increases. History entries prefer one
+  artist/track/album/duration line and wrap metadata only when width requires.
+- **Medium (80+ columns, 20–23 rows):** station/now-playing split; hide RECENT
+  when its complete entries would squeeze the eight-row now-playing minimum.
 - **Small:** one switchable station or now-playing pane; one-line progress and
   status; remove decoration before information.
 
@@ -435,7 +436,9 @@ and output-free headless startup without a TTY.
     The header reports count and sort mode. `f` toggles ID-based local
     favorites, `/` edits an incremental substring filter, and `#` selects a
     one-based row in the current sorted/filtered view. Jump mode alone adds a
-    temporary number overlay; `G` remains Genres. `*` in the first marker column means active,
+    temporary number overlay, accepts number-row and xterm application-keypad
+    digits, and safely ignores keypad navigation or unsupported sequences;
+    `G` remains Genres. `*` in the first marker column means active,
     `*` in the second means favorite, and reverse video means selected, so
     monochrome and `NO_COLOR` remain understandable. Recent-activation sorting
     is deferred because no persistent usage history currently exists.
