@@ -531,6 +531,7 @@ int main (int argc, char **argv) {
 			tuiTheme)) {
 		fputs ("signalbox: unable to initialize ncursesw\n", stderr);
 		SbUiRendererSetActive (NULL);
+		SbUiModelDestroy (&app.uiModel);
 		BarSettingsDestroy (&app.settings);
 		BarPlayerDestroy (&app.player);
 		BarTermRestore ();
@@ -549,6 +550,7 @@ int main (int argc, char **argv) {
 				" %s\n", PianoErrorToStr (pret));
 		SbUiRendererShutdown (&app.uiRenderer);
 		SbUiRendererSetActive (NULL);
+		SbUiModelDestroy (&app.uiModel);
 		BarSettingsDestroy (&app.settings);
 		BarPlayerDestroy (&app.player);
 		BarTermRestore ();
@@ -615,6 +617,7 @@ int main (int argc, char **argv) {
 	BarPlayerDestroy (&app.player);
 	SbUiRendererShutdown (&app.uiRenderer);
 	SbUiRendererSetActive (NULL);
+	SbUiModelDestroy (&app.uiModel);
 	BarSettingsDestroy (&app.settings);
 
 	/* restore terminal attributes, zsh doesn't need this, bash does... */

@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdint.h>
+#include <time.h>
 
 #include <piano.h>
 
@@ -23,7 +24,6 @@ typedef enum {
 } SbUiActivityState;
 
 enum {
-	SB_UI_HISTORY_MAX = 10,
 	SB_UI_HISTORY_TEXT_MAX = 128,
 };
 
@@ -33,6 +33,7 @@ typedef struct {
 	char album[SB_UI_HISTORY_TEXT_MAX];
 	char station[SB_UI_HISTORY_TEXT_MAX];
 	PianoSongRating_t rating;
+	time_t playedAt;
 } SbUiHistoryEntry;
 
 /* Renderer-facing view state. Canonical Piano objects remain owned by BarApp_t;
@@ -52,8 +53,9 @@ typedef struct {
 	 * the player and is deliberately not presented as user volume. */
 	int volumeDb;
 	/* Owned display snapshots, newest first. These never borrow song pointers. */
-	SbUiHistoryEntry history[SB_UI_HISTORY_MAX];
+	SbUiHistoryEntry *history;
 	size_t historyCount;
+	size_t historyCapacity;
 	uint64_t generation;
 	/* Changes only when the canonical station collection is refreshed. */
 	uint64_t stationsGeneration;
@@ -90,6 +92,7 @@ struct SbUiRenderer {
 };
 
 void SbUiModelInit (SbUiModel *);
+void SbUiModelDestroy (SbUiModel *);
 void SbUiModelSetStations (SbUiModel *, const PianoStation_t *);
 void SbUiModelSetStation (SbUiModel *, const PianoStation_t *);
 void SbUiModelSetSong (SbUiModel *, const PianoSong_t *,
@@ -108,6 +111,7 @@ bool SbUiRendererConfirm (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *);
 int SbUiRendererSelectList (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *const *, size_t);
+int SbUiRendererSelectHistory (SbUiRenderer *, const SbUiModel *);
 bool SbUiRendererToggleList (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *const *, bool *, size_t);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);

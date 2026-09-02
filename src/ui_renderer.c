@@ -2,7 +2,9 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "debug.h"
 #include "ui.h"
@@ -27,11 +29,23 @@ static void SbUiModelRememberSong (SbUiModel *model) {
 	if (model->song == NULL) {
 		return;
 	}
-	const size_t moveCount = model->historyCount < SB_UI_HISTORY_MAX ?
-			model->historyCount : SB_UI_HISTORY_MAX - 1;
-	if (moveCount > 0) {
+	if (model->historyCount == model->historyCapacity) {
+		if (model->historyCapacity > SIZE_MAX / 2 / sizeof (*model->history)) {
+			return;
+		}
+		const size_t capacity = model->historyCapacity == 0 ? 16 :
+				model->historyCapacity * 2;
+		SbUiHistoryEntry *history = realloc (model->history,
+				capacity * sizeof (*history));
+		if (history == NULL) {
+			return;
+		}
+		model->history = history;
+		model->historyCapacity = capacity;
+	}
+	if (model->historyCount > 0) {
 		memmove (&model->history[1], &model->history[0],
-				moveCount * sizeof (model->history[0]));
+				model->historyCount * sizeof (model->history[0]));
 	}
 	SbUiHistoryEntry * const entry = &model->history[0];
 	memset (entry, 0, sizeof (*entry));
@@ -44,9 +58,16 @@ static void SbUiModelRememberSong (SbUiModel *model) {
 	SbUiModelCopyText (entry->station, sizeof (entry->station),
 			station != NULL ? station->name : NULL);
 	entry->rating = model->song->rating;
-	if (model->historyCount < SB_UI_HISTORY_MAX) {
-		model->historyCount++;
-	}
+	entry->playedAt = time (NULL);
+	model->historyCount++;
+}
+
+void SbUiModelDestroy (SbUiModel *model) {
+	assert (model != NULL);
+	free (model->history);
+	model->history = NULL;
+	model->historyCount = 0;
+	model->historyCapacity = 0;
 }
 
 void SbUiModelInit (SbUiModel *model) {

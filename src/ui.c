@@ -801,6 +801,7 @@ void BarUiPrintStation (const BarSettings_t *settings,
 	SbUiModelSetStation (&model, station);
 	SbUiRendererRender (&renderer, &model, SB_UI_RENDER_STATION);
 	SbUiRendererShutdown (&renderer);
+	SbUiModelDestroy (&model);
 }
 
 static const char *ratingToIcon (const BarSettings_t * const settings,
@@ -834,6 +835,7 @@ void BarUiPrintSong (const BarSettings_t *settings,
 	SbUiModelSetSong (&model, song, station);
 	SbUiRendererRender (&renderer, &model, SB_UI_RENDER_SONG);
 	SbUiRendererShutdown (&renderer);
+	SbUiModelDestroy (&model);
 }
 
 /*	Print list of songs
@@ -1055,8 +1057,9 @@ void BarUiHistoryPrepend (BarApp_t *app, PianoSong_t *song) {
 	/* make sure it's a single song */
 	assert (PianoListNextP (song) == NULL);
 
-	if (app->settings.history != 0) {
+	if (app->useTui || app->settings.history != 0) {
 		app->songHistory = PianoListPrependP (app->songHistory, song);
+		if (app->useTui) return;
 		PianoSong_t *del;
 		do {
 			del = PianoListGetP (app->songHistory, app->settings.history);

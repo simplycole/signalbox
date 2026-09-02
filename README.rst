@@ -132,9 +132,13 @@ it exits with a concise error instead of initializing curses otherwise. The
 shell opens immediately; credential prompts temporarily restore classic mode.
 The shell shows the real station list, distinct selected and active stations,
 artist/title/album/station metadata, rating, signed-dB software volume,
-playback state and adaptive progress, transient status notices, and up to ten
-recent tracks from the current session. History is shown only when the terminal
-has room. Navigate with arrows or ``j``/``k``, press Enter to tune, and use the
+playback state and adaptive progress, transient status notices, and a RECENT
+view that expands to show as many previous tracks as the terminal height allows.
+Its count is the total full-session history, not a display cap. Press ``h`` for
+the newest-first session-history modal; navigate it with arrows or ``j``/``k``,
+Page Up/Page Down, and Home/End, then press Enter for the existing song actions
+or Esc to close it. History is held only in memory and clears when Signalbox
+exits. Navigate stations with arrows or ``j``/``k``, press Enter to tune, and use the
 configured keys for create, rename, delete, pause/resume, next, love, ban,
 volume down/up/reset, help, and quit. Native management includes create/search,
 add-music search, QuickMix membership, genre browsing, shared-station IDs,
@@ -151,8 +155,9 @@ Pandora's canonical order. Press ``z`` to cycle A-Z, favorites-first A-Z, and
 original/Pandora order; the compact pane header shows the station count and
 current mode. Press ``f`` to toggle a selected station as a Signalbox-local
 favorite, ``/`` for an incremental case-insensitive substring filter, and
-``G`` to jump to a one-based row in the current sorted and filtered view.
+``#`` to jump to a one-based row in the current sorted and filtered view.
 Jump mode temporarily shows row numbers; normal browsing never does.
+``G`` remains the configured Genres command.
 
 On first run, enter Pandora credentials when prompted. TUI mode starts with the
 autostart station, or the first available station when none is configured.

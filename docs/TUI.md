@@ -92,8 +92,10 @@ renderer-facing projection containing borrowed current-station/current-song
 references, the optional real song station used by QuickMix formatting,
 elapsed/duration, playback state, signed-dB software volume, and a generation
 counter. Pandora and player structures remain canonical. The exception is a
-bounded ten-row recent-history projection whose strings are copied when a song
-transitions away, avoiding pointers into objects with independent lifetimes.
+dynamically grown, newest-first session-history projection whose bounded
+artist, title, album, and station strings are copied when a song transitions
+away, avoiding pointers into objects with independent lifetimes. It lasts only
+for the process lifetime and is freed at shutdown.
 
 Phase C2 also borrows the canonical station-list head. The synchronous main
 loop owns and serializes that list's lifetime; the renderer only traverses it
@@ -193,7 +195,7 @@ and outstanding operations. It remains usable without a UI.
 
 The TUI model is a safe snapshot/projection with stable IDs and display strings
 for stations and tracks; elapsed/duration, playback, volume, and rating state;
-connection/activity and structured notices; bounded history/upcoming rows;
+connection/activity and structured notices; session history/upcoming rows;
 selected station, scroll positions, focus, overlay and prompt state; terminal
 size, layout, capabilities and theme; and dirty categories or a generation.
 
@@ -225,8 +227,9 @@ while keeping quit/playback controls usable.
 
 Suggested breakpoints, to tune after prototypes:
 
-- **Large (about 100+ columns, 28+ rows):** stations left; now playing right;
-  history/upcoming and status below.
+- **Large (about 100+ columns, 24+ rows):** stations left; a usable eight-row
+  now-playing block right; RECENT receives the remaining right-column rows and
+  grows naturally as terminal height increases.
 - **Medium (about 70–99 columns):** station/now-playing split; collapse history
   to a count or overlay; shorten secondary metadata.
 - **Small:** one switchable station or now-playing pane; one-line progress and
@@ -397,7 +400,7 @@ and output-free headless startup without a TTY.
 3. **Application actions:** move service/player mutations and validation out of
    `BarUiAct*`; represent nested prompts as explicit states.
 4. **UI model (C2 projection complete):** borrowed current state is augmented
-   by scalar playback/volume state and owned bounded history display rows.
+   by scalar playback/volume state and dynamically owned session-history rows.
 5. **Mode lifecycle:** define TUI/classic/headless selection; establish true
    non-interactive startup before curses becomes default.
 6. **ncursesw skeleton (complete):** opt-in alternate-screen lifecycle,
@@ -408,9 +411,13 @@ and output-free headless startup without a TTY.
    responsive layout, and direct Enter activation.
 8. **Now playing (complete):** metadata, playback/rating, signed-dB volume,
    wide-aware truncation, and timed adaptive progress.
-9. **History/notices/help (complete):** bounded history, timed status/error
-   notices, configured help, and request retry/recovery presentation are
-   complete, including a read-only upcoming-track modal over the existing queue.
+9. **History/notices/help (complete):** full-session in-memory history, a
+   height-responsive RECENT projection, timed status/error notices, configured
+   help, and request retry/recovery presentation are complete, including a
+   read-only upcoming-track modal over the existing queue. The newest-first
+   history modal supports arrows/j/k, Page Up/Page Down, Home/End, resize, and
+   Esc; Enter preserves the existing historical-song actions. No history is
+   persisted yet.
 10. **Prompts/themes/accessibility (C3 complete):** bounded wide-character text
     entry, destructive confirmation, search-result selection, phosphor/amber/
     mono/neutral palettes, and `NO_COLOR`. Selection and severity retain text
@@ -426,9 +433,9 @@ and output-free headless startup without a TTY.
 12. **Large station libraries (C5 complete):** the TUI defaults to A-Z view
     order and cycles through original, A-Z, and favorites-first A-Z with `z`.
     The header reports count and sort mode. `f` toggles ID-based local
-    favorites, `/` edits an incremental substring filter, and `G` selects a
+    favorites, `/` edits an incremental substring filter, and `#` selects a
     one-based row in the current sorted/filtered view. Jump mode alone adds a
-    temporary number overlay. `*` in the first marker column means active,
+    temporary number overlay; `G` remains Genres. `*` in the first marker column means active,
     `*` in the second means favorite, and reverse video means selected, so
     monochrome and `NO_COLOR` remain understandable. Recent-activation sorting
     is deferred because no persistent usage history currently exists.

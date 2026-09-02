@@ -139,6 +139,39 @@ static void SbUiCursesPut (const int y, const int x, const int width,
 	mvaddnwstr (y, x, wide, (int) keep);
 }
 
+static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
+		const int width, const char *text) {
+	if (width <= 0) return;
+	const char *source = SbUiCursesText (text);
+	wchar_t wide[512];
+	mbstate_t state;
+	memset (&state, 0, sizeof (state));
+	const size_t converted = mbsrtowcs (wide, &source,
+			(sizeof (wide) / sizeof (*wide)) - 1, &state);
+	if (converted == (size_t) -1) {
+		mvwaddnstr (window, y, x, text != NULL ? text : "--", width);
+		return;
+	}
+	wide[converted] = L'\0';
+	int cells = 0;
+	size_t keep = 0;
+	while (keep < converted) {
+		const int charWidth = wcwidth (wide[keep]);
+		if (charWidth < 0 || cells + charWidth > width) break;
+		cells += charWidth;
+		keep++;
+	}
+	if (keep < converted && width >= 2) {
+		while (keep > 0 && cells > width - 1) {
+			const int charWidth = wcwidth (wide[--keep]);
+			if (charWidth > 0) cells -= charWidth;
+		}
+		wide[keep++] = L'\u2026';
+	}
+	wide[keep] = L'\0';
+	mvwaddnwstr (window, y, x, wide, (int) keep);
+}
+
 static void SbUiCursesTime (char *dest, const size_t size,
 		const unsigned int seconds) {
 	if (seconds >= 3600) {
@@ -497,7 +530,33 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 	}
 }
 
-static void SbUiCursesHistory (const SbUiModel *model, const int y,
+static void SbUiCursesHistoryRow (const SbUiCursesData *data,
+		WINDOW *window, const SbUiHistoryEntry *entry, const int y,
+		const int x, const int width, const bool selected) {
+	if (width <= 0) return;
+	const int separatorWidth = width >= 8 ? 3 : 1;
+	const int contentWidth = width - separatorWidth;
+	const int artistWidth = contentWidth > 1 ? contentWidth / 2 : contentWidth;
+	const int trackWidth = contentWidth - artistWidth;
+	if (selected) SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SELECTED,
+			A_REVERSE);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+	SbUiCursesWPut (window, y, x, artistWidth, entry->artist);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesWPut (window, y, x + artistWidth, separatorWidth,
+			separatorWidth == 3 ? " — " : "-");
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+	SbUiCursesWPut (window, y, x + artistWidth + separatorWidth,
+			trackWidth, entry->title);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+	if (selected) SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SELECTED,
+			A_REVERSE);
+}
+
+static void SbUiCursesHistory (const SbUiCursesData *data,
+		const SbUiModel *model, const int y,
 		const int x, const int height, const int width) {
 	if (height <= 0) return;
 	if (model->historyCount == 0) {
@@ -507,10 +566,8 @@ static void SbUiCursesHistory (const SbUiModel *model, const int y,
 	const size_t rows = model->historyCount < (size_t) height ?
 			model->historyCount : (size_t) height;
 	for (size_t i = 0; i < rows; i++) {
-		char line[SB_UI_HISTORY_TEXT_MAX * 2 + 8];
-		snprintf (line, sizeof (line), "%s — %s", model->history[i].artist,
-				model->history[i].title);
-		SbUiCursesPut (y + (int) i, x, width, line);
+		SbUiCursesHistoryRow (data, stdscr, &model->history[i],
+				y + (int) i, x, width, false);
 	}
 }
 
@@ -591,18 +648,22 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (cols >= 100 && rows >= 24) {
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
-		const int historyY = statusY - 5;
+		const int nowPlayingHeight = 8;
+		const int historyY = 6 + nowPlayingHeight + 1;
 		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesStationHeader (data, 4, 2, split - 3);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
-		SbUiCursesPut (historyY, split + 2, cols - split - 4, "RECENT");
+		char historyTitle[64];
+		snprintf (historyTitle, sizeof (historyTitle), "RECENT %zu",
+				model->historyCount);
+		SbUiCursesPut (historyY, split + 2, cols - split - 4, historyTitle);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
 		const int rightWidth = cols - rightX - 2;
-		SbUiCursesNowPlaying (data, model, 6, rightX, historyY - 8, rightWidth);
-		SbUiCursesHistory (model, historyY + 1, rightX,
+		SbUiCursesNowPlaying (data, model, 6, rightX, nowPlayingHeight, rightWidth);
+		SbUiCursesHistory (data, model, historyY + 1, rightX,
 				statusY - historyY - 2, rightWidth);
 	} else if (cols >= 80 && rows >= 20) {
 		const int split = cols / 3;
@@ -679,7 +740,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					{"rename", "delete", "QuickMix", "manage"};
 			SbUiCursesHelpCommands (help, data, 8, stationKeys2,
 					stationDescriptions2, 4, width);
-			const char stationKeys3[] = {'z', 'f', '/', 'G'};
+			const char stationKeys3[] = {'z', 'f', '/', '#'};
 			const char *const stationDescriptions3[] =
 					{"sort", "favorite", "filter", "jump"};
 			SbUiCursesHelpCommands (help, data, 9, stationKeys3,
@@ -878,7 +939,67 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
 		else if (key == KEY_HOME) selected = 0;
 		else if (key == KEY_END) selected = count - 1;
+		else if (key == KEY_PPAGE) selected = selected > visible ?
+				selected - visible : 0;
+		else if (key == KEY_NPAGE) selected = selected + visible < count ?
+				selected + visible : count - 1;
 		else if (key == '\n' || key == '\r' || key == KEY_ENTER) return (int) selected;
+	}
+}
+
+int SbUiRendererSelectHistory (SbUiRenderer *renderer,
+		const SbUiModel *model) {
+	if (!SbUiRendererIsCurses (renderer) || model->historyCount == 0) return -1;
+	/* The main event loop is paused while this modal is active, so its count is
+	 * a stable snapshot even though resize events rebuild the window. */
+	const size_t count = model->historyCount;
+	size_t selected = 0, offset = 0;
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		int rows, cols;
+		getmaxyx (stdscr, rows, cols);
+		const int height = rows < 28 ? rows - 2 : 26;
+		SbUiCursesData * const data = renderer->data;
+		char title[80];
+		snprintf (title, sizeof (title), "SESSION HISTORY  %zu tracks", count);
+		WINDOW *window = SbUiCursesModal (data, title,
+				"Arrows/j/k, PgUp/PgDn, Home/End; Enter selects; Esc closes",
+				height);
+		if (window == NULL) continue;
+		int wh, ww;
+		getmaxyx (window, wh, ww);
+		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
+		if (selected < offset) offset = selected;
+		if (selected >= offset + visible) offset = selected - visible + 1;
+		const size_t maxOffset = count > visible ? count - visible : 0;
+		if (offset > maxOffset) offset = maxOffset;
+		for (size_t row = 0; row < visible && offset + row < count; row++) {
+			char played[8] = "--:--";
+			struct tm local;
+			if (model->history[offset + row].playedAt != (time_t) 0 &&
+					localtime_r (&model->history[offset + row].playedAt, &local) != NULL) {
+				strftime (played, sizeof (played), "%H:%M", &local);
+			}
+			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+			SbUiCursesWPut (window, 5 + (int) row, 2, 5, played);
+			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+			SbUiCursesHistoryRow (data, window, &model->history[offset + row],
+					5 + (int) row, 8, ww - 10, offset + row == selected);
+		}
+		wrefresh (window);
+		const int key = wgetch (window);
+		delwin (window);
+		if (key == 27) return -1;
+		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
+		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
+		else if (key == KEY_HOME) selected = 0;
+		else if (key == KEY_END) selected = count - 1;
+		else if (key == KEY_PPAGE) selected = selected > visible ?
+				selected - visible : 0;
+		else if (key == KEY_NPAGE) selected = selected + visible < count ?
+				selected + visible : count - 1;
+		else if (key == '\n' || key == '\r' || key == KEY_ENTER)
+			return (int) selected;
 	}
 }
 
@@ -1078,7 +1199,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		SbUiCursesFilter (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
-	if (!data->helpVisible && key == 'G') {
+	if (!data->helpVisible && key == '#') {
 		SbUiCursesJump (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}

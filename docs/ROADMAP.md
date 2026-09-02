@@ -45,7 +45,9 @@ plans, not promises of a date or release.
   ban, and quit controls through named commands.
 - [x] Add now-playing metadata, playback/rating state, volume, and low-frequency
   progress updates.
-- [x] Present bounded session history, expiring status/error notices,
+- [x] Present full-session in-memory history, a height-responsive semantic
+  RECENT view, and a newest-first scrollable history modal with preserved song
+  actions. History is session-only and is freed rather than persisted. Add expiring status/error notices,
   request retry/recovery state, and configured key help. Upcoming tracks remain
   deferred.
 - [x] Add native TUI create/search, rename, and delete prompts with bounded
@@ -62,7 +64,8 @@ plans, not promises of a date or release.
 - [x] Add the C5 large-library station view: default A-Z, original and
   favorites-first modes, local ID-based favorites, incremental filtering,
   compact count/sort headers, and numeric jump with temporary row numbers.
-  Recent-activation ordering remains deferred.
+  Numeric jump uses `#`; `G` remains Genres. Recent-activation ordering remains
+  deferred.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and

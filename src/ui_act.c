@@ -837,9 +837,14 @@ BarUiActCallback(BarUiActHistory) {
 	PianoSong_t *histSong;
 
 	if (app->songHistory != NULL) {
-		histSong = app->useTui ?
-				BarUiTuiSelectSong (app, app->songHistory, "SONG HISTORY") :
-				BarUiSelectSong (app, app->songHistory, &app->input);
+		if (app->useTui) {
+			const int selected = SbUiRendererSelectHistory (&app->uiRenderer,
+					&app->uiModel);
+			histSong = selected >= 0 ? PianoListGetP (app->songHistory,
+					(size_t) selected) : NULL;
+		} else {
+			histSong = BarUiSelectSong (app, app->songHistory, &app->input);
+		}
 		if (histSong != NULL) {
 			SbUiCommand command;
 			PianoStation_t *songStation = PianoFindStationById (app->ph.stations,
@@ -882,7 +887,8 @@ BarUiActCallback(BarUiActHistory) {
 			} while (command == SB_UI_CMD_HELP);
 		} /* end if histSong != NULL */
 	} else {
-		BarUiMsg (&app->settings, MSG_INFO, (app->settings.history == 0) ? "History disabled.\n" :
+		BarUiMsg (&app->settings, MSG_INFO,
+				(!app->useTui && app->settings.history == 0) ? "History disabled.\n" :
 				"No history yet.\n");
 	}
 }

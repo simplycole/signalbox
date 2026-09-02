@@ -62,8 +62,10 @@ call sites are migrated incrementally.
 canonical station list and current `PianoStation_t` and `PianoSong_t` objects
 owned by the application, and stores the small playback projection needed
 to render progress: duration, elapsed time, playing/paused state, and signed-dB
-software volume. Ten owned, bounded recent-track display rows are copied when
-the current song transitions away, avoiding dangling libpiano pointers. A monotonically
+software volume. A dynamically grown, newest-first session-history array copies
+bounded artist, title, album, and station strings plus rating and transition
+time when the current song transitions away, avoiding dangling libpiano
+pointers. It has no small track cap and is freed at shutdown. A monotonically
 increasing generation records updates for a future invalidation-driven
 renderer. It does not own or copy Pandora lists or objects. The synchronous
 main loop serializes their lifetime; renderer-local selection and scrolling do
@@ -96,6 +98,11 @@ jump addresses the resulting one-based visible view. A-Z comparison is
 case-insensitive, then uses exact name, stable station ID, and original
 position as deterministic tie-breakers. Renderer selection remains a view
 index while active station identity remains the canonical pointer.
+
+In TUI mode the canonical `PianoSong_t` history is also retained for the full
+process lifetime so historical info, station creation, and bookmark actions
+continue to operate. Classic mode retains its configured bounded-history
+behavior. Neither representation is persisted; both are destroyed at shutdown.
 
 Favorites are keyed only by Pandora station ID and stored in
 `$XDG_CONFIG_HOME/signalbox/favorites` by writing a temporary file and renaming
