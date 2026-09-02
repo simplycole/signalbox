@@ -119,7 +119,13 @@ full-screen interface, use an interactive terminal and run:
    ./signalbox --tui
 
 Choose a palette with ``--theme phosphor`` (the default), ``amber``, ``mono``,
-or ``neutral``. Setting ``NO_COLOR`` forces the monochrome presentation.
+or ``neutral``. Themes use semantic colors for UI chrome, station state,
+now-playing metadata, progress, notices, help, and prompts. Phosphor remains a
+green-terminal design with restrained cyan, pink, purple, amber, and red
+accents; amber keeps a warm CRT baseline, while neutral uses an editor-like
+gray baseline. Eight-color terminals receive standard curses colors and
+256-color terminals receive subtle shade refinements. Setting ``NO_COLOR``
+forces the attribute-only monochrome presentation.
 
 The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
 it exits with a concise error instead of initializing curses otherwise. The

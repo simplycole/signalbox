@@ -246,10 +246,26 @@ colors and attributes after capability detection. Initial themes: phosphor
 green, amber, monochrome, modern neutral, and high contrast. Never communicate
 status by color alone.
 
+The curses renderer implements these as a compact semantic palette rather than
+call-site pair numbers. Phosphor is green-dominant, using cyan for artist,
+status, selection accents and keys; pink for track/loved state; purple for
+album; amber for paused/waiting/warnings; and red for errors or destructive
+state. Amber preserves warm chrome and station text with sparing cool accents;
+neutral uses gray/white chrome and editor-like semantic accents. Standard
+eight-color curses colors are the portable baseline. When at least 256 colors
+are reported, a small set of richer xterm-compatible indices refines shades;
+truecolor is neither required nor emitted. Pair allocation is deduplicated and
+degrades role-by-role on terminals with a small ``COLOR_PAIRS`` limit.
+
 Honor `NO_COLOR`, monochrome/high-contrast choices, reduced motion, and
 terminals without color. Disable blink. Provide ASCII-safe symbols and avoid
 ambiguous-width glyphs in aligned content. Classic/headless output remains the
 screen-reader-friendly alternative.
+
+The `mono` theme, `NO_COLOR`, and terminals without color skip decorative color
+pairs entirely. Bold, dim, reverse-video selection, labels, and textual status
+remain, so focus and severity never depend on hue alone. The terminal's default
+background is preferred when curses supports it.
 
 ## Library evaluation
 

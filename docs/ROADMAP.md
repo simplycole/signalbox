@@ -55,8 +55,10 @@ plans, not promises of a date or release.
   station entry, create-from-song and bookmark choices, history actions, and
   station seed/feedback/mode management with destructive confirmations.
 - [x] Add phosphor, amber, monochrome, and neutral themes with `NO_COLOR`
-  degradation and no blink/animation. A dedicated high-contrast theme remains
-  future work.
+  degradation and no blink/animation. Semantic roles now color stations,
+  metadata, progress, status, help, prompts, and footer hints with standard
+  eight-color fallbacks and restrained 256-color refinements. A dedicated
+  high-contrast theme remains future work.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and

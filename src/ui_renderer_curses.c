@@ -25,6 +25,31 @@ typedef enum {
 	SB_UI_NOTICE_ERROR,
 } SbUiNoticeSeverity;
 
+typedef enum {
+	SB_TUI_COLOR_BORDER = 0,
+	SB_TUI_COLOR_TITLE,
+	SB_TUI_COLOR_SECTION,
+	SB_TUI_COLOR_PRIMARY,
+	SB_TUI_COLOR_MUTED,
+	SB_TUI_COLOR_STATION,
+	SB_TUI_COLOR_STATION_ACTIVE,
+	SB_TUI_COLOR_SELECTED,
+	SB_TUI_COLOR_ARTIST,
+	SB_TUI_COLOR_TRACK,
+	SB_TUI_COLOR_ALBUM,
+	SB_TUI_COLOR_PROGRESS_FILLED,
+	SB_TUI_COLOR_STATUS,
+	SB_TUI_COLOR_WARNING,
+	SB_TUI_COLOR_ERROR,
+	SB_TUI_COLOR_LOVED,
+	SB_TUI_COLOR_KEY,
+	SB_TUI_COLOR_COUNT,
+} SbTuiColorRole;
+
+typedef struct {
+	short colors[SB_TUI_COLOR_COUNT];
+} SbTuiPalette;
+
 typedef struct {
 	SCREEN *screen;
 	pthread_mutex_t statusLock;
@@ -33,16 +58,36 @@ typedef struct {
 	time_t statusExpires;
 	bool helpVisible;
 	bool colors;
+	attr_t roleAttrs[SB_TUI_COLOR_COUNT];
 	bool selectionInitialized;
 	size_t selectedIndex;
 	size_t scrollOffset;
 } SbUiCursesData;
 
-enum {
-	SB_TUI_PAIR_ACCENT = 1,
-	SB_TUI_PAIR_ERROR,
-	SB_TUI_PAIR_WARNING,
-};
+static attr_t SbUiCursesRole (const SbUiCursesData *data,
+		const SbTuiColorRole role) {
+	return data->colors ? data->roleAttrs[role] : 0;
+}
+
+static void SbUiCursesAttrOn (const SbUiCursesData *data,
+		const SbTuiColorRole role, const attr_t extra) {
+	attron (SbUiCursesRole (data, role) | extra);
+}
+
+static void SbUiCursesAttrOff (const SbUiCursesData *data,
+		const SbTuiColorRole role, const attr_t extra) {
+	attroff (SbUiCursesRole (data, role) | extra);
+}
+
+static void SbUiCursesWAttrOn (WINDOW *window, const SbUiCursesData *data,
+		const SbTuiColorRole role, const attr_t extra) {
+	wattron (window, SbUiCursesRole (data, role) | extra);
+}
+
+static void SbUiCursesWAttrOff (WINDOW *window, const SbUiCursesData *data,
+		const SbTuiColorRole role, const attr_t extra) {
+	wattroff (window, SbUiCursesRole (data, role) | extra);
+}
 
 static const SbUiRendererOps cursesOps;
 
@@ -131,6 +176,50 @@ static void SbUiCursesFooter (const SbUiRenderer *renderer, char *footer,
 			SbUiCursesKey (renderer, SB_UI_CMD_QUIT));
 }
 
+static void SbUiCursesFooterDraw (const SbUiCursesData *data, const int y,
+		const int x, const int width, const char *footer) {
+	int column = x;
+	const char *part = footer;
+	while (*part != '\0' && column < x + width) {
+		const char *gap = strstr (part, "  ");
+		const size_t length = gap != NULL ? (size_t) (gap - part) : strlen (part);
+		const char *space = memchr (part, ' ', length);
+		const size_t keyLength = space != NULL ? (size_t) (space - part) : length;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_KEY, A_BOLD);
+		mvaddnstr (y, column, part, (int) keyLength);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_KEY, A_BOLD);
+		column += (int) keyLength;
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_PRIMARY, 0);
+		mvaddnstr (y, column, part + keyLength, (int) (length - keyLength));
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_PRIMARY, 0);
+		column += (int) (length - keyLength);
+		if (gap == NULL) break;
+		if (column + 2 <= x + width) mvaddnstr (y, column, "  ", 2);
+		column += 2;
+		part = gap + 2;
+	}
+}
+
+static void SbUiCursesHelpCommands (WINDOW *window,
+		const SbUiCursesData *data, const int y, const char *keys,
+		const char *const *descriptions, const size_t count, const int width) {
+	int x = 2;
+	for (size_t i = 0; i < count && x < width - 2; i++) {
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_KEY, A_BOLD);
+		mvwaddch (window, y, x++, keys[i]);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, A_BOLD);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
+		waddch (window, ' ');
+		waddnstr (window, descriptions[i], width - x - 2);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
+		x += 1 + (int) strlen (descriptions[i]);
+		if (i + 1 < count && x + 3 < width - 2) {
+			waddstr (window, "   ");
+			x += 3;
+		}
+	}
+}
+
 static const char *SbUiCursesRating (const PianoSong_t *song) {
 	if (song == NULL) return "Rating: Neutral";
 	switch (song->rating) {
@@ -201,7 +290,9 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 	const size_t visible = height > 0 ? (size_t) height : 0;
 	SbUiCursesClampSelection (data, model, visible);
 	if (model->stations == NULL) {
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, A_DIM);
 		SbUiCursesPut (y, x, width, "No stations available");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, A_DIM);
 		return;
 	}
 	for (size_t row = 0; row < visible; row++) {
@@ -210,18 +301,24 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 		if (station == NULL) {
 			break;
 		}
-		mvaddch (y + (int) row, x, station == model->station ? '*' : ' ');
+		const bool active = station == model->station;
+		SbUiCursesAttrOn (data, active ? SB_TUI_COLOR_STATION_ACTIVE :
+				SB_TUI_COLOR_STATION, active ? A_BOLD : 0);
+		mvaddch (y + (int) row, x, active ? '*' : ' ');
 		if (index == data->selectedIndex) {
-			attron (A_REVERSE);
+			SbUiCursesAttrOn (data, SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		SbUiCursesPut (y + (int) row, x + 2, width - 2, station->name);
 		if (index == data->selectedIndex) {
-			attroff (A_REVERSE);
+			SbUiCursesAttrOff (data, SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
+		SbUiCursesAttrOff (data, active ? SB_TUI_COLOR_STATION_ACTIVE :
+				SB_TUI_COLOR_STATION, active ? A_BOLD : 0);
 	}
 }
 
-static void SbUiCursesProgress (const SbUiModel *model, const int y,
+static void SbUiCursesProgress (const SbUiCursesData *data,
+		const SbUiModel *model, const int y,
 		const int x, const int width) {
 	char elapsed[16], duration[16];
 	if (model->duration == 0) {
@@ -235,7 +332,9 @@ static void SbUiCursesProgress (const SbUiModel *model, const int y,
 	snprintf (times, sizeof (times), "%s / %s", elapsed, duration);
 	const int timeWidth = (int) strlen (times);
 	if (width < timeWidth + 5) {
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_STATUS, 0);
 		SbUiCursesPut (y, x, width, times);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_STATUS, 0);
 		return;
 	}
 	const int barWidth = width - timeWidth - 3;
@@ -248,10 +347,18 @@ static void SbUiCursesProgress (const SbUiModel *model, const int y,
 			model->duration) : 0;
 	mvaddch (y, x, '[');
 	for (int i = 0; i < barWidth; i++) {
+		SbUiCursesAttrOn (data, (unsigned int) i < filled ?
+				SB_TUI_COLOR_PROGRESS_FILLED : SB_TUI_COLOR_MUTED,
+				(unsigned int) i < filled ? A_BOLD : A_DIM);
 		addch ((unsigned int) i < filled ? '=' : '-');
+		SbUiCursesAttrOff (data, (unsigned int) i < filled ?
+				SB_TUI_COLOR_PROGRESS_FILLED : SB_TUI_COLOR_MUTED,
+				(unsigned int) i < filled ? A_BOLD : A_DIM);
 	}
 	addch (']');
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_STATUS, 0);
 	SbUiCursesPut (y, x + barWidth + 3, timeWidth, times);
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_STATUS, 0);
 }
 
 static const char *SbUiCursesPlayback (const SbUiModel *model) {
@@ -270,36 +377,66 @@ static const char *SbUiCursesActivity (const SbUiModel *model) {
 	}
 }
 
-static void SbUiCursesNowPlaying (const SbUiModel *model, const int y,
+static void SbUiCursesLabelValue (const SbUiCursesData *data, const int y,
+		const int x, const int width, const char *label, const char *value,
+		const SbTuiColorRole valueRole, const attr_t valueAttr) {
+	const int labelWidth = (int) strlen (label);
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
+	mvaddnstr (y, x, label, width);
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
+	if (width > labelWidth) {
+		SbUiCursesAttrOn (data, valueRole, valueAttr);
+		SbUiCursesPut (y, x + labelWidth, width - labelWidth, value);
+		SbUiCursesAttrOff (data, valueRole, valueAttr);
+	}
+}
+
+static void SbUiCursesNowPlaying (const SbUiCursesData *data,
+		const SbUiModel *model, const int y,
 		const int x, const int height, const int width) {
 	if (height <= 0) return;
-	attron (A_BOLD);
-	SbUiCursesPut (y, x, width,
-			model->song != NULL ? model->song->artist : NULL);
-	if (height > 1) SbUiCursesPut (y + 1, x, width,
-			model->song != NULL ? model->song->title : NULL);
-	attroff (A_BOLD);
+	SbUiCursesLabelValue (data, y, x, width, "Artist: ",
+			model->song != NULL ? model->song->artist : NULL,
+			SB_TUI_COLOR_ARTIST, A_BOLD);
+	if (height > 1) SbUiCursesLabelValue (data, y + 1, x, width, "Track: ",
+			model->song != NULL ? model->song->title : NULL,
+			SB_TUI_COLOR_TRACK, A_BOLD);
 	if (height > 2) {
-		char line[320];
-		snprintf (line, sizeof (line), "Album: %s",
-				model->song != NULL ? SbUiCursesText (model->song->album) : "--");
-		SbUiCursesPut (y + 2, x, width, line);
+		SbUiCursesLabelValue (data, y + 2, x, width, "Album: ",
+				model->song != NULL ? model->song->album : NULL,
+				SB_TUI_COLOR_ALBUM, 0);
 	}
 	if (height > 3) {
 		const PianoStation_t * const station = model->songStation != NULL ?
 				model->songStation : model->station;
-		char line[320];
-		snprintf (line, sizeof (line), "Station: %s",
-				station != NULL ? SbUiCursesText (station->name) : "--");
-		SbUiCursesPut (y + 3, x, width, line);
+		SbUiCursesLabelValue (data, y + 3, x, width, "Station: ",
+				station != NULL ? station->name : NULL,
+				SB_TUI_COLOR_STATION_ACTIVE, A_BOLD);
 	}
-	if (height > 5) SbUiCursesProgress (model, y + 5, x, width);
+	if (height > 5) SbUiCursesProgress (data, model, y + 5, x, width);
 	if (height > 6) {
-		char state[128];
-		snprintf (state, sizeof (state), "%s   Volume %+d dB   %s",
-				SbUiCursesPlayback (model), model->volumeDb,
-				SbUiCursesRating (model->song));
-		SbUiCursesPut (y + 6, x, width, state);
+		const SbTuiColorRole playbackRole = model->playback == SB_UI_PLAYBACK_PAUSED ?
+				SB_TUI_COLOR_WARNING : SB_TUI_COLOR_STATUS;
+		SbUiCursesAttrOn (data, playbackRole, A_BOLD);
+		SbUiCursesPut (y + 6, x, width, SbUiCursesPlayback (model));
+		SbUiCursesAttrOff (data, playbackRole, A_BOLD);
+		char volume[40];
+		snprintf (volume, sizeof (volume), "Volume %+d dB", model->volumeDb);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, 0);
+		SbUiCursesPut (y + 6, x + 12, width - 12, volume);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, 0);
+		const char *rating = SbUiCursesRating (model->song);
+		const int ratingX = x + 12 + (int) strlen (volume) + 3;
+		SbTuiColorRole ratingRole = SB_TUI_COLOR_MUTED;
+		if (model->song != NULL && model->song->rating == PIANO_RATE_LOVE)
+			ratingRole = SB_TUI_COLOR_LOVED;
+		else if (model->song != NULL && model->song->rating == PIANO_RATE_BAN)
+			ratingRole = SB_TUI_COLOR_ERROR;
+		if (ratingX < x + width) {
+			SbUiCursesAttrOn (data, ratingRole, 0);
+			SbUiCursesPut (y + 6, ratingX, x + width - ratingX, rating);
+			SbUiCursesAttrOff (data, ratingRole, 0);
+		}
 	}
 }
 
@@ -326,27 +463,35 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
+	attrset (SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
 	char footer[256];
 	SbUiCursesFooter (renderer, footer, sizeof (footer), cols);
 
 	if (rows < 15 || cols < 50) {
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
 		box (stdscr, 0, 0);
-		attron (A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_TITLE, A_BOLD);
 		SbUiCursesPut (2, 3, cols - 6, "SIGNALBOX");
-		attroff (A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_TITLE, A_BOLD);
 		SbUiCursesPut (5, 3, cols - 6,
 				"Terminal too small for Signalbox TUI");
 		mvprintw (7, 3, "Need 50x15; current size is %dx%d", cols, rows);
-		SbUiCursesPut (rows - 2, 3, cols - 6, footer);
+		SbUiCursesFooterDraw (data, rows - 2, 3, cols - 6, footer);
 		refresh ();
 		return;
 	}
 
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
 	box (stdscr, 0, 0);
-	attron (A_BOLD | (data->colors ? COLOR_PAIR (SB_TUI_PAIR_ACCENT) : 0));
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_TITLE, A_BOLD);
 	SbUiCursesPut (1, 2, cols / 2, "SIGNALBOX");
-	attroff (A_BOLD | (data->colors ? COLOR_PAIR (SB_TUI_PAIR_ACCENT) : 0));
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_TITLE, A_BOLD);
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
 	SbUiCursesPut (1, cols - 15, 13, "PANDORA RADIO");
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
 	mvhline (2, 1, ACS_HLINE, cols - 2);
 
 	const int footerY = rows - 2;
@@ -355,10 +500,17 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	const char helpKey = renderer->settings->keys[BAR_KS_HELP];
 	mvhline (statusY - 1, 1, ACS_HLINE, cols - 2);
 	mvhline (footerY - 1, 1, ACS_HLINE, cols - 2);
-	attron (A_BOLD);
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
+	SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 	SbUiCursesPut (statusY, 2, 8, "STATUS");
-	attroff (A_BOLD);
+	SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
+	SbUiCursesAttrOn (data, model->activity == SB_UI_ACTIVITY_ERROR ?
+			SB_TUI_COLOR_ERROR : (model->activity == SB_UI_ACTIVITY_READY ?
+			SB_TUI_COLOR_STATUS : SB_TUI_COLOR_WARNING), A_BOLD);
 	SbUiCursesPut (statusY, 11, 20, SbUiCursesActivity (model));
+	SbUiCursesAttrOff (data, model->activity == SB_UI_ACTIVITY_ERROR ?
+			SB_TUI_COLOR_ERROR : (model->activity == SB_UI_ACTIVITY_READY ?
+			SB_TUI_COLOR_STATUS : SB_TUI_COLOR_WARNING), A_BOLD);
 	pthread_mutex_lock (&data->statusLock);
 	if (data->statusExpires != 0 && time (NULL) >= data->statusExpires) {
 		data->status[0] = '\0';
@@ -366,59 +518,57 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
 			data->status[0] != '\0') {
-		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ?
-				SB_TUI_PAIR_ERROR : SB_TUI_PAIR_WARNING;
-		attron (A_BOLD | (data->colors ? COLOR_PAIR (pair) : 0));
+		SbUiCursesAttrOn (data, data->statusSeverity == SB_UI_NOTICE_ERROR ?
+				SB_TUI_COLOR_ERROR : SB_TUI_COLOR_WARNING, A_BOLD);
 	}
 	SbUiCursesPut (statusY, 32, cols - 34,
 			data->status[0] != '\0' ? data->status : "Ready");
 	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
 			data->status[0] != '\0') {
-		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ?
-				SB_TUI_PAIR_ERROR : SB_TUI_PAIR_WARNING;
-		attroff (A_BOLD | (data->colors ? COLOR_PAIR (pair) : 0));
+		SbUiCursesAttrOff (data, data->statusSeverity == SB_UI_NOTICE_ERROR ?
+				SB_TUI_COLOR_ERROR : SB_TUI_COLOR_WARNING, A_BOLD);
 	}
 	pthread_mutex_unlock (&data->statusLock);
-	SbUiCursesPut (footerY, 2, cols - 4, footer);
+	SbUiCursesFooterDraw (data, footerY, 2, cols - 4, footer);
 
 	if (cols >= 100 && rows >= 24) {
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
 		const int historyY = statusY - 5;
 		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
-		attron (A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (4, 2, split - 3, "STATIONS");
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
 		SbUiCursesPut (historyY, split + 2, cols - split - 4, "RECENT");
-		attroff (A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
 		const int rightWidth = cols - rightX - 2;
-		SbUiCursesNowPlaying (model, 6, rightX, historyY - 8, rightWidth);
+		SbUiCursesNowPlaying (data, model, 6, rightX, historyY - 8, rightWidth);
 		SbUiCursesHistory (model, historyY + 1, rightX,
 				statusY - historyY - 2, rightWidth);
 	} else if (cols >= 80 && rows >= 20) {
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
-		attron (A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (4, 2, split - 3, "STATIONS");
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
-		attroff (A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
-		SbUiCursesNowPlaying (model, 6, split + 2, statusY - 7,
+		SbUiCursesNowPlaying (data, model, 6, split + 2, statusY - 7,
 				cols - split - 4);
 	} else {
-		attron (A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (4, 2, cols - 4, "STATION");
-		attroff (A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		const int stationRows = (statusY - 9) / 2;
 		SbUiCursesStations (data, model, 5, 2, stationRows, cols - 4);
 		const int dividerY = 5 + stationRows;
 		mvhline (dividerY, 1, ACS_HLINE, cols - 2);
-		attron (A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (dividerY + 1, 2, cols - 4, "NOW PLAYING");
-		attroff (A_BOLD);
-		SbUiCursesNowPlaying (model, dividerY + 2, 2,
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesNowPlaying (data, model, dividerY + 2, 2,
 				statusY - dividerY - 3, cols - 4);
 	}
 
@@ -428,38 +578,67 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		WINDOW * const help = newwin (height, width, (rows - height) / 2,
 				(cols - width) / 2);
 		if (help != NULL) {
+			wbkgdset (help, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_BORDER, 0);
 			box (help, 0, 0);
-			wattron (help, A_BOLD);
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_BORDER, 0);
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_TITLE, A_BOLD);
 			mvwaddstr (help, 1, 2, "SIGNALBOX HELP");
-			wattroff (help, A_BOLD);
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_TITLE, A_BOLD);
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 2, 2, "NAVIGATION");
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 3, 2, "Up/Down or j/k select; Enter tunes");
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 4, 2, "PLAYBACK");
-			mvwprintw (help, 5, 2, "%c pause/resume   %c next   %c love   %c ban",
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
+			const char playbackKeys[] = {
 					SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
 					SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
 					SbUiCursesKey (renderer, SB_UI_CMD_LOVE),
-					SbUiCursesKey (renderer, SB_UI_CMD_BAN));
+					SbUiCursesKey (renderer, SB_UI_CMD_BAN)};
+			const char *const playbackDescriptions[] =
+					{"pause/resume", "next", "love", "ban"};
+			SbUiCursesHelpCommands (help, data, 5, playbackKeys,
+					playbackDescriptions, 4, width);
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 6, 2, "STATIONS");
-			mvwprintw (help, 7, 2, "%c create  %c genre  %c shared  %c add music",
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
+			const char stationKeys1[] = {
 					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION),
 					SbUiCursesKey (renderer, SB_UI_CMD_GENRE_STATION),
 					SbUiCursesKey (renderer, SB_UI_CMD_ADD_SHARED),
-					SbUiCursesKey (renderer, SB_UI_CMD_ADD_MUSIC));
-			mvwprintw (help, 8, 2, "%c rename  %c delete  %c QuickMix  %c manage",
+					SbUiCursesKey (renderer, SB_UI_CMD_ADD_MUSIC)};
+			const char *const stationDescriptions1[] =
+					{"create", "genre", "shared", "add music"};
+			SbUiCursesHelpCommands (help, data, 7, stationKeys1,
+					stationDescriptions1, 4, width);
+			const char stationKeys2[] = {
 					SbUiCursesKey (renderer, SB_UI_CMD_RENAME_STATION),
 					SbUiCursesKey (renderer, SB_UI_CMD_DELETE_STATION),
 					SbUiCursesKey (renderer, SB_UI_CMD_SELECT_QUICKMIX),
-					SbUiCursesKey (renderer, SB_UI_CMD_MANAGE_STATION));
+					SbUiCursesKey (renderer, SB_UI_CMD_MANAGE_STATION)};
+			const char *const stationDescriptions2[] =
+					{"rename", "delete", "QuickMix", "manage"};
+			SbUiCursesHelpCommands (help, data, 8, stationKeys2,
+					stationDescriptions2, 4, width);
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 9, 2, "LIBRARY");
-			mvwprintw (help, 10, 2, "%c bookmark  %c from song  %c history  %c upcoming",
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
+			const char libraryKeys[] = {
 					SbUiCursesKey (renderer, SB_UI_CMD_BOOKMARK),
 					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION_FROM_SONG),
 					SbUiCursesKey (renderer, SB_UI_CMD_HISTORY),
-					SbUiCursesKey (renderer, SB_UI_CMD_UPCOMING));
-			mvwprintw (help, 12, 2, "%c quit   %c close help",
-					quitKey != BAR_KS_DISABLED ? quitKey : '-',
-					helpKey != BAR_KS_DISABLED ? helpKey : '-');
+					SbUiCursesKey (renderer, SB_UI_CMD_UPCOMING)};
+			const char *const libraryDescriptions[] =
+					{"bookmark", "from song", "history", "upcoming"};
+			SbUiCursesHelpCommands (help, data, 10, libraryKeys,
+					libraryDescriptions, 4, width);
+			const char closeKeys[] = {quitKey != BAR_KS_DISABLED ? quitKey : '-',
+					helpKey != BAR_KS_DISABLED ? helpKey : '-'};
+			const char *const closeDescriptions[] = {"quit", "close help"};
+			SbUiCursesHelpCommands (help, data, 12, closeKeys,
+					closeDescriptions, 2, width);
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
 			doupdate ();
@@ -470,7 +649,8 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	refresh ();
 }
 
-static WINDOW *SbUiCursesModal (const char *title, const char *prompt,
+static WINDOW *SbUiCursesModal (const SbUiCursesData *data,
+		const char *title, const char *prompt,
 		const int wantedHeight) {
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
@@ -482,11 +662,16 @@ static WINDOW *SbUiCursesModal (const char *title, const char *prompt,
 	if (window != NULL) {
 		tuiDebugPrint ("modal_open title=\"%s\" size=%dx%d\n", title,
 				width, height);
+		wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0);
 		box (window, 0, 0);
-		wattron (window, A_BOLD);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_BORDER, 0);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
 		mvwaddnstr (window, 1, 2, title, width - 4);
-		wattroff (window, A_BOLD);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
 		mvwaddnstr (window, 3, 2, prompt, width - 4);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
 		keypad (window, TRUE);
 		wnoutrefresh (stdscr);
 	}
@@ -508,7 +693,8 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 	(void) curs_set (1);
 	for (;;) {
 		SbUiCursesFrame (renderer, model);
-		WINDOW *window = SbUiCursesModal (title, prompt, 8);
+		SbUiCursesData * const data = renderer->data;
+		WINDOW *window = SbUiCursesModal (data, title, prompt, 8);
 		if (window == NULL) continue;
 		int height, width;
 		getmaxyx (window, height, width);
@@ -518,8 +704,12 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		while (start < cursor && wcswidth (&input[start], cursor - start) > width - 5) {
 			start++;
 		}
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
 		mvwaddnwstr (window, 5, 2, &input[start], width - 5);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_KEY, 0);
 		mvwaddnstr (window, 6, 2, "Enter: submit   Esc: cancel", width - 4);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
 		const int cursorCells = wcswidth (&input[start], cursor - start);
 		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
 		wrefresh (window);
@@ -570,10 +760,15 @@ bool SbUiRendererConfirm (SbUiRenderer *renderer, const SbUiModel *model,
 	bool yes = false;
 	for (;;) {
 		SbUiCursesFrame (renderer, model);
-		WINDOW *window = SbUiCursesModal (title, prompt, 8);
+		SbUiCursesData * const data = renderer->data;
+		WINDOW *window = SbUiCursesModal (data, title, prompt, 8);
 		if (window == NULL) continue;
+		SbUiCursesWAttrOn (window, data, yes ? SB_TUI_COLOR_WARNING :
+				SB_TUI_COLOR_ERROR, A_BOLD);
 		mvwprintw (window, 5, 2, "%s   %s", yes ? "[YES]" : " Yes ",
 				yes ? " No " : "[NO]");
+		SbUiCursesWAttrOff (window, data, yes ? SB_TUI_COLOR_WARNING :
+				SB_TUI_COLOR_ERROR, A_BOLD);
 		mvwaddnstr (window, 6, 2,
 				"y/n or arrows; Enter confirms selection; Esc cancels", getmaxx (window) - 4);
 		wrefresh (window);
@@ -595,7 +790,8 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		int rows, cols;
 		getmaxyx (stdscr, rows, cols);
 		const int height = rows < 22 ? rows - 2 : 20;
-		WINDOW *window = SbUiCursesModal (title,
+		SbUiCursesData * const data = renderer->data;
+		WINDOW *window = SbUiCursesModal (data, title,
 				"Up/Down or j/k; Enter selects; Esc cancels", height);
 		if (window == NULL) continue;
 		int wh, ww;
@@ -604,11 +800,13 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		if (selected < offset) offset = selected;
 		if (selected >= offset + visible) offset = selected - visible + 1;
 		for (size_t row = 0; row < visible && offset + row < count; row++) {
-			if (offset + row == selected) wattron (window, A_REVERSE);
+			if (offset + row == selected) SbUiCursesWAttrOn (window, data,
+					SB_TUI_COLOR_SELECTED, A_REVERSE);
 			const char *item = items[offset + row] != NULL ?
 					items[offset + row] : "(unavailable)";
 			mvwaddnstr (window, 5 + (int) row, 2, item, ww - 4);
-			if (offset + row == selected) wattroff (window, A_REVERSE);
+			if (offset + row == selected) SbUiCursesWAttrOff (window, data,
+					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		wrefresh (window);
 		const int key = wgetch (window);
@@ -636,7 +834,8 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 		int rows, cols;
 		getmaxyx (stdscr, rows, cols);
 		const int height = rows < 22 ? rows - 2 : 20;
-		WINDOW *window = SbUiCursesModal (title,
+		SbUiCursesData * const data = renderer->data;
+		WINDOW *window = SbUiCursesModal (data, title,
 				"Up/Down or j/k; Space toggles; Enter saves; Esc cancels", height);
 		if (window == NULL) continue;
 		int wh, ww;
@@ -646,12 +845,14 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 		if (selected >= offset + visible) offset = selected - visible + 1;
 		for (size_t row = 0; row < visible && offset + row < count; row++) {
 			const size_t index = offset + row;
-			if (index == selected) wattron (window, A_REVERSE);
+			if (index == selected) SbUiCursesWAttrOn (window, data,
+					SB_TUI_COLOR_SELECTED, A_REVERSE);
 			mvwprintw (window, 5 + (int) row, 2, "[%c] ",
 					checked[index] ? 'x' : ' ');
 			mvwaddnstr (window, 5 + (int) row, 6,
 					items[index] != NULL ? items[index] : "(unavailable)", ww - 8);
-			if (index == selected) wattroff (window, A_REVERSE);
+			if (index == selected) SbUiCursesWAttrOff (window, data,
+					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		wrefresh (window);
 		const int key = wgetch (window);
@@ -808,6 +1009,91 @@ static void SbUiCursesShutdown (SbUiRenderer *renderer) {
 	}
 }
 
+static SbTuiPalette SbUiCursesPalette (const SbTuiTheme theme,
+		const bool rich) {
+	SbTuiPalette palette;
+	if (theme == SB_TUI_THEME_AMBER) {
+		palette = (SbTuiPalette) {{COLOR_YELLOW, COLOR_YELLOW, COLOR_YELLOW,
+				COLOR_YELLOW, COLOR_YELLOW, COLOR_YELLOW, COLOR_YELLOW,
+				COLOR_CYAN, COLOR_CYAN, COLOR_MAGENTA, COLOR_MAGENTA,
+				COLOR_YELLOW, COLOR_CYAN, COLOR_YELLOW, COLOR_RED,
+				COLOR_MAGENTA, COLOR_CYAN}};
+		if (rich) {
+			palette.colors[SB_TUI_COLOR_BORDER] = 172;
+			palette.colors[SB_TUI_COLOR_TITLE] = 220;
+			palette.colors[SB_TUI_COLOR_SECTION] = 214;
+			palette.colors[SB_TUI_COLOR_PRIMARY] = 178;
+			palette.colors[SB_TUI_COLOR_MUTED] = 136;
+			palette.colors[SB_TUI_COLOR_STATION] = 178;
+			palette.colors[SB_TUI_COLOR_STATION_ACTIVE] = 220;
+			palette.colors[SB_TUI_COLOR_WARNING] = 214;
+		}
+	} else if (theme == SB_TUI_THEME_NEUTRAL) {
+		palette = (SbTuiPalette) {{COLOR_WHITE, COLOR_CYAN, COLOR_MAGENTA,
+				COLOR_WHITE, COLOR_WHITE, COLOR_WHITE, COLOR_GREEN, COLOR_CYAN,
+				COLOR_CYAN, COLOR_MAGENTA, COLOR_MAGENTA, COLOR_GREEN,
+				COLOR_CYAN, COLOR_YELLOW, COLOR_RED, COLOR_MAGENTA, COLOR_CYAN}};
+		if (rich) {
+			palette.colors[SB_TUI_COLOR_BORDER] = 245;
+			palette.colors[SB_TUI_COLOR_PRIMARY] = 252;
+			palette.colors[SB_TUI_COLOR_MUTED] = 244;
+			palette.colors[SB_TUI_COLOR_ALBUM] = 141;
+			palette.colors[SB_TUI_COLOR_TRACK] = 205;
+		}
+	} else {
+		palette = (SbTuiPalette) {{COLOR_GREEN, COLOR_GREEN, COLOR_GREEN,
+				COLOR_GREEN, COLOR_GREEN, COLOR_GREEN, COLOR_GREEN, COLOR_CYAN,
+				COLOR_CYAN, COLOR_MAGENTA, COLOR_MAGENTA, COLOR_GREEN,
+				COLOR_CYAN, COLOR_YELLOW, COLOR_RED, COLOR_MAGENTA, COLOR_CYAN}};
+		if (rich) {
+			palette.colors[SB_TUI_COLOR_BORDER] = 34;
+			palette.colors[SB_TUI_COLOR_TITLE] = 46;
+			palette.colors[SB_TUI_COLOR_SECTION] = 40;
+			palette.colors[SB_TUI_COLOR_PRIMARY] = 40;
+			palette.colors[SB_TUI_COLOR_MUTED] = 65;
+			palette.colors[SB_TUI_COLOR_STATION] = 40;
+			palette.colors[SB_TUI_COLOR_STATION_ACTIVE] = 46;
+			palette.colors[SB_TUI_COLOR_SELECTED] = 51;
+			palette.colors[SB_TUI_COLOR_ARTIST] = 51;
+			palette.colors[SB_TUI_COLOR_TRACK] = 205;
+			palette.colors[SB_TUI_COLOR_ALBUM] = 141;
+			palette.colors[SB_TUI_COLOR_PROGRESS_FILLED] = 48;
+			palette.colors[SB_TUI_COLOR_STATUS] = 51;
+			palette.colors[SB_TUI_COLOR_WARNING] = 214;
+			palette.colors[SB_TUI_COLOR_LOVED] = 205;
+			palette.colors[SB_TUI_COLOR_KEY] = 51;
+		}
+	}
+	return palette;
+}
+
+static bool SbUiCursesInitPalette (SbUiCursesData *data,
+		const SbTuiTheme theme) {
+	if (start_color () == ERR) return false;
+	short background = COLOR_BLACK;
+#ifdef NCURSES_VERSION
+	if (use_default_colors () == OK) background = -1;
+#endif
+	const SbTuiPalette palette = SbUiCursesPalette (theme, COLORS >= 256);
+	short nextPair = 1;
+	for (int role = 0; role < SB_TUI_COLOR_COUNT; role++) {
+		for (int previous = 0; previous < role; previous++) {
+			if (palette.colors[previous] == palette.colors[role]) {
+				data->roleAttrs[role] = data->roleAttrs[previous];
+				break;
+			}
+		}
+		if (data->roleAttrs[role] != 0) continue;
+		if (nextPair >= COLOR_PAIRS ||
+				init_pair (nextPair, palette.colors[role], background) == ERR) {
+			data->roleAttrs[role] = 0;
+			continue;
+		}
+		data->roleAttrs[role] = COLOR_PAIR (nextPair++);
+	}
+	return nextPair > 1;
+}
+
 static const SbUiRendererOps cursesOps = {
 	.init = SbUiCursesInit,
 	.render = SbUiCursesRender,
@@ -846,16 +1132,7 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	wtimeout (stdscr, 1000);
 	(void) curs_set (0);
 	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
-		start_color ();
-#ifdef NCURSES_VERSION
-		use_default_colors ();
-#endif
-		const short accent = theme == SB_TUI_THEME_AMBER ? COLOR_YELLOW :
-				(theme == SB_TUI_THEME_NEUTRAL ? COLOR_CYAN : COLOR_GREEN);
-		init_pair (SB_TUI_PAIR_ACCENT, accent, -1);
-		init_pair (SB_TUI_PAIR_ERROR, COLOR_RED, -1);
-		init_pair (SB_TUI_PAIR_WARNING, COLOR_YELLOW, -1);
-		data->colors = true;
+		data->colors = SbUiCursesInitPalette (data, theme);
 	}
 	renderer->ops = &cursesOps;
 	renderer->settings = settings;
