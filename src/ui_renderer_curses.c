@@ -113,6 +113,8 @@ static void SbUiCursesWAttrOff (WINDOW *window, const SbUiCursesData *data,
 
 static const SbUiRendererOps cursesOps;
 
+static int SbUiCursesTextWidth (const char *text);
+
 static SbUiNoticeSeverity SbUiCursesNoticeSeverity (const BarUiMsg_t type) {
 	if (type == MSG_ERR) return SB_UI_NOTICE_ERROR;
 	if (type == MSG_QUESTION) return SB_UI_NOTICE_WARNING;
@@ -605,9 +607,32 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 	const bool wide = width >= 69;
 	const size_t bandCount = wide ? SB_SPECTRUM_BANDS : SB_SPECTRUM_COMPACT_BANDS;
 	const int bandPitch = wide ? 6 : 5;
-	const int displayWidth = bandPitch * (int) bandCount - (wide ? 3 : 2);
+	const int barWidth = 3;
+	const int displayWidth = bandPitch * (int) bandCount -
+			(bandPitch - barWidth);
 	const int origin = x + (width > displayWidth ?
 			(width - displayWidth < 12 ? (width - displayWidth) / 2 : 6) : 0);
+	const char *const *labels = wide ? wideLabels : compactLabels;
+	int labelX[SB_SPECTRUM_BANDS];
+	int labelWidth[SB_SPECTRUM_BANDS];
+	for (size_t band = 0; band < bandCount; band++) {
+		const int barX = origin + (int) band * bandPitch;
+		labelWidth[band] = SbUiCursesTextWidth (labels[band]);
+		labelX[band] = barX + (barWidth - labelWidth[band]) / 2;
+		if (labelX[band] < x) labelX[band] = x;
+		if (labelX[band] + labelWidth[band] > x + width)
+			labelX[band] = x + width - labelWidth[band];
+		if (band > 0 && labelX[band] <
+				labelX[band - 1] + labelWidth[band - 1])
+			labelX[band] = labelX[band - 1] + labelWidth[band - 1];
+	}
+	for (size_t band = bandCount; band-- > 0;) {
+		const int rightLimit = band + 1 < bandCount ? labelX[band + 1] :
+				x + width;
+		if (labelX[band] + labelWidth[band] > rightLimit)
+			labelX[band] = rightLimit - labelWidth[band];
+		if (labelX[band] < x) labelX[band] = x;
+	}
 	float levels[SB_SPECTRUM_COMPACT_BANDS], peaks[SB_SPECTRUM_COMPACT_BANDS];
 	if (!wide) {
 		SbSpectrumAggregateCompact (model->spectrum.bands, levels);
@@ -635,7 +660,7 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 				role = SB_TUI_COLOR_TRACK;
 			SbUiCursesAttrOn (data, role, 0);
 			SbUiCursesPut (baseline - bodyRow,
-					origin + (int) band * bandPitch, 3,
+					origin + (int) band * bandPitch, barWidth,
 					data->unicodeBlocks ? "███" : "###");
 			SbUiCursesAttrOff (data, role, 0);
 		}
@@ -643,12 +668,11 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 		if (peakY < y) peakY = y;
 		if (peak > 0.01f && peakY >= y && peakY < bodyTop) {
 			SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, A_BOLD);
-			SbUiCursesPut (peakY, origin + (int) band * bandPitch, 3, "---");
+			SbUiCursesPut (peakY, origin + (int) band * bandPitch, barWidth, "---");
 			SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, A_BOLD);
 		}
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
-		mvaddnstr (y + barRows, origin + (int) band * bandPitch,
-				wide ? wideLabels[band] : compactLabels[band], bandPitch - 1);
+		SbUiCursesPut (y + barRows, labelX[band], labelWidth[band], labels[band]);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
 	}
 }
