@@ -108,6 +108,15 @@ the files are never merged or copied automatically. The annotated
 
 .. _configuration example: contrib/config-example
 
+Contrib helpers
+---------------
+
+User-facing helper scripts and event-command examples are available in
+``contrib/``. The headless wrapper is ``contrib/headless_signalbox``; the old
+``contrib/headless_pianobar`` name remains as a lightweight compatibility entry
+point. FIFO helpers prefer the Signalbox configuration directory and follow the
+application's fallback to a legacy pianobar configuration when it is active.
+
 Development expectations
 ------------------------
 

@@ -23,11 +23,17 @@
 
 # Use contrib/eventcmd-examples/dmenu.pl to capture station names
 
-STATION=$(cat /tmp/pianobar_stations | \
+STATION=$(cat /tmp/signalbox_stations | \
 	dmenu -nf '#888888' -nb '#222222' -sf '#ffffff' -i \
 	-sb '#285577' -p 'choose station:' -fn 'Terminus 8' | \
 	sed -e 's/\([0-9]\+\)\..*/\1/')
 
 
-[[ -n $STATION ]] && echo "s$STATION" > ~/.config/pianobar/ctl
+CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
+if [[ -f "$CONFIG_HOME/signalbox/config" || ! -f "$CONFIG_HOME/pianobar/config" ]]; then
+	CTL="$CONFIG_HOME/signalbox/ctl"
+else
+	CTL="$CONFIG_HOME/pianobar/ctl"
+fi
 
+[[ -n $STATION ]] && echo "s$STATION" > "$CTL"

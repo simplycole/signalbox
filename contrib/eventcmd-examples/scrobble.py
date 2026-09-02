@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Last.fm scrobbling for Pianobar, the command-line Pandora client.
+Last.fm scrobbling for Signalbox, the command-line Pandora client.
 
 Copyright (c) 2011
 Jon Pierce <jon@jonpierce.com>
@@ -25,15 +25,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 Dependencies:
-1) https://github.com/PromyLOPh/pianobar/
+1) Signalbox
 2) http://python.org/
 3) http://code.google.com/p/pylast/
 4) http://www.last.fm/api/account
 
 Installation:
-1) Copy this script and pylast.py to the Pianobar config directory, ~/.config/pianobar/, and make sure this script is executable
+1) Copy this script and pylast.py to the Signalbox config directory, ~/.config/signalbox/, and make sure this script is executable
 2) Supply your own Last.fm credentials below
-3) Update Pianobar's config file to use this script as its event_command
+3) Update Signalbox's config file to use this script as its event_command
 """
 
 import sys
@@ -79,4 +79,3 @@ def main():
 
 if __name__ == "__main__":
   main()
-

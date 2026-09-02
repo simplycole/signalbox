@@ -43,7 +43,7 @@
 #audio_quality = low
 #autostart_station = 123456
 #event_command = /home/user/.config/signalbox/eventcmd
-#fifo = /tmp/pianobar
+#fifo = /tmp/signalbox
 #sort = quickmix_10_name_az
 #volume = 0
 #ca_bundle = /etc/ssl/certs/ca-certificates.crt

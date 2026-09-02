@@ -1,8 +1,13 @@
 #!/bin/sh
 
-# extract shared station id from station homepage and add it to pianobar
+# Extract a shared station id from its homepage and add it to Signalbox.
 
-ctl="$HOME/.config/pianobar/ctl"
+config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
+if [ -f "$config_home/signalbox/config" ] || [ ! -f "$config_home/pianobar/config" ]; then
+	ctl="$config_home/signalbox/ctl"
+else
+	ctl="$config_home/pianobar/ctl"
+fi
 
 if [ -z "$1" ]; then
 	echo "Usage: `basename $0` <station url>"
@@ -12,4 +17,3 @@ fi
 curl -s "$1" | sed -nre "s#.*launchStationFromId\('([0-9]+)'\).*#j\1#gp" > "$ctl"
 
 exit 0
-

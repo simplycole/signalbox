@@ -21,7 +21,7 @@ plans, not promises of a date or release.
 - [ ] Add repeatable compatibility tests for supported macOS and Linux systems.
 - [x] Define the transition policy for inherited configuration paths, with a
   legacy pianobar fallback and no automatic file migration.
-- [ ] Define the transition policy for remaining inherited tooling names.
+- [x] Define the transition policy for remaining inherited tooling names.
 
 ## Phase 2 — Modern terminal UI
 
