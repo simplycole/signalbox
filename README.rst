@@ -18,7 +18,7 @@ station-management foundation inherited from pianobar.
    :alt: Signalbox real-time spectrum analyzer in the phosphor terminal theme
    :align: center
 
-.. |CI| image:: https://github.com/simplycole/signalbox/actions/workflows/build.yml/badge.svg?branch=develop
+.. |CI| image:: https://github.com/simplycole/signalbox/actions/workflows/build.yml/badge.svg?branch=main
    :target: https://github.com/simplycole/signalbox/actions/workflows/build.yml
    :alt: Build status
 .. |License| image:: https://img.shields.io/badge/license-MIT-39ff88.svg
