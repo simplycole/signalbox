@@ -16,6 +16,12 @@ void SbUiModelInit (SbUiModel *model) {
 	memset (model, 0, sizeof (*model));
 }
 
+void SbUiModelSetStations (SbUiModel *model, const PianoStation_t *stations) {
+	assert (model != NULL);
+	model->stations = stations;
+	SbUiModelChanged (model);
+}
+
 void SbUiModelSetStation (SbUiModel *model, const PianoStation_t *station) {
 	assert (model != NULL);
 	model->station = station;
@@ -157,11 +163,11 @@ static void SbUiClassicShutdown (SbUiRenderer *renderer) {
 	(void) renderer;
 }
 
-static SbUiCommand SbUiClassicReadCommand (SbUiRenderer *renderer,
+static SbUiCommandEvent SbUiClassicReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	(void) renderer;
 	(void) model;
-	return SB_UI_CMD_NONE;
+	return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 }
 
 static void SbUiClassicMessage (SbUiRenderer *renderer, const BarUiMsg_t type,
@@ -197,7 +203,7 @@ void SbUiRendererRender (SbUiRenderer *renderer, const SbUiModel *model,
 	renderer->ops->render (renderer, model, event);
 }
 
-SbUiCommand SbUiRendererReadCommand (SbUiRenderer *renderer,
+SbUiCommandEvent SbUiRendererReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	assert (renderer != NULL);
 	assert (renderer->ops != NULL);

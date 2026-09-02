@@ -19,6 +19,9 @@ typedef struct {
 	char status[256];
 	bool helpVisible;
 	bool colors;
+	bool selectionInitialized;
+	size_t selectedIndex;
+	size_t scrollOffset;
 } SbUiCursesData;
 
 static const SbUiRendererOps cursesOps;
@@ -39,18 +42,116 @@ static void SbUiCursesTime (char *dest, const size_t size,
 	snprintf (dest, size, "%02u:%02u", seconds / 60, seconds % 60);
 }
 
+static char SbUiCursesKey (const SbUiRenderer *renderer,
+		const SbUiCommand command) {
+	for (size_t i = 0; i < BAR_KS_COUNT; i++) {
+		if (dispatchActions[i].command == command &&
+				renderer->settings->keys[i] != BAR_KS_DISABLED) {
+			return renderer->settings->keys[i];
+		}
+	}
+	return '-';
+}
+
 static void SbUiCursesFooter (const SbUiRenderer *renderer, char *footer,
 		const size_t size) {
-	const char quitKey = renderer->settings->keys[BAR_KS_QUIT];
-	const char helpKey = renderer->settings->keys[BAR_KS_HELP];
-	if (quitKey != BAR_KS_DISABLED && helpKey != BAR_KS_DISABLED) {
-		snprintf (footer, size, "%c quit   %c help", quitKey, helpKey);
-	} else if (quitKey != BAR_KS_DISABLED) {
-		snprintf (footer, size, "%c quit", quitKey);
-	} else if (helpKey != BAR_KS_DISABLED) {
-		snprintf (footer, size, "%c help", helpKey);
+	snprintf (footer, size,
+			"j/k stations  Enter tune  %c pause  %c next  %c love  %c ban  %c help  %c quit",
+			SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
+			SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
+			SbUiCursesKey (renderer, SB_UI_CMD_LOVE),
+			SbUiCursesKey (renderer, SB_UI_CMD_BAN),
+			SbUiCursesKey (renderer, SB_UI_CMD_HELP),
+			SbUiCursesKey (renderer, SB_UI_CMD_QUIT));
+}
+
+static const char *SbUiCursesRating (const PianoSong_t *song) {
+	if (song == NULL) return "Rating: Neutral";
+	switch (song->rating) {
+		case PIANO_RATE_LOVE: return "Rating: Loved";
+		case PIANO_RATE_BAN: return "Rating: Banned";
+		case PIANO_RATE_TIRED: return "Rating: Tired";
+		default: return "Rating: Neutral";
+	}
+}
+
+static size_t SbUiCursesStationCount (const SbUiModel *model) {
+	size_t count = 0;
+	const PianoStation_t *station = model->stations;
+	PianoListForeachP (station) {
+		count++;
+	}
+	return count;
+}
+
+static const PianoStation_t *SbUiCursesStationAt (const SbUiModel *model,
+		const size_t index) {
+	const PianoStation_t *station = model->stations;
+	for (size_t i = 0; station != NULL && i < index; i++) {
+		station = PianoListNextP (station);
+	}
+	return station;
+}
+
+static void SbUiCursesClampSelection (SbUiCursesData *data,
+		const SbUiModel *model, const size_t visibleRows) {
+	const size_t count = SbUiCursesStationCount (model);
+	if (count == 0) {
+		data->selectedIndex = data->scrollOffset = 0;
+		data->selectionInitialized = false;
+		return;
+	}
+	if (!data->selectionInitialized) {
+		data->selectedIndex = 0;
+		const PianoStation_t *station = model->stations;
+		for (size_t i = 0; station != NULL; i++, station = PianoListNextP (station)) {
+			if (station == model->station) {
+				data->selectedIndex = i;
+				break;
+			}
+		}
+		data->selectionInitialized = true;
+	}
+	if (data->selectedIndex >= count) {
+		data->selectedIndex = count - 1;
+	}
+	if (visibleRows == 0) {
+		data->scrollOffset = data->selectedIndex;
 	} else {
-		snprintf (footer, size, "Ctrl-C quit");
+		if (data->selectedIndex < data->scrollOffset) {
+			data->scrollOffset = data->selectedIndex;
+		} else if (data->selectedIndex >= data->scrollOffset + visibleRows) {
+			data->scrollOffset = data->selectedIndex - visibleRows + 1;
+		}
+		const size_t maxOffset = count > visibleRows ? count - visibleRows : 0;
+		if (data->scrollOffset > maxOffset) {
+			data->scrollOffset = maxOffset;
+		}
+	}
+}
+
+static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
+		const int y, const int x, const int height, const int width) {
+	const size_t visible = height > 0 ? (size_t) height : 0;
+	SbUiCursesClampSelection (data, model, visible);
+	if (model->stations == NULL) {
+		SbUiCursesPut (y, x, width, "No stations available");
+		return;
+	}
+	for (size_t row = 0; row < visible; row++) {
+		const size_t index = data->scrollOffset + row;
+		const PianoStation_t * const station = SbUiCursesStationAt (model, index);
+		if (station == NULL) {
+			break;
+		}
+		mvaddch (y + (int) row, x, station == model->station ? '*' : ' ');
+		if (index == data->selectedIndex) {
+			attron (A_REVERSE);
+		}
+		SbUiCursesPut (y + (int) row, x + 2, width - 2, station->name);
+		if (index == data->selectedIndex) {
+			attroff (A_REVERSE);
+		}
 	}
 }
 
@@ -80,7 +181,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
-	char footer[64];
+	char footer[256];
 	SbUiCursesFooter (renderer, footer, sizeof (footer));
 
 	if (rows < 15 || cols < 50) {
@@ -131,9 +232,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		SbUiCursesPut (4, 2, split - 3, "STATIONS");
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
 		attroff (A_BOLD);
-		SbUiCursesPut (6, 2, split - 3,
-				model->station != NULL ? model->station->name : NULL);
-		SbUiCursesPut (8, 2, split - 3, "station browser coming next");
+		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
 		const int rightWidth = cols - rightX - 2;
 		SbUiCursesPut (6, rightX, rightWidth,
@@ -144,26 +243,34 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		attroff (A_BOLD);
 		SbUiCursesPut (10, rightX, rightWidth,
 				model->song != NULL ? model->song->album : NULL);
+		SbUiCursesPut (11, rightX, rightWidth, SbUiCursesRating (model->song));
 		SbUiCursesProgress (model, 12, rightX, rightWidth);
 	} else {
 		attron (A_BOLD);
 		SbUiCursesPut (4, 2, cols - 4, "STATION");
 		attroff (A_BOLD);
-		SbUiCursesPut (5, 2, cols - 4,
-				model->station != NULL ? model->station->name : NULL);
-		mvhline (7, 1, ACS_HLINE, cols - 2);
+		const int stationRows = (statusY - 9) / 2;
+		SbUiCursesStations (data, model, 5, 2, stationRows, cols - 4);
+		const int dividerY = 5 + stationRows;
+		mvhline (dividerY, 1, ACS_HLINE, cols - 2);
 		attron (A_BOLD);
-		SbUiCursesPut (8, 2, cols - 4, "NOW PLAYING");
+		SbUiCursesPut (dividerY + 1, 2, cols - 4, "NOW PLAYING");
 		attroff (A_BOLD);
-		SbUiCursesPut (9, 2, cols - 4,
+		SbUiCursesPut (dividerY + 2, 2, cols - 4,
 				model->song != NULL ? model->song->artist : NULL);
-		SbUiCursesPut (10, 2, cols - 4,
+		SbUiCursesPut (dividerY + 3, 2, cols - 4,
 				model->song != NULL ? model->song->title : NULL);
-		SbUiCursesProgress (model, 12, 2, cols - 4);
+		if (dividerY + 5 < statusY - 1) {
+			SbUiCursesPut (dividerY + 4, 2, cols - 4,
+					SbUiCursesRating (model->song));
+			SbUiCursesProgress (model, dividerY + 5, 2, cols - 4);
+		} else {
+			SbUiCursesProgress (model, dividerY + 4, 2, cols - 4);
+		}
 	}
 
 	if (data->helpVisible) {
-		const int height = 7;
+		const int height = 13;
 		const int width = cols < 64 ? cols - 6 : 58;
 		WINDOW * const help = newwin (height, width, (rows - height) / 2,
 				(cols - width) / 2);
@@ -172,9 +279,19 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			wattron (help, A_BOLD);
 			mvwaddstr (help, 1, 2, "SIGNALBOX HELP");
 			wattroff (help, A_BOLD);
-			mvwprintw (help, 3, 2, "%c   quit",
+			mvwaddstr (help, 3, 2, "Up/Down or j/k   select station");
+			mvwaddstr (help, 4, 2, "Enter            tune selected station");
+			mvwprintw (help, 5, 2, "%c                pause/resume",
+					SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE));
+			mvwprintw (help, 6, 2, "%c                next song",
+					SbUiCursesKey (renderer, SB_UI_CMD_SKIP));
+			mvwprintw (help, 7, 2, "%c                love song",
+					SbUiCursesKey (renderer, SB_UI_CMD_LOVE));
+			mvwprintw (help, 8, 2, "%c                ban song",
+					SbUiCursesKey (renderer, SB_UI_CMD_BAN));
+			mvwprintw (help, 9, 2, "%c                quit",
 					quitKey != BAR_KS_DISABLED ? quitKey : '-');
-			mvwprintw (help, 4, 2, "%c   close help",
+			mvwprintw (help, 10, 2, "%c                close help",
 					helpKey != BAR_KS_DISABLED ? helpKey : '-');
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
@@ -196,18 +313,50 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 	SbUiCursesFrame (renderer, model);
 }
 
-static SbUiCommand SbUiCursesReadCommand (SbUiRenderer *renderer,
+static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	const int key = getch ();
 	if (key == ERR) {
 		SbUiCursesFrame (renderer, model);
-		return SB_UI_CMD_NONE;
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key == KEY_RESIZE) {
 		clearok (stdscr, TRUE);
 		SbUiCursesFrame (renderer, model);
-		return SB_UI_CMD_NONE;
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (!data->helpVisible && (key == KEY_UP || key == 'k' ||
+			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
+			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
+		const size_t count = SbUiCursesStationCount (model);
+		SbUiCursesClampSelection (data, model, 1);
+		if (count > 0) {
+			if (key == KEY_UP || key == 'k') {
+				if (data->selectedIndex > 0) data->selectedIndex--;
+			} else if (key == KEY_DOWN || key == 'j') {
+				if (data->selectedIndex + 1 < count) data->selectedIndex++;
+			} else if (key == KEY_HOME) {
+				data->selectedIndex = 0;
+			} else if (key == KEY_END) {
+				data->selectedIndex = count - 1;
+			} else if (key == KEY_PPAGE) {
+				data->selectedIndex = data->selectedIndex > 5 ?
+						data->selectedIndex - 5 : 0;
+			} else if (key == KEY_NPAGE) {
+				data->selectedIndex = data->selectedIndex + 5 < count ?
+						data->selectedIndex + 5 : count - 1;
+			}
+		}
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (!data->helpVisible && (key == '\n' || key == '\r' || key == KEY_ENTER)) {
+		const PianoStation_t * const station = SbUiCursesStationAt (model,
+				data->selectedIndex);
+		return (SbUiCommandEvent) {station != NULL ?
+				SB_UI_CMD_ACTIVATE_STATION : SB_UI_CMD_NONE,
+				(PianoStation_t *) station};
 	}
 	if (key >= 0 && key <= UCHAR_MAX) {
 		const SbUiCommand command = BarUiCommandFromKey (renderer->settings,
@@ -215,18 +364,30 @@ static SbUiCommand SbUiCursesReadCommand (SbUiRenderer *renderer,
 		if (command == SB_UI_CMD_HELP) {
 			data->helpVisible = !data->helpVisible;
 			SbUiCursesFrame (renderer, model);
-			return SB_UI_CMD_NONE;
+			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
 		if (data->helpVisible) {
 			data->helpVisible = false;
 			SbUiCursesFrame (renderer, model);
-			return SB_UI_CMD_NONE;
+			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
-		/* Phase C0 exposes only commands that cannot enter inherited blocking
-		 * prompts or write classic-mode output into the curses screen. */
-		return command == SB_UI_CMD_QUIT ? command : SB_UI_CMD_NONE;
+		/* Only actions audited as prompt-free are allowed to leave the renderer.
+		 * The classic station-select key is intentionally consumed with guidance. */
+		if (command == SB_UI_CMD_SELECT_STATION) {
+			pthread_mutex_lock (&data->statusLock);
+			strcpy (data->status, "Use arrows or j/k, then Enter to tune");
+			pthread_mutex_unlock (&data->statusLock);
+			SbUiCursesFrame (renderer, model);
+			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+		}
+		if (command == SB_UI_CMD_QUIT || command == SB_UI_CMD_TOGGLE_PAUSE ||
+				command == SB_UI_CMD_PLAY || command == SB_UI_CMD_PAUSE ||
+				command == SB_UI_CMD_SKIP || command == SB_UI_CMD_LOVE ||
+				command == SB_UI_CMD_BAN) {
+			return (SbUiCommandEvent) {command, NULL};
+		}
 	}
-	return SB_UI_CMD_NONE;
+	return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 }
 
 static void SbUiCursesMessage (SbUiRenderer *renderer, const BarUiMsg_t type,

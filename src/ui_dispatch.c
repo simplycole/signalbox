@@ -91,6 +91,7 @@ static const BarKeyShortcutFunc_t commandHandlers[SB_UI_CMD_COUNT] = {
 	[SB_UI_CMD_PAUSE] = BarUiActPause,
 	[SB_UI_CMD_VOLUME_RESET] = BarUiActVolReset,
 	[SB_UI_CMD_SETTINGS] = BarUiActSettings,
+	[SB_UI_CMD_ACTIVATE_STATION] = BarUiActActivateStation,
 };
 
 SbUiCommand BarUiCommandFromKey (const BarSettings_t *settings, const char key) {
@@ -112,6 +113,17 @@ bool BarUiDispatchCommand (BarApp_t *app, const SbUiCommand command, PianoStatio
 	assert (app != NULL);
 	if (command <= SB_UI_CMD_NONE || command >= SB_UI_CMD_COUNT) {
 		return false;
+	}
+	if (command == SB_UI_CMD_ACTIVATE_STATION) {
+		if (selStation == NULL) {
+			if (verbose) {
+				BarUiMsg (&app->settings, MSG_ERR, "No station selected.\n");
+			}
+			return false;
+		}
+		commandHandlers[command] (app, selStation, selSong,
+				context | BAR_DC_STATION);
+		return true;
 	}
 
 	if (selStation != NULL) {

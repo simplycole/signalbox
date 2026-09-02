@@ -111,7 +111,7 @@ Start the executable from the source tree with:
 
    ./signalbox
 
-Classic mode remains the default. To launch the experimental Phase C0
+Classic mode remains the default. To launch the experimental Phase C1
 full-screen interface, use an interactive terminal and run:
 
 .. code-block:: console
@@ -120,14 +120,16 @@ full-screen interface, use an interactive terminal and run:
 
 The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
 it exits with a concise error instead of initializing curses otherwise. The
-shell opens immediately; when login or initial station selection needs an
-inherited blocking prompt, Signalbox temporarily restores classic mode and
-then re-enters the TUI. The current shell shows the active station,
-now-playing metadata, playback state/progress, status, resize-aware layouts,
-and working quit/help keys. Station browsing and other modal actions remain
-deferred; use classic mode for the complete inherited interface.
+shell opens immediately; credential prompts temporarily restore classic mode.
+The shell shows the real station list, distinct selected and active stations,
+now-playing metadata, playback state/progress, and status. Navigate with arrows
+or ``j``/``k``, press Enter to tune, and use the configured keys for
+pause/resume, next, love, ban, help, and quit. The inherited station-select key
+shows browser guidance instead of opening a blocking prompt. Other modal
+actions remain deferred; use classic mode for the complete inherited interface.
 
-On first run, enter Pandora credentials when prompted, then select a station.
+On first run, enter Pandora credentials when prompted. TUI mode starts with the
+autostart station, or the first available station when none is configured.
 Press ``?`` for the current key bindings and ``q`` to quit. Configuration is
 read from ``$XDG_CONFIG_HOME/signalbox/config`` (normally
 ``~/.config/signalbox/config``). If that file does not exist, Signalbox falls

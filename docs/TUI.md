@@ -1,7 +1,8 @@
 # Terminal UI architecture decision
 
-Status: architecture phases A and B and renderer Phase C0 are complete. The
-ncursesw shell is experimental and opt-in; station navigation is not present.
+Status: architecture phases A and B and renderer Phase C1 are complete. The
+ncursesw shell is experimental and opt-in, with a usable station browser and
+core playback controls.
 
 ## Decision
 
@@ -85,6 +86,12 @@ renderer-facing projection containing borrowed current-station/current-song
 references, the optional real song station used by QuickMix formatting,
 elapsed/duration, playback state, and a generation counter. Pandora and player
 structures remain canonical; the model neither copies nor owns them.
+
+Phase C1 also borrows the canonical station-list head. The synchronous main
+loop owns and serializes that list's lifetime; the renderer only traverses it
+for display and returns a borrowed selected pointer in an activation command.
+Selection index and scroll offset are renderer-local and do not increment the
+canonical model generation.
 
 The renderer interface in `src/ui_renderer.h` has `init`, event-oriented
 `render`, and `shutdown` operations. The classic backend in
@@ -332,6 +339,14 @@ For ncursesw:
 - source builds should prefer `pkg-config ncursesw`, with documented config-
   script/platform fallback and an actual compile/link feature check.
 
+On the validated macOS 26 environment, Homebrew's `ncursesw.pc` compatibility
+metadata returns `-D_DARWIN_C_SOURCE` plus `-lncurses`. Compilation uses
+Apple's SDK `curses.h`, and the binary links `/usr/lib/libncurses.5.4.dylib`.
+A compile/link probe for `cchar_t` and `setcchar()` succeeds, so the system
+library supplies the wide-character API needed here. Signalbox accepts this
+portable pkg-config decision rather than hardcoding a Homebrew keg path; no
+Makefile or CI override is required.
+
 Dynamic binary-size impact should be modest. Static size depends on platform
 library/terminfo arrangements.
 
@@ -366,7 +381,8 @@ and output-free headless startup without a TTY.
    configured quit/help input, full redraw on resize, minimum-size behavior,
    model-driven metadata/progress, and status. Explicit suspend/resume polish
    remains alongside broader terminal recovery testing.
-7. **Station browser:** selection, scrolling, active station, responsive layout.
+7. **Station browser (complete):** selection, scrolling, active station,
+   responsive layout, and direct Enter activation.
 8. **Now playing:** metadata, playback/rating, volume, timed progress.
 9. **History/notices/help:** upcoming/history, errors, prompts, generated help.
 10. **Themes/accessibility:** semantic themes, `NO_COLOR`, high contrast,

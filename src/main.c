@@ -173,6 +173,7 @@ static bool BarMainGetStations (BarApp_t *app) {
 
 	BarUiMsg (&app->settings, MSG_INFO, "Get stations... ");
 	ret = BarUiPianoCall (app, PIANO_REQUEST_GET_STATIONS, NULL, &pRet, &wRet);
+	SbUiModelSetStations (&app->uiModel, app->ph.stations);
 	BarUiStartEventCmd (&app->settings, "usergetstations", NULL, NULL, &app->player,
 			app->ph.stations, pRet, wRet);
 	return ret;
@@ -191,7 +192,9 @@ static void BarMainGetInitialStation (BarApp_t *app) {
 		}
 	}
 	/* no autostart? ask the user */
-	if (app->nextStation == NULL) {
+	if (app->nextStation == NULL && app->useTui) {
+		app->nextStation = app->ph.stations;
+	} else if (app->nextStation == NULL) {
 		app->nextStation = BarUiSelectStation (app, app->ph.stations,
 				"Select station: ", NULL, app->settings.autoselect);
 	}
@@ -220,10 +223,12 @@ static void BarMainLeaveTuiForPrompt (BarApp_t *app) {
  */
 static void BarMainHandleUserInput (BarApp_t *app) {
 	if (app->useTui) {
-		const SbUiCommand command = SbUiRendererReadCommand (&app->uiRenderer,
+		const SbUiCommandEvent event = SbUiRendererReadCommand (&app->uiRenderer,
 				&app->uiModel);
-		if (command != SB_UI_CMD_NONE) {
-			BarUiDispatchCommand (app, command, app->curStation, app->playlist,
+		if (event.command != SB_UI_CMD_NONE) {
+			BarUiDispatchCommand (app, event.command,
+					event.station != NULL ? event.station : app->curStation,
+					app->playlist,
 					true, BAR_DC_GLOBAL);
 		}
 	}
@@ -385,16 +390,11 @@ static void BarMainLoop (BarApp_t *app) {
 		return;
 	}
 
-	resumeTui = app->useTui && (app->settings.autostartStation == NULL ||
-			PianoFindStationById (app->ph.stations,
-			app->settings.autostartStation) == NULL);
-	if (resumeTui) {
-		BarMainLeaveTuiForPrompt (app);
-	}
 	BarMainGetInitialStation (app);
-	if (resumeTui && !BarMainEnterTui (app)) {
-		app->doQuit = true;
-		return;
+	if (app->useTui) {
+		SbUiModelSetStation (&app->uiModel, app->nextStation);
+		SbUiRendererRender (&app->uiRenderer, &app->uiModel,
+				SB_UI_RENDER_STATION);
 	}
 
 	player_t * const player = &app->player;

@@ -58,28 +58,32 @@ delegates its byte-for-byte-compatible formatting to the classic renderer
 implementation. The inherited message API remains a compatibility facade while
 call sites are migrated incrementally.
 
-`SbUiModel` is view state, not a second application model. It borrows pointers
-to the current canonical `PianoStation_t` and `PianoSong_t` objects owned by the
-application, and stores only the small playback projection needed to render
-progress: duration, elapsed time, and playing/paused state. A monotonically
+`SbUiModel` is view state, not a second application model. It borrows the
+canonical station list and current `PianoStation_t` and `PianoSong_t` objects
+owned by the application, and stores only the small playback projection needed
+to render progress: duration, elapsed time, and playing/paused state. A monotonically
 increasing generation records updates for a future invalidation-driven
-renderer. It does not own or copy Pandora lists or objects.
+renderer. It does not own or copy Pandora lists or objects. The synchronous
+main loop serializes their lifetime; renderer-local selection and scrolling do
+not mutate the model.
 
 The renderer has an `init`/`render`/input/notice/`shutdown` lifecycle. Its
 classic synchronous line backend preserves
 configured prefixes, postfixes, formats, ANSI erase-line behavior, flushing,
-and carriage-return progress. Phase C0 adds an opt-in ncursesw backend that
+and carriage-return progress. Phase C1 adds an opt-in ncursesw backend that
 owns its `SCREEN`, maps ordinary keys through the shared command table, stores
 legacy notices for the status line, redraws on `KEY_RESIZE`, and calls
-`endwin()` during normal shutdown. ncurses types remain private to
-`ui_renderer_curses.c`.
+`endwin()` during normal shutdown. It owns station selection and scrolling,
+keeps the active station independent, and sends Enter activation plus audited
+prompt-free playback actions through named commands. ncurses types remain
+private to `ui_renderer_curses.c`.
 
 `--tui` selects the full-screen backend while classic remains the default.
 Terminal suitability is checked before termios or curses initialization. The
-inherited blocking login and initial-station interactions run in classic mode;
-after they finish, stdin moves to curses while FIFO input remains on the
-existing byte-to-command path. Interactive legacy actions with nested prompts
-are not yet adapted for curses and remain a Phase C1+ boundary.
+inherited blocking login interaction runs in classic mode. Initial TUI station
+choice uses autostart or the first station without leaving curses, while FIFO
+input remains on the existing byte-to-command path. Interactive legacy actions
+with nested prompts remain disabled in curses.
 
 Blocking prompts and selection/readline editing intentionally remain on the
 classic path. Event-command serialization remains machine-facing direct

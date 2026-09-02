@@ -66,7 +66,14 @@ typedef enum {
 	SB_UI_CMD_PAUSE,
 	SB_UI_CMD_VOLUME_RESET,
 	SB_UI_CMD_SETTINGS,
+	/* TUI-only contextual command: activate an already selected station. */
+	SB_UI_CMD_ACTIVATE_STATION,
 	SB_UI_CMD_COUNT,
 } SbUiCommand;
+
+typedef struct {
+	SbUiCommand command;
+	struct PianoStation *station;
+} SbUiCommandEvent;
 
 #endif /* SRC_UI_TYPES_H_2HR75RII */

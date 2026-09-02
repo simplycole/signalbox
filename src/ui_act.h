@@ -61,4 +61,4 @@ BarUiActCallback(BarUiActVolUp);
 BarUiActCallback(BarUiActManageStation);
 BarUiActCallback(BarUiActVolReset);
 BarUiActCallback(BarUiActSettings);
-
+BarUiActCallback(BarUiActActivateStation);

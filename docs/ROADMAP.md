@@ -39,8 +39,10 @@ plans, not promises of a date or release.
 - [x] Add an opt-in `ncursesw` skeleton with alternate-screen lifecycle,
   resize handling, responsive/minimum-size layouts, model-driven playback
   content, status, and configured quit/help input.
-- [ ] Add a responsive station browser with selection, scrolling, and active
+- [x] Add a responsive station browser with selection, scrolling, and active
   station highlighting.
+- [x] Route TUI station activation and prompt-free pause/resume, next, love,
+  ban, and quit controls through named commands.
 - [ ] Add now-playing metadata, playback/rating state, volume, and low-frequency
   progress updates.
 - [ ] Present history, upcoming tracks, status, reconnects, errors, prompts, and

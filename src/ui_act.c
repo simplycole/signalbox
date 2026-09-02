@@ -425,6 +425,9 @@ BarUiActCallback(BarUiActLoveSong) {
  */
 BarUiActCallback(BarUiActSkipSong) {
 	BarUiDoSkipSong (&app->player);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, "Skipping track\n");
+	}
 }
 
 /*	play
@@ -434,6 +437,9 @@ BarUiActCallback(BarUiActPlay) {
 	app->player.doPause = false;
 	pthread_cond_broadcast (&app->player.cond);
 	pthread_mutex_unlock (&app->player.lock);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, "Resumed\n");
+	}
 }
 
 /*	pause
@@ -443,6 +449,9 @@ BarUiActCallback(BarUiActPause) {
 	app->player.doPause = true;
 	pthread_cond_broadcast (&app->player.cond);
 	pthread_mutex_unlock (&app->player.lock);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, "Paused\n");
+	}
 }
 
 /*	toggle pause
@@ -450,8 +459,12 @@ BarUiActCallback(BarUiActPause) {
 BarUiActCallback(BarUiActTogglePause) {
 	pthread_mutex_lock (&app->player.lock);
 	app->player.doPause = !app->player.doPause;
+	const bool paused = app->player.doPause;
 	pthread_cond_broadcast (&app->player.cond);
 	pthread_mutex_unlock (&app->player.lock);
+	if (app->useTui) {
+		BarUiMsg (&app->settings, MSG_INFO, paused ? "Paused\n" : "Resumed\n");
+	}
 }
 
 /*	rename current station
@@ -487,6 +500,20 @@ BarUiActCallback(BarUiActSelectStation) {
 	if (newStation != NULL) {
 		app->nextStation = newStation;
 		drainPlaylist (app);
+	}
+}
+
+/* Activate a station already chosen by a non-blocking UI. */
+BarUiActCallback(BarUiActActivateStation) {
+	assert (selStation != NULL);
+	if (selStation != app->curStation || app->playlist == NULL) {
+		app->nextStation = selStation;
+		drainPlaylist (app);
+		BarUiMsg (&app->settings, MSG_INFO, "Switching to %s...\n",
+				selStation->name);
+	} else {
+		BarUiMsg (&app->settings, MSG_INFO, "Already tuned to %s\n",
+				selStation->name);
 	}
 }
 

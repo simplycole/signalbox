@@ -17,6 +17,9 @@ typedef enum {
 /* Renderer-facing view state. Canonical Piano objects remain owned by BarApp_t;
  * these pointers are borrowed and valid only while their canonical objects are. */
 typedef struct {
+	/* Borrowed canonical list. BarApp_t owns every station and serializes list
+	 * mutation with renderer access on the main thread. */
+	const PianoStation_t *stations;
 	const PianoStation_t *station;
 	const PianoStation_t *songStation;
 	const PianoSong_t *song;
@@ -37,7 +40,7 @@ typedef struct SbUiRenderer SbUiRenderer;
 typedef struct {
 	void (*init) (SbUiRenderer *);
 	void (*render) (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);
-	SbUiCommand (*readCommand) (SbUiRenderer *, const SbUiModel *);
+	SbUiCommandEvent (*readCommand) (SbUiRenderer *, const SbUiModel *);
 	void (*message) (SbUiRenderer *, BarUiMsg_t, const char *, va_list);
 	void (*shutdown) (SbUiRenderer *);
 } SbUiRendererOps;
@@ -49,6 +52,7 @@ struct SbUiRenderer {
 };
 
 void SbUiModelInit (SbUiModel *);
+void SbUiModelSetStations (SbUiModel *, const PianoStation_t *);
 void SbUiModelSetStation (SbUiModel *, const PianoStation_t *);
 void SbUiModelSetSong (SbUiModel *, const PianoSong_t *,
 		const PianoStation_t *);
@@ -58,7 +62,7 @@ void SbUiModelSetProgress (SbUiModel *, unsigned int, unsigned int,
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
 bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);
-SbUiCommand SbUiRendererReadCommand (SbUiRenderer *, const SbUiModel *);
+SbUiCommandEvent SbUiRendererReadCommand (SbUiRenderer *, const SbUiModel *);
 void SbUiRendererShutdown (SbUiRenderer *);
 void SbUiRendererSetActive (SbUiRenderer *);
 SbUiRenderer *SbUiRendererGetActive (void);
