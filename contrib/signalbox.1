@@ -18,11 +18,16 @@ is a lightweight console music player for the personalized online radio
 pandora.com.
 
 .SH FILES
-.I $XDG_CONFIG_HOME/pianobar/config
+.I $XDG_CONFIG_HOME/signalbox/config
 or
-.I ~/.config/pianobar/config
+.I ~/.config/signalbox/config
 .RS
-Per-user configuration file. See
+Preferred per-user configuration file. If it does not exist, Signalbox uses
+.I $XDG_CONFIG_HOME/pianobar/config
+(normally
+.IR ~/.config/pianobar/config )
+as a compatibility fallback. If both exist, the Signalbox file takes
+precedence; files are not merged or migrated automatically. See
 .B CONFIGURATION.
 .RE
 
@@ -239,8 +244,11 @@ File that is executed when event occurs. See section
 .B EVENTCMD
 
 .TP
-.B fifo = $XDG_CONFIG_HOME/pianobar/ctl
-Location of control fifo. See section
+.B fifo = $XDG_CONFIG_HOME/signalbox/ctl
+Location of control fifo when using the Signalbox configuration directory. The
+legacy configuration fallback likewise defaults to
+.IR $XDG_CONFIG_HOME/pianobar/ctl .
+See section
 .B REMOTE CONTROL
 
 .TP
@@ -415,12 +423,12 @@ Initial volume correction in dB. Usually between -30 and +5.
 .B signalbox
 can be controlled through a fifo. You have to create it yourself by executing
 
- mkfifo ~/.config/pianobar/ctl
+ mkfifo ~/.config/signalbox/ctl
 
 Adjust the path if you set up a $XDG_CONFIG_HOME or changed the fifo setting.
 Afterwards you can write commands directly into the fifo. Example (next song):
 
- echo -n 'n' > ~/.config/pianobar/ctl
+ echo -n 'n' > ~/.config/signalbox/ctl
 
 .B n
 is the keybinding for "next song". If you customized your keybindings you have to use these characters to control
@@ -430,7 +438,7 @@ is the keybinding for "next song". If you customized your keybindings you have t
 Another example:
 
  while true; do;
-    nc -l -p 12345 -s localhost localhost > ~/.config/pianobar/ctl;
+    nc -l -p 12345 -s localhost localhost > ~/.config/signalbox/ctl;
     sleep 1;
  done
 

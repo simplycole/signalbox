@@ -9,8 +9,8 @@ working implementation and preserved history, then aims to build a maintainable
 terminal application around that foundation.
 
 Signalbox is not yet a distinct end-user release. The current program builds
-and runs as ``signalbox`` while its inherited behavior, configuration paths,
-and internal names remain unchanged.
+and runs as ``signalbox`` while much of its inherited behavior and internal
+naming remains unchanged.
 
 .. _pianobar: https://github.com/PromyLOPh/pianobar
 
@@ -97,10 +97,14 @@ Start the executable from the source tree with:
    ./signalbox
 
 On first run, enter Pandora credentials when prompted, then select a station.
-Press ``?`` for the current key bindings and ``q`` to quit. Existing pianobar
-configuration is read from ``$XDG_CONFIG_HOME/pianobar/config`` or
-``~/.config/pianobar/config``. The annotated `configuration example`_ documents
-available settings.
+Press ``?`` for the current key bindings and ``q`` to quit. Configuration is
+read from ``$XDG_CONFIG_HOME/signalbox/config`` (normally
+``~/.config/signalbox/config``). If that file does not exist, Signalbox falls
+back to ``$XDG_CONFIG_HOME/pianobar/config`` (normally
+``~/.config/pianobar/config``), so existing pianobar users do not need to move
+their configuration immediately. If both files exist, the Signalbox file wins;
+the files are never merged or copied automatically. The annotated
+`configuration example`_ documents available settings.
 
 .. _configuration example: contrib/config-example
 

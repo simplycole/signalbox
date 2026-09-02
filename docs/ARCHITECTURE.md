@@ -53,10 +53,13 @@ the current UI boundary is not isolated from orchestration or service calls.
 
 ### Settings and configuration: `src/settings.c`, `src/settings.h`
 
-The settings layer defines defaults and reads the pianobar configuration file.
-It owns credentials, network and audio options, key bindings, output formats,
-event-command settings, and protocol configuration. Existing paths and keys are
-part of the inherited behavior and remain unchanged at this stage.
+The settings layer defines defaults and reads configuration and state. It owns
+credentials, network and audio options, key bindings, output formats,
+event-command settings, and protocol configuration. It selects one active
+configuration directory: `signalbox` when its config exists, otherwise the
+legacy `pianobar` directory when its config exists, otherwise `signalbox`. State
+and the default control FIFO use that same directory; explicit paths configured
+for the FIFO, event command, audio pipe, or CA bundle remain unchanged.
 
 ### Platform integration
 

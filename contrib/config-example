@@ -1,5 +1,5 @@
-# This is an example configuration file for pianobar. You may remove the # from
-# lines you need and copy/move this file to ~/.config/pianobar/config
+# This is an example configuration file for Signalbox. You may remove the # from
+# lines you need and copy this file to ~/.config/signalbox/config
 # See manpage for a description of the config keys
 #
 # User
@@ -42,7 +42,7 @@
 # Misc
 #audio_quality = low
 #autostart_station = 123456
-#event_command = /home/user/.config/pianobar/eventcmd
+#event_command = /home/user/.config/signalbox/eventcmd
 #fifo = /tmp/pianobar
 #sort = quickmix_10_name_az
 #volume = 0
@@ -67,4 +67,3 @@
 #device = D01
 #encrypt_password = 2%3WCL*JU$MP]4
 #decrypt_password = U#IO$RZPAB%VX2
-

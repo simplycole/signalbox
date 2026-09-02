@@ -63,9 +63,10 @@ static char *BarSettingsGetHome () {
 	return NULL;
 }
 
-/*	Get XDG config directory, which is set by BarSettingsRead (if not set)
+/*	Construct a path below the XDG config directory, which is set by
+	BarSettingsRead (if not set)
  */
-static char *BarGetXdgConfigDir (const char * const filename) {
+static char *BarGetXdgConfigPath (const char * const filename) {
 	assert (filename != NULL);
 
 	char *xdgConfigDir;
@@ -80,6 +81,35 @@ static char *BarGetXdgConfigDir (const char * const filename) {
 	}
 
 	return NULL;
+}
+
+/*	Select one configuration directory for config, state, and default FIFO.
+	Signalbox takes precedence; pianobar remains a compatibility fallback.
+ */
+static char *BarSettingsGetConfigDir (bool * const legacy) {
+	char * const signalboxConfig = BarGetXdgConfigPath ("signalbox/config");
+	char * const pianobarConfig = BarGetXdgConfigPath ("pianobar/config");
+	assert (signalboxConfig != NULL);
+	assert (pianobarConfig != NULL);
+
+	*legacy = access (signalboxConfig, F_OK) != 0 &&
+			access (pianobarConfig, F_OK) == 0;
+	free (signalboxConfig);
+	free (pianobarConfig);
+
+	return BarGetXdgConfigPath (*legacy ? "pianobar" : "signalbox");
+}
+
+static char *BarSettingsConfigPath (const BarSettings_t * const settings,
+		const char * const filename) {
+	assert (settings != NULL);
+	assert (settings->configDir != NULL);
+	assert (filename != NULL);
+
+	const size_t len = strlen (settings->configDir) + 1 + strlen (filename) + 1;
+	char * const path = malloc (len * sizeof (*path));
+	snprintf (path, len, "%s/%s", settings->configDir, filename);
+	return path;
 }
 
 /*	Expand ~/ to user’s home directory
@@ -127,6 +157,7 @@ void BarSettingsDestroy (BarSettings_t *settings) {
 	free (settings->timeFormat);
 	free (settings->fifo);
 	free (settings->audioPipe);
+	free (settings->configDir);
 	free (settings->rpcHost);
 	free (settings->rpcTlsPort);
 	free (settings->partnerUser);
@@ -146,14 +177,17 @@ void BarSettingsDestroy (BarSettings_t *settings) {
  *	@return nothing yet
  */
 void BarSettingsRead (BarSettings_t *settings) {
-	char * const configfiles[] = {PACKAGE "/state", PACKAGE "/config"};
+	const char * const configfiles[] = {"state", "config"};
 	char * const userhome = BarSettingsGetHome ();
+	bool legacyConfig;
 	assert (userhome != NULL);
 	/* set xdg config path (if not set) */
 	char * const defaultxdg = malloc (strlen (userhome) + strlen ("/.config") + 1);
 	sprintf (defaultxdg, "%s/.config", userhome);
 	setenv ("XDG_CONFIG_HOME", defaultxdg, 0);
 	free (defaultxdg);
+	settings->configDir = BarSettingsGetConfigDir (&legacyConfig);
+	assert (settings->configDir != NULL);
 
 	assert (sizeof (settings->keys) / sizeof (*settings->keys) ==
 			sizeof (dispatchActions) / sizeof (*dispatchActions));
@@ -184,7 +218,7 @@ void BarSettingsRead (BarSettings_t *settings) {
 	settings->device = strdup ("android-generic");
 	settings->inkey = strdup ("R=U!LH$O2B#");
 	settings->outkey = strdup ("6#26FRL$ZWD");
-	settings->fifo = BarGetXdgConfigDir (PACKAGE "/ctl");
+	settings->fifo = BarSettingsConfigPath (settings, "ctl");
 	settings->audioPipe = NULL;
 	assert (settings->fifo != NULL);
 	settings->sampleRate = 0; /* default to stream sample rate */
@@ -208,6 +242,11 @@ void BarSettingsRead (BarSettings_t *settings) {
 		settings->keys[i] = dispatchActions[i].defaultKey;
 	}
 
+	if (legacyConfig) {
+		BarUiMsg (settings, MSG_INFO, "Using legacy pianobar config: %s/config\n",
+				settings->configDir);
+	}
+
 	/* read config files */
 	for (size_t j = 0; j < sizeof (configfiles) / sizeof (*configfiles); j++) {
 		static const char *formatMsgPrefix = "format_msg_";
@@ -215,7 +254,7 @@ void BarSettingsRead (BarSettings_t *settings) {
 		char line[512];
 		size_t lineNum = 0;
 
-		char * const path = BarGetXdgConfigDir (configfiles[j]);
+		char * const path = BarSettingsConfigPath (settings, configfiles[j]);
 		assert (path != NULL);
 		if ((configfd = fopen (path, "r")) == NULL) {
 			free (path);
@@ -467,7 +506,7 @@ void BarSettingsWrite (PianoStation_t *station, BarSettings_t *settings) {
 
 	assert (settings != NULL);
 
-	char * const path = BarGetXdgConfigDir (PACKAGE "/state");
+	char * const path = BarSettingsConfigPath (settings, "state");
 	assert (path != NULL);
 	if ((fd = fopen (path, "w")) == NULL) {
 		free (path);
@@ -483,4 +522,3 @@ void BarSettingsWrite (PianoStation_t *station, BarSettings_t *settings) {
 	fclose (fd);
 	free (path);
 }
-
