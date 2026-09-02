@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <assert.h>
 
+#include "debug.h"
 #include "ui_dispatch.h"
 #include "settings.h"
 #include "ui.h"
@@ -94,6 +95,16 @@ static const BarKeyShortcutFunc_t commandHandlers[SB_UI_CMD_COUNT] = {
 	[SB_UI_CMD_ACTIVATE_STATION] = BarUiActActivateStation,
 };
 
+static const char *BarUiCommandDiagnosticName (const SbUiCommand command) {
+	if (command == SB_UI_CMD_ACTIVATE_STATION) return "activate_station";
+	for (size_t i = 0; i < BAR_KS_COUNT; i++) {
+		if (dispatchActions[i].command == command) {
+			return dispatchActions[i].configKey;
+		}
+	}
+	return "unknown";
+}
+
 SbUiCommand BarUiCommandFromKey (const BarSettings_t *settings, const char key) {
 	assert (settings != NULL);
 	for (size_t i = 0; i < BAR_KS_COUNT; i++) {
@@ -114,6 +125,11 @@ bool BarUiDispatchCommand (BarApp_t *app, const SbUiCommand command, PianoStatio
 	if (command <= SB_UI_CMD_NONE || command >= SB_UI_CMD_COUNT) {
 		return false;
 	}
+	tuiDebugPrint ("command=%s station_context=%s song_context=%s model_generation=%llu\n",
+			BarUiCommandDiagnosticName (command),
+			selStation != NULL ? "yes" : "no",
+			selSong != NULL ? "yes" : "no",
+			(unsigned long long) app->uiModel.generation);
 	if (command == SB_UI_CMD_ACTIVATE_STATION) {
 		if (selStation == NULL) {
 			if (verbose) {

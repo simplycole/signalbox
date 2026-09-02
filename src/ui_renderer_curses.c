@@ -14,6 +14,7 @@
 
 #include <curses.h>
 
+#include "debug.h"
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
 
@@ -479,6 +480,8 @@ static WINDOW *SbUiCursesModal (const char *title, const char *prompt,
 	WINDOW *window = newwin (height, width, (rows - height) / 2,
 			(cols - width) / 2);
 	if (window != NULL) {
+		tuiDebugPrint ("modal_open title=\"%s\" size=%dx%d\n", title,
+				width, height);
 		box (window, 0, 0);
 		wattron (window, A_BOLD);
 		mvwaddnstr (window, 1, 2, title, width - 4);
@@ -682,6 +685,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key == KEY_RESIZE) {
+		tuiDebugPrint ("resize\n");
 		clearok (stdscr, TRUE);
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
@@ -709,6 +713,8 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 			}
 		}
 		SbUiCursesFrame (renderer, model);
+		tuiDebugPrint ("station_selection index=%zu count=%zu\n",
+				data->selectedIndex, count);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (!data->helpVisible && (key == '\n' || key == '\r' || key == KEY_ENTER)) {
@@ -793,6 +799,7 @@ static void SbUiCursesMessage (SbUiRenderer *renderer, const BarUiMsg_t type,
 static void SbUiCursesShutdown (SbUiRenderer *renderer) {
 	SbUiCursesData * const data = renderer->data;
 	if (data != NULL) {
+		tuiDebugPrint ("renderer_shutdown\n");
 		endwin ();
 		delscreen (data->screen);
 		pthread_mutex_destroy (&data->statusLock);
@@ -853,5 +860,7 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	renderer->ops = &cursesOps;
 	renderer->settings = settings;
 	renderer->data = data;
+	tuiDebugPrint ("renderer_init theme=%d colors=%s\n", (int) theme,
+			data->colors ? "yes" : "no");
 	return true;
 }

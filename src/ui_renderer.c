@@ -4,11 +4,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "debug.h"
 #include "ui.h"
 #include "ui_renderer.h"
 
 static void SbUiModelChanged (SbUiModel *model) {
 	++model->generation;
+	tuiDebugPrint ("model_generation=%llu\n",
+			(unsigned long long) model->generation);
 }
 
 static void SbUiModelCopyText (char *dest, const size_t size,
@@ -54,6 +57,10 @@ void SbUiModelInit (SbUiModel *model) {
 void SbUiModelSetStations (SbUiModel *model, const PianoStation_t *stations) {
 	assert (model != NULL);
 	model->stations = stations;
+	size_t count = 0;
+	const PianoStation_t *station = stations;
+	PianoListForeachP (station) count++;
+	tuiDebugPrint ("station_list_refresh count=%zu\n", count);
 	SbUiModelChanged (model);
 }
 
@@ -83,6 +90,7 @@ void SbUiModelSetVolume (SbUiModel *model, const int volumeDb) {
 void SbUiModelSetActivity (SbUiModel *model, const SbUiActivityState activity) {
 	assert (model != NULL);
 	model->activity = activity;
+	tuiDebugPrint ("activity=%d\n", (int) activity);
 	SbUiModelChanged (model);
 }
 

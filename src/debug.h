@@ -25,11 +25,30 @@ THE SOFTWARE.
 
 #include "config.h"
 #include <stdbool.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+/* Metadata-only TUI diagnostics for supervised QA.  Keep this separate from
+ * PIANOBAR_DEBUG: network debugging can include protocol response bodies. */
+inline static bool tuiDebugEnable () {
+	const char * const value = getenv ("SIGNALBOX_DEBUG_TUI");
+	return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+__attribute__((format(printf, 1, 2)))
+inline static void tuiDebugPrint (const char * const format, ...) {
+	if (tuiDebugEnable ()) {
+		va_list fmtargs;
+		va_start (fmtargs, format);
+		fputs ("[signalbox:tui] ", stderr);
+		vfprintf (stderr, format, fmtargs);
+		va_end (fmtargs);
+		fflush (stderr);
+	}
+}
 
 #ifdef HAVE_DEBUGLOG
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
 
 /* bitfield */
 typedef enum {
@@ -61,4 +80,3 @@ inline static void debugPrint(debugKind kind, const char * const format, ...) {
 inline static bool debugEnable () { return false; }
 #define debugPrint(...)
 #endif
-
