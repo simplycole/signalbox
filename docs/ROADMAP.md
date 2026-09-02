@@ -26,15 +26,28 @@ plans, not promises of a date or release.
 
 ## Phase 2 — Modern terminal UI
 
-- [ ] Add an interactive full-screen TUI.
-- [ ] Add a station pane and station browser.
-- [ ] Add a now-playing pane and playback progress.
-- [ ] Add consistent keyboard navigation.
-- [ ] Present playback history and upcoming tracks.
-- [ ] Present status, reconnect attempts, and errors clearly.
-- [ ] Handle terminal resize correctly.
-- [ ] Support configurable terminal themes.
-- [ ] Provide reduced/non-animated behavior where appropriate.
+- [x] Define the TUI architecture and select `ncursesw` as the preferred core
+  renderer.
+- [ ] Remove direct terminal output from playback/service code while preserving
+  classic output through structured notices and state snapshots.
+- [ ] Introduce named commands and separate key/FIFO decoding from action
+  execution without changing inherited bindings.
+- [ ] Establish canonical application state and a read-only transient UI model.
+- [ ] Define explicit TUI, classic, and headless front-end lifecycles.
+- [ ] Add an `ncursesw` skeleton with alternate-screen safety, batched redraw,
+  resize, suspend/resume, and minimum-size behavior.
+- [ ] Add a responsive station browser with selection, scrolling, and active
+  station highlighting.
+- [ ] Add now-playing metadata, playback/rating state, volume, and low-frequency
+  progress updates.
+- [ ] Present history, upcoming tracks, status, reconnects, errors, prompts, and
+  generated key help.
+- [ ] Add semantic green, amber, monochrome, neutral, and high-contrast themes
+  with `NO_COLOR` degradation and reduced motion.
+- [ ] Verify classic, FIFO, event-command, and headless compatibility before
+  making the TUI the interactive default.
+- [ ] Evaluate optional mouse and terminal artwork only after the text TUI and
+  packaging are stable.
 
 ## Phase 3 — macOS integration
 

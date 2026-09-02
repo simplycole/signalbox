@@ -112,6 +112,14 @@ resize behavior, accessible reduced/non-animated behavior, and human-readable
 status and error presentation. It must not become the only way to operate the
 application.
 
+The architecture decision is to use `ncursesw` behind a small
+Signalbox-specific renderer boundary. Terminal input should map to named
+application commands, and the renderer should consume a read-only UI model
+rather than mutable libpiano/player internals. Rendering should be event-driven
+with a bounded progress timer and batched curses updates. The current-state
+analysis, dependency comparison, event model, responsive layout, and migration
+sequence are in [`TUI.md`](TUI.md).
+
 ### CLI/headless layer
 
 A separate non-interactive entry point should expose predictable startup,
@@ -119,6 +127,12 @@ control, status, and exit behavior for terminals, scripts, services, and remote
 front ends. It should reuse the application core rather than automate the TUI.
 The inherited FIFO and event-command facilities are compatibility inputs to
 that design, not yet the finished interface.
+
+Migration should retain the line-oriented interface as a classic fallback.
+Headless operation must skip termios/curses setup and route FIFO, future IPC,
+and platform controls through the same command dispatcher as the TUI.
+Application events should feed classic output, the TUI model, event commands,
+and platform hooks without any consumer owning playback or Pandora policy.
 
 ### Platform adapters
 
