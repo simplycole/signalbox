@@ -28,7 +28,8 @@ and collision-checked local `V` control the feature. Classic mode disables it,
 and modal input loops naturally suspend spectrum redraws.
 
 The HELP overlay groups navigation, playback, volume, stations, history,
-upcoming, and visualizer controls with blank rows and semantic headings. It
+upcoming, and visualizer controls with blank rows between sections and between
+each semantic heading and its controls. It
 reads remappable playback, volume, station-genre, history, and upcoming keys
 from the effective `act_*` map, omits unbound actions, and shows uppercase `V`
 only when that local spectrum toggle does not collide with a configured action.

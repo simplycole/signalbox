@@ -238,40 +238,44 @@ static void SbUiCursesHelpAddConfigured (const SbUiRenderer *renderer,
 }
 
 static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows) {
+	const SbUiCursesData * const data = renderer->data;
 	size_t count = 0;
 #define HELP_BLANK() rows[count++] = (SbHelpRow) {SB_HELP_BLANK, "", NULL}
 #define HELP_HEADING(value) rows[count++] = (SbHelpRow) {SB_HELP_HEADING, "", value}
+#define HELP_SECTION(value) HELP_HEADING (value); HELP_BLANK ()
 #define HELP_COMMAND(key, value) SbUiCursesHelpAddCommand (rows, &count, key, value)
 #define HELP_CONFIG(command, value) SbUiCursesHelpAddConfigured (renderer, rows, &count, command, value)
-	HELP_HEADING ("NAVIGATION");
+	HELP_SECTION ("NAVIGATION");
 	HELP_COMMAND ("Tab", "switch pane"); HELP_COMMAND ("Shift+Tab", "switch pane backward");
 	HELP_COMMAND ("Up/Down", "navigate"); HELP_COMMAND ("j/k", "navigate");
 	HELP_COMMAND ("PgUp/PgDn", "page"); HELP_COMMAND ("Home/End", "first / last");
 	HELP_COMMAND ("Enter", "select / action"); HELP_COMMAND ("Esc", "back / close");
-	HELP_BLANK (); HELP_HEADING ("PLAYBACK");
+	HELP_BLANK (); HELP_SECTION ("PLAYBACK");
 	HELP_CONFIG (SB_UI_CMD_TOGGLE_PAUSE, "pause / resume");
-	HELP_CONFIG (SB_UI_CMD_SKIP, "next"); HELP_CONFIG (SB_UI_CMD_LOVE, "love");
-	HELP_CONFIG (SB_UI_CMD_BAN, "ban");
-	HELP_BLANK (); HELP_HEADING ("VOLUME");
+	HELP_CONFIG (SB_UI_CMD_SKIP, "next track");
+	HELP_CONFIG (SB_UI_CMD_LOVE, data->unicodeSymbols ? "♥ love" : "<3 love");
+	HELP_CONFIG (SB_UI_CMD_BAN, "</3 ban");
+	HELP_BLANK (); HELP_SECTION ("VOLUME");
 	HELP_CONFIG (SB_UI_CMD_VOLUME_DOWN, "volume down");
 	HELP_CONFIG (SB_UI_CMD_VOLUME_UP, "volume up");
 	HELP_CONFIG (SB_UI_CMD_VOLUME_RESET, "reset to 0 dB");
-	HELP_BLANK (); HELP_HEADING ("STATIONS");
+	HELP_BLANK (); HELP_SECTION ("STATIONS");
 	HELP_COMMAND ("f", "favorite / unfavorite"); HELP_COMMAND ("z", "cycle sort");
-	HELP_COMMAND ("/", "filter"); HELP_COMMAND ("#", "jump to station number");
+	HELP_COMMAND ("/", "filter stations"); HELP_COMMAND ("#", "jump to station number");
 	HELP_CONFIG (SB_UI_CMD_GENRE_STATION, "genres");
-	HELP_BLANK (); HELP_HEADING ("HISTORY");
+	HELP_BLANK (); HELP_SECTION ("HISTORY");
 	HELP_CONFIG (SB_UI_CMD_HISTORY, "full session history");
 	HELP_COMMAND ("Tab", "focus RECENT"); HELP_COMMAND ("Enter", "history action");
-	HELP_BLANK (); HELP_HEADING ("UPCOMING");
+	HELP_BLANK (); HELP_SECTION ("UPCOMING");
 	HELP_CONFIG (SB_UI_CMD_UPCOMING, "browse upcoming");
 	HELP_COMMAND ("Enter", "selected-track actions");
 	if (SbUiCursesVisualizerKeyAvailable (renderer)) {
-		HELP_BLANK (); HELP_HEADING ("VISUALIZER");
+		HELP_BLANK (); HELP_SECTION ("VISUALIZER");
 		HELP_COMMAND ("V", "toggle spectrum");
 	}
 #undef HELP_BLANK
 #undef HELP_HEADING
+#undef HELP_SECTION
 #undef HELP_COMMAND
 #undef HELP_CONFIG
 	return count;
