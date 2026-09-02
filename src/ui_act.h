@@ -62,3 +62,4 @@ BarUiActCallback(BarUiActManageStation);
 BarUiActCallback(BarUiActVolReset);
 BarUiActCallback(BarUiActSettings);
 BarUiActCallback(BarUiActActivateStation);
+void BarUiActHistorySelected (BarApp_t *, size_t);

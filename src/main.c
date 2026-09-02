@@ -54,6 +54,7 @@ THE SOFTWARE.
 #include "debug.h"
 #include "terminal.h"
 #include "ui.h"
+#include "ui_act.h"
 #include "ui_dispatch.h"
 #include "ui_readline.h"
 
@@ -226,7 +227,9 @@ static void BarMainHandleUserInput (BarApp_t *app) {
 	if (app->useTui) {
 		const SbUiCommandEvent event = SbUiRendererReadCommand (&app->uiRenderer,
 				&app->uiModel);
-		if (event.command != SB_UI_CMD_NONE) {
+		if (event.historySelected) {
+			BarUiActHistorySelected (app, event.historyIndex);
+		} else if (event.command != SB_UI_CMD_NONE) {
 			BarUiDispatchCommand (app, event.command,
 					event.station != NULL ? event.station : app->curStation,
 					app->playlist,

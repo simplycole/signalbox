@@ -52,6 +52,11 @@ typedef struct {
 	short colors[SB_TUI_COLOR_COUNT];
 } SbTuiPalette;
 
+typedef enum {
+	SB_TUI_FOCUS_STATIONS = 0,
+	SB_TUI_FOCUS_RECENT,
+} SbTuiFocus;
+
 typedef struct {
 	SCREEN *screen;
 	pthread_mutex_t statusLock;
@@ -66,6 +71,11 @@ typedef struct {
 	size_t scrollOffset;
 	SbStationBrowser browser;
 	bool jumpMode;
+	bool unicodeSymbols;
+	SbTuiFocus focus;
+	size_t recentSelected;
+	size_t recentOffset;
+	size_t observedHistoryCount;
 } SbUiCursesData;
 
 static attr_t SbUiCursesRole (const SbUiCursesData *data,
@@ -199,7 +209,7 @@ static char SbUiCursesKey (const SbUiRenderer *renderer,
 
 static void SbUiCursesFooter (const SbUiRenderer *renderer, char *footer,
 		const size_t size, const int width) {
-	if (width < 76) {
+	if (width < 80) {
 		snprintf (footer, size, "j/k select  Enter tune  %c pause  %c next  %c help  %c quit",
 				SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
 				SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
@@ -208,11 +218,9 @@ static void SbUiCursesFooter (const SbUiRenderer *renderer, char *footer,
 		return;
 	}
 	snprintf (footer, size,
-			"j/k stations  Enter tune  %c pause  %c next  %c/%c volume  %c help  %c quit",
+			"Tab pane  j/k navigate  Enter action  %c pause  %c next  %c help  %c quit",
 			SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
 			SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
-			SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_DOWN),
-			SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_UP),
 			SbUiCursesKey (renderer, SB_UI_CMD_HELP),
 			SbUiCursesKey (renderer, SB_UI_CMD_QUIT));
 }
@@ -261,11 +269,14 @@ static void SbUiCursesHelpCommands (WINDOW *window,
 	}
 }
 
-static const char *SbUiCursesRating (const PianoSong_t *song) {
+static const char *SbUiCursesRating (const SbUiCursesData *data,
+		const PianoSong_t *song) {
 	if (song == NULL) return "Rating: Neutral";
 	switch (song->rating) {
-		case PIANO_RATE_LOVE: return "Rating: Loved";
-		case PIANO_RATE_BAN: return "Rating: Banned";
+		case PIANO_RATE_LOVE: return data->unicodeSymbols ?
+				"Rating: ♥ Loved" : "Rating: + Loved";
+		case PIANO_RATE_BAN: return data->unicodeSymbols ?
+				"Rating: × Banned" : "Rating: - Banned";
 		case PIANO_RATE_TIRED: return "Rating: Tired";
 		default: return "Rating: Neutral";
 	}
@@ -375,7 +386,7 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 		mvaddch (y + (int) row, x, active ? '*' : ' ');
 		mvaddch (y + (int) row, x + 1,
 				SbStationBrowserIsFavorite (&data->browser, station) ? '*' : ' ');
-		if (index == data->selectedIndex) {
+		if (index == data->selectedIndex && data->focus == SB_TUI_FOCUS_STATIONS) {
 			SbUiCursesAttrOn (data, SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		int nameX = x + 3;
@@ -388,7 +399,7 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 			nameWidth -= 6;
 		}
 		SbUiCursesPut (y + (int) row, nameX, nameWidth, station->name);
-		if (index == data->selectedIndex) {
+		if (index == data->selectedIndex && data->focus == SB_TUI_FOCUS_STATIONS) {
 			SbUiCursesAttrOff (data, SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		SbUiCursesAttrOff (data, active ? SB_TUI_COLOR_STATION_ACTIVE :
@@ -519,7 +530,7 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, 0);
 		SbUiCursesPut (y + 6, x + 12, width - 12, volume);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, 0);
-		const char *rating = SbUiCursesRating (model->song);
+		const char *rating = SbUiCursesRating (data, model->song);
 		const int ratingX = x + 12 + (int) strlen (volume) + 3;
 		SbTuiColorRole ratingRole = SB_TUI_COLOR_MUTED;
 		if (model->song != NULL && model->song->rating == PIANO_RATE_LOVE)
@@ -555,11 +566,18 @@ static bool SbUiCursesHistoryWraps (const SbUiHistoryEntry *entry,
 		const int width) {
 	char duration[16];
 	SbUiCursesTime (duration, sizeof (duration), entry->duration);
-	/* Artist + " — " + title + " · " + album + " · " + duration. */
+	/* Marker plus Artist + " — " + title + " · " + album + " · " + duration. */
 	return width < SbUiCursesTextWidth (entry->artist) +
 			SbUiCursesTextWidth (entry->title) +
 			SbUiCursesTextWidth (entry->album) +
-			SbUiCursesTextWidth (duration) + 9;
+			SbUiCursesTextWidth (duration) + 11 && width >= 18;
+}
+
+static const char *SbUiCursesRatingMarker (const SbUiCursesData *data,
+		const PianoSongRating_t rating) {
+	if (rating == PIANO_RATE_LOVE) return data->unicodeSymbols ? "♥" : "+";
+	if (rating == PIANO_RATE_BAN) return data->unicodeSymbols ? "×" : "-";
+	return " ";
 }
 
 static int SbUiCursesHistoryRow (const SbUiCursesData *data,
@@ -569,33 +587,52 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 	char duration[16];
 	SbUiCursesTime (duration, sizeof (duration), entry->duration);
 	const bool wraps = SbUiCursesHistoryWraps (entry, width);
-	const int metadataWidth = SbUiCursesTextWidth (duration) + 3;
-	const int albumWidth = wraps ? width - 2 - metadataWidth :
-			SbUiCursesTextWidth (entry->album);
-	const int firstWidth = wraps ? width : width - albumWidth - metadataWidth - 6;
-	const int separatorWidth = width >= 8 ? 3 : 1;
-	const int contentWidth = firstWidth - separatorWidth;
-	const int artistWidth = contentWidth > 1 ? contentWidth / 2 : contentWidth;
-	const int trackWidth = contentWidth - artistWidth;
+	const int durationWidth = SbUiCursesTextWidth (duration);
+	const int artistNatural = SbUiCursesTextWidth (entry->artist);
+	const int titleNatural = SbUiCursesTextWidth (entry->title);
+	const int albumNatural = SbUiCursesTextWidth (entry->album);
+	const int firstAvailable = (wraps ? width : width - albumNatural -
+			durationWidth - 6) - 2;
+	const int contentAvailable = firstAvailable > 3 ? firstAvailable - 3 :
+			firstAvailable;
+	int artistWidth = artistNatural;
+	int trackWidth = titleNatural;
+	if (artistWidth + trackWidth > contentAvailable) {
+		artistWidth = contentAvailable > 1 ? contentAvailable / 2 :
+				(contentAvailable > 0 ? contentAvailable : 0);
+		trackWidth = contentAvailable > artistWidth ?
+				contentAvailable - artistWidth : 0;
+	}
 	if (selected) SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SELECTED,
 			A_REVERSE);
+	const SbTuiColorRole markerRole = entry->rating == PIANO_RATE_LOVE ?
+			SB_TUI_COLOR_LOVED : entry->rating == PIANO_RATE_BAN ?
+			SB_TUI_COLOR_ERROR : SB_TUI_COLOR_MUTED;
+	SbUiCursesWAttrOn (window, data, markerRole, A_BOLD);
+	SbUiCursesWPut (window, y, x, 1, SbUiCursesRatingMarker (data, entry->rating));
+	SbUiCursesWAttrOff (window, data, markerRole, A_BOLD);
 	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-	SbUiCursesWPut (window, y, x, artistWidth, entry->artist);
+	SbUiCursesWPut (window, y, x + 2, artistWidth, entry->artist);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-	SbUiCursesWPut (window, y, x + artistWidth, separatorWidth,
-			separatorWidth == 3 ? " — " : "-");
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	int column = x + 2 + artistWidth;
+	if (contentAvailable >= 3) {
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesWPut (window, y, column, 3, " — ");
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+		column += 3;
+	}
 	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
-	SbUiCursesWPut (window, y, x + artistWidth + separatorWidth,
-			trackWidth, entry->title);
+	SbUiCursesWPut (window, y, column, trackWidth, entry->title);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+	column += trackWidth;
 	const int metadataY = wraps ? y + 1 : y;
-	const int metadataX = wraps ? x + 2 : x + firstWidth + 3;
-	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-	SbUiCursesWPut (window, metadataY, metadataX - (wraps ? 0 : 3),
-			wraps ? 0 : 3, " · ");
-	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	const int metadataX = wraps ? x + 2 : column + 3;
+	if (!wraps) {
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+		SbUiCursesWPut (window, y, column, 3, " · ");
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+	}
+	const int albumWidth = wraps ? width - 2 - durationWidth - 3 : albumNatural;
 	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
 	SbUiCursesWPut (window, metadataY, metadataX, albumWidth, entry->album);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
@@ -604,14 +641,14 @@ static int SbUiCursesHistoryRow (const SbUiCursesData *data,
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
 	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_WARNING, 0);
 	SbUiCursesWPut (window, metadataY, metadataX + albumWidth + 3,
-			metadataWidth - 3, duration);
+			durationWidth, duration);
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_WARNING, 0);
 	if (selected) SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SELECTED,
 			A_REVERSE);
 	return wraps ? 2 : 1;
 }
 
-static void SbUiCursesHistory (const SbUiCursesData *data,
+static void SbUiCursesHistory (SbUiCursesData *data,
 		const SbUiModel *model, const int y,
 		const int x, const int height, const int width) {
 	if (height <= 0) return;
@@ -619,13 +656,36 @@ static void SbUiCursesHistory (const SbUiCursesData *data,
 		SbUiCursesPut (y, x, width, "No previous tracks this session");
 		return;
 	}
+	if (data->observedHistoryCount != model->historyCount) {
+		if ((data->focus == SB_TUI_FOCUS_RECENT || data->recentSelected > 0) &&
+				data->observedHistoryCount > 0 &&
+				model->historyCount > data->observedHistoryCount) {
+			const size_t added = model->historyCount - data->observedHistoryCount;
+			data->recentSelected += added;
+			data->recentOffset += added;
+		}
+		data->observedHistoryCount = model->historyCount;
+	}
+	if (data->recentSelected >= model->historyCount)
+		data->recentSelected = model->historyCount - 1;
+	if (data->focus != SB_TUI_FOCUS_RECENT) data->recentOffset = 0;
+	if (data->recentOffset > data->recentSelected)
+		data->recentOffset = data->recentSelected;
+	int rowsToSelection = 0;
+	for (size_t i = data->recentOffset; i <= data->recentSelected; i++)
+		rowsToSelection += SbUiCursesHistoryWraps (&model->history[i], width) ? 2 : 1;
+	while (rowsToSelection > height && data->recentOffset < data->recentSelected) {
+		rowsToSelection -= SbUiCursesHistoryWraps (
+				&model->history[data->recentOffset++], width) ? 2 : 1;
+	}
 	int used = 0;
-	for (size_t i = 0; i < model->historyCount; i++) {
+	for (size_t i = data->recentOffset; i < model->historyCount; i++) {
 		const int cost = SbUiCursesHistoryWraps (&model->history[i], width) ? 2 : 1;
 		if (used + cost > height) break;
 		const int rowY = y + used;
 		used += SbUiCursesHistoryRow (data, stdscr, &model->history[i],
-				rowY, x, width, false);
+				rowY, x, width, data->focus == SB_TUI_FOCUS_RECENT &&
+				i == data->recentSelected);
 	}
 }
 
@@ -640,6 +700,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	SbUiCursesFooter (renderer, footer, sizeof (footer), cols);
 
 	if (rows < 15 || cols < 50) {
+		data->focus = SB_TUI_FOCUS_STATIONS;
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
 		box (stdscr, 0, 0);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
@@ -653,6 +714,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		refresh ();
 		return;
 	}
+	if (cols < 80 || rows < 24) data->focus = SB_TUI_FOCUS_STATIONS;
 
 	SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
 	box (stdscr, 0, 0);
@@ -709,14 +771,22 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const int nowPlayingHeight = 8;
 		const int historyY = 6 + nowPlayingHeight + 1;
 		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStationHeader (data, 4, 2, split - 3);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
 		char historyTitle[64];
 		snprintf (historyTitle, sizeof (historyTitle), "RECENT %zu",
 				model->historyCount);
-		SbUiCursesPut (historyY, split + 2, cols - split - 4, historyTitle);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD | A_REVERSE : 0);
+		SbUiCursesPut (historyY, split + 2, cols - split - 4, historyTitle);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD | A_REVERSE : 0);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
 		const int rightWidth = cols - rightX - 2;
@@ -726,17 +796,21 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	} else if (cols >= 80 && rows >= 20) {
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStationHeader (data, 4, 2, split - 3);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		SbUiCursesNowPlaying (data, model, 6, split + 2, statusY - 7,
 				cols - split - 4);
 	} else {
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStationHeader (data, 4, 2, cols - 4);
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION,
+				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		const int stationRows = (statusY - 9) / 2;
 		SbUiCursesStations (data, model, 5, 2, stationRows, cols - 4);
 		const int dividerY = 5 + stationRows;
@@ -764,7 +838,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 2, 2, "NAVIGATION");
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 3, 2, "Up/Down or j/k select; Enter tunes");
+			mvwaddstr (help, 3, 2, "Tab switches pane; j/k or arrows navigate; Enter acts");
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			mvwaddstr (help, 4, 2, "PLAYBACK");
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
@@ -1197,9 +1271,11 @@ static bool SbUiCursesNormalizeNumericInput (const int key,
 	return false;
 }
 
-static void SbUiCursesJump (SbUiRenderer *renderer, const SbUiModel *model) {
+static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
+		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	char digits[16] = "";
+	PianoStation_t *activate = NULL;
 	data->jumpMode = true;
 	while (true) {
 		char prompt[80];
@@ -1260,7 +1336,9 @@ static void SbUiCursesJump (SbUiRenderer *renderer, const SbUiModel *model) {
 			}
 			if (valid && target > 0 && target <= data->browser.visibleCount) {
 				data->selectedIndex = target - 1;
-				SbUiCursesLocalNotice (data, "Station selected");
+				activate = (PianoStation_t *) SbUiCursesStationAt (data,
+						data->selectedIndex);
+				SbUiCursesLocalNotice (data, "Tuning selected station");
 			} else {
 				SbUiCursesLocalNotice (data, "Station number is out of range");
 			}
@@ -1290,6 +1368,7 @@ static void SbUiCursesJump (SbUiRenderer *renderer, const SbUiModel *model) {
 	}
 	data->jumpMode = false;
 	SbUiCursesFrame (renderer, model);
+	return activate;
 }
 
 static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
@@ -1309,6 +1388,29 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	if (!data->helpVisible && (key == KEY_UP || key == 'k' ||
 			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
 			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
+		if (data->focus == SB_TUI_FOCUS_RECENT) {
+			const size_t count = model->historyCount;
+			int rows, cols;
+			getmaxyx (stdscr, rows, cols);
+			(void) cols;
+			const size_t page = rows > 22 ? (size_t) rows - 21 : 1;
+			if (count > 0) {
+				if ((key == KEY_UP || key == 'k') && data->recentSelected > 0)
+					data->recentSelected--;
+				else if ((key == KEY_DOWN || key == 'j') &&
+						data->recentSelected + 1 < count) data->recentSelected++;
+				else if (key == KEY_HOME) data->recentSelected = 0;
+				else if (key == KEY_END) data->recentSelected = count - 1;
+				else if (key == KEY_PPAGE) data->recentSelected =
+						data->recentSelected > page ?
+						data->recentSelected - page : 0;
+				else if (key == KEY_NPAGE) data->recentSelected =
+						data->recentSelected + page < count ?
+						data->recentSelected + page : count - 1;
+			}
+			SbUiCursesFrame (renderer, model);
+			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+		}
 		SbUiCursesClampSelection (data, model, 1);
 		const size_t count = SbUiCursesStationCount (data);
 		if (count > 0) {
@@ -1334,19 +1436,36 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (!data->helpVisible && (key == '\n' || key == '\r' || key == KEY_ENTER)) {
+		if (data->focus == SB_TUI_FOCUS_RECENT &&
+				data->recentSelected < model->historyCount) {
+			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL, true,
+					data->recentSelected};
+		}
 		const PianoStation_t * const station = SbUiCursesStationAt (data,
 				data->selectedIndex);
 		return (SbUiCommandEvent) {station != NULL ?
 				SB_UI_CMD_ACTIVATE_STATION : SB_UI_CMD_NONE,
 				(PianoStation_t *) station};
 	}
+	if (!data->helpVisible && (key == '\t' || key == KEY_BTAB)) {
+		int rows, cols;
+		getmaxyx (stdscr, rows, cols);
+		if (data->focus == SB_TUI_FOCUS_STATIONS && cols >= 80 && rows >= 24)
+			data->focus = SB_TUI_FOCUS_RECENT;
+		else data->focus = SB_TUI_FOCUS_STATIONS;
+		if (data->focus == SB_TUI_FOCUS_RECENT && model->historyCount == 0)
+			data->recentSelected = data->recentOffset = 0;
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
 	if (!data->helpVisible && key == '/') {
 		SbUiCursesFilter (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (!data->helpVisible && key == '#') {
-		SbUiCursesJump (renderer, model);
-		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+		PianoStation_t *station = SbUiCursesJump (renderer, model);
+		return (SbUiCommandEvent) {station != NULL ?
+				SB_UI_CMD_ACTIVATE_STATION : SB_UI_CMD_NONE, station};
 	}
 	if (!data->helpVisible && key == 'z') {
 		data->browser.sort = (SbStationSort) ((data->browser.sort + 1) %
@@ -1581,6 +1700,7 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	strcpy (data->status, "Ready");
 	data->statusSeverity = SB_UI_NOTICE_INFO;
 	data->statusExpires = time (NULL) + 4;
+	data->unicodeSymbols = wcwidth (L'♥') == 1 && wcwidth (L'×') == 1;
 	cbreak ();
 	noecho ();
 	keypad (stdscr, TRUE);

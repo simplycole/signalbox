@@ -133,10 +133,14 @@ shell opens immediately; credential prompts temporarily restore classic mode.
 The shell shows the real station list, distinct selected and active stations,
 artist/title/album/station metadata, rating, signed-dB software volume,
 playback state and adaptive progress, transient status notices, and a RECENT
-view that shows artist, track, album, and duration on one compact line when
-width permits. Narrower history rows use a two-line metadata fallback, and the
-view expands to show as many complete entries as the terminal height allows.
-Its count is the total full-session history, not a display cap. Press ``h`` for
+view that left-packs rating, artist, track, album, and duration as
+``♥ Artist — Track · Album · 05:18`` when width permits. Loved tracks use
+``♥`` and banned tracks use ``×``; terminals without safe single-cell glyphs
+fall back to ``+`` and ``-``. Narrower history rows use a two-line metadata
+fallback, and the view never draws a partial entry. Its count is the total
+full-session history, not a display cap. Press ``Tab`` to focus RECENT, browse
+the full session with arrows or ``j``/``k``, Page Up/Page Down, and Home/End,
+and press Enter for the selected track's existing history actions. Press ``h`` for
 the newest-first session-history modal; navigate it with arrows or ``j``/``k``,
 Page Up/Page Down, and Home/End, then press Enter for the existing song actions
 or Esc to close it. History is held only in memory and clears when Signalbox
@@ -151,13 +155,17 @@ shows browser guidance instead of opening a blocking prompt. Other modal
 actions involving account settings and startup credentials remain classic-only;
 use classic mode for the complete inherited interface. The upcoming modal
 browses the already-fetched queue and deliberately adds no queue mutations.
+The inherited feedback semantics remain unchanged: ``+`` submits a Love rating;
+``-`` submits a Ban rating and, when that successful ban targets the current
+song, skips it.
 
 The TUI station browser defaults to case-insensitive A-Z order without changing
 Pandora's canonical order. Press ``z`` to cycle A-Z, favorites-first A-Z, and
 original/Pandora order; the compact pane header shows the station count and
 current mode. Press ``f`` to toggle a selected station as a Signalbox-local
 favorite, ``/`` for an incremental case-insensitive substring filter, and
-``#`` to jump to a one-based row in the current sorted and filtered view.
+``#`` to jump to a one-based row in the current sorted and filtered view;
+confirming a valid number immediately tunes it with no second Enter.
 Jump mode temporarily shows row numbers; normal browsing never does.
 Number-row digits and xterm-style application-keypad digits are accepted;
 keypads exposed as navigation keys are ignored safely while jump mode remains

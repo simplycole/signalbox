@@ -103,6 +103,9 @@ In TUI mode the canonical `PianoSong_t` history is also retained for the full
 process lifetime so historical info, station creation, and bookmark actions
 continue to operate. Classic mode retains its configured bounded-history
 behavior. Neither representation is persisted; both are destroyed at shutdown.
+The curses renderer owns only RECENT focus, selection, and scroll indexes. An
+Enter event carries the selected index back to the main loop, which resolves it
+against canonical history and reuses the existing history action flow.
 
 Favorites are keyed only by Pandora station ID and stored in
 `$XDG_CONFIG_HOME/signalbox/favorites` by writing a temporary file and renaming

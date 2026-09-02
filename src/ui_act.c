@@ -830,10 +830,53 @@ BarUiActCallback(BarUiActQuit) {
 	BarUiDoSkipSong (&app->player);
 }
 
+static void BarUiActHistorySong (BarApp_t *app, PianoSong_t *histSong) {
+	char buf[2];
+	if (histSong == NULL) return;
+	SbUiCommand command;
+	PianoStation_t *songStation = PianoFindStationById (app->ph.stations,
+			histSong->stationId);
+
+	if (songStation == NULL) {
+		BarUiMsg (&app->settings, MSG_ERR, "Station does not exist any more.\n");
+		return;
+	}
+
+	if (app->useTui) {
+		const char *actions[] = {"Song information", "Create station",
+				"Bookmark song or artist"};
+		const SbUiCommand commands[] = {SB_UI_CMD_INFO,
+				SB_UI_CMD_CREATE_STATION_FROM_SONG, SB_UI_CMD_BOOKMARK};
+		const int selected = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, "HISTORY ACTION", actions, 3);
+		if (selected >= 0) {
+			BarUiDispatchCommand (app, commands[selected], songStation,
+					histSong, false, BAR_DC_UNDEFINED);
+		}
+		return;
+	}
+
+	do {
+		command = SB_UI_CMD_NONE;
+		BarUiMsg (&app->settings, MSG_QUESTION, "What to do with this song? ");
+		if (BarReadline (buf, sizeof (buf), NULL, &app->input,
+				BAR_RL_FULLRETURN, -1) > 0) {
+			command = BarUiCommandFromKey (&app->settings, buf[0]);
+			if (command != SB_UI_CMD_NONE) {
+				BarUiDispatchCommand (app, command, songStation, histSong,
+						false, BAR_DC_UNDEFINED);
+			}
+		}
+	} while (command == SB_UI_CMD_HELP);
+}
+
+void BarUiActHistorySelected (BarApp_t *app, const size_t index) {
+	BarUiActHistorySong (app, PianoListGetP (app->songHistory, index));
+}
+
 /*	song history
  */
 BarUiActCallback(BarUiActHistory) {
-	char buf[2];
 	PianoSong_t *histSong;
 
 	if (app->songHistory != NULL) {
@@ -845,47 +888,7 @@ BarUiActCallback(BarUiActHistory) {
 		} else {
 			histSong = BarUiSelectSong (app, app->songHistory, &app->input);
 		}
-		if (histSong != NULL) {
-			SbUiCommand command;
-			PianoStation_t *songStation = PianoFindStationById (app->ph.stations,
-					histSong->stationId);
-
-			if (songStation == NULL) {
-				BarUiMsg (&app->settings, MSG_ERR, "Station does not exist any more.\n");
-				return;
-			}
-
-			if (app->useTui) {
-				const char *actions[] = {"Song information", "Create station",
-						"Bookmark song or artist"};
-				const SbUiCommand commands[] = {SB_UI_CMD_INFO,
-						SB_UI_CMD_CREATE_STATION_FROM_SONG, SB_UI_CMD_BOOKMARK};
-				const int selected = SbUiRendererSelectList (&app->uiRenderer,
-						&app->uiModel, "HISTORY ACTION", actions, 3);
-				if (selected >= 0) {
-					BarUiDispatchCommand (app, commands[selected], songStation,
-							histSong, false, BAR_DC_UNDEFINED);
-				}
-				return;
-			}
-
-			do {
-				command = SB_UI_CMD_NONE;
-
-				BarUiMsg (&app->settings, MSG_QUESTION, "What to do with this song? ");
-
-				if (BarReadline (buf, sizeof (buf), NULL, &app->input,
-						BAR_RL_FULLRETURN, -1) > 0) {
-					/* actions assume that selStation is the song's original
-					 * station */
-					command = BarUiCommandFromKey (&app->settings, buf[0]);
-					if (command != SB_UI_CMD_NONE) {
-						BarUiDispatchCommand (app, command, songStation, histSong,
-								false, BAR_DC_UNDEFINED);
-					}
-				}
-			} while (command == SB_UI_CMD_HELP);
-		} /* end if histSong != NULL */
+		BarUiActHistorySong (app, histSong);
 	} else {
 		BarUiMsg (&app->settings, MSG_INFO,
 				(!app->useTui && app->settings.history == 0) ? "History disabled.\n" :

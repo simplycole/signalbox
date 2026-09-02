@@ -65,8 +65,10 @@ plans, not promises of a date or release.
   favorites-first modes, local ID-based favorites, incremental filtering,
   compact count/sort headers, and numeric jump with temporary row numbers.
   Numeric jump uses `#` and isolates number-row/keypad input from normal command
-  dispatch; `G` remains Genres. RECENT includes album and snapshotted duration
-  in a compact one-line layout with a width-driven two-line fallback.
+  dispatch, and valid confirmation tunes immediately; `G` remains Genres.
+  RECENT includes rating markers, album, and snapshotted duration in a compact
+  left-packed one-line layout with a width-driven two-line fallback. Tab focus
+  makes the full main-pane history directly navigable without removing its modal.
   Recent-activation ordering remains deferred.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.

@@ -115,7 +115,8 @@ response bodies. Review the diagnostic log before sharing it anyway.
   Enter using the number row; repeat with the physical numeric keypad. Also try
   `0`, an out-of-range number, empty Enter, a long digit sequence, Backspace,
   Delete, and keypad navigation with Num Lock changed. **Expected:** valid input
-  selects that one-based row in the visible list; invalid input reports out of
+  selects and immediately tunes that one-based row in the visible list with no
+  second Enter; invalid input reports out of
   range; unsupported keypad codes remain in jump mode and never quit or invoke
   another command. **Account:** SAFE/local. **Real account:** Yes.
 
@@ -129,6 +130,13 @@ response bodies. Review the diagnostic log before sharing it anyway.
 
 ## H. History/upcoming
 
+- **Action:** Accumulate more history than fits in RECENT. Press `Tab`, then use
+  arrows/`j`/`k`, Page Up/Page Down, and Home/End; resize through roughly 90,
+  143, and 219 columns and back to a narrow layout. **Expected:** RECENT focus
+  is visible, every session entry is reachable, selection remains valid, a new
+  track does not yank an actively browsed selection, wide rows stay left-packed,
+  and wrapped rows are complete. Enter opens the existing history action menu.
+  **Account:** SAFE/read-only if actions are cancelled. **Real account:** Yes.
 - **Action:** After several tracks, press `h`, browse, open Song information,
   and cancel other history actions. **Expected:** session history is ordered,
   selection is stable, info matches the chosen track, and nested Esc returns

@@ -24,6 +24,9 @@ THE SOFTWARE.
 #ifndef SRC_UI_TYPES_H_2HR75RII
 #define SRC_UI_TYPES_H_2HR75RII
 
+#include <stdbool.h>
+#include <stddef.h>
+
 typedef enum {
 	MSG_NONE = 0,
 	MSG_INFO = 1,
@@ -74,6 +77,10 @@ typedef enum {
 typedef struct {
 	SbUiCommand command;
 	struct PianoStation *station;
+	/* TUI RECENT selection.  The main loop resolves this against canonical
+	 * songHistory; the renderer never owns or borrows historical songs. */
+	bool historySelected;
+	size_t historyIndex;
 } SbUiCommandEvent;
 
 #endif /* SRC_UI_TYPES_H_2HR75RII */

@@ -230,7 +230,9 @@ Suggested breakpoints, to tune after prototypes:
 - **Large (80+ columns, 24+ rows):** stations left; a usable eight-row
   now-playing block right; RECENT receives the remaining right-column rows and
   grows naturally as terminal height increases. History entries prefer one
-  artist/track/album/duration line and wrap metadata only when width requires.
+  left-packed ``♥ Artist — Track · Album · Duration`` line and wrap metadata
+  only when width requires. Tab moves navigation focus between STATIONS and
+  RECENT; focused history has its own selection and scroll offset.
 - **Medium (80+ columns, 20–23 rows):** station/now-playing split; hide RECENT
   when its complete entries would squeeze the eight-row now-playing minimum.
 - **Small:** one switchable station or now-playing pane; one-line progress and
