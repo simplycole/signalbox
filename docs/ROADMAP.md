@@ -59,6 +59,10 @@ plans, not promises of a date or release.
   metadata, progress, status, help, prompts, and footer hints with standard
   eight-color fallbacks and restrained 256-color refinements. A dedicated
   high-contrast theme remains future work.
+- [x] Add the C5 large-library station view: default A-Z, original and
+  favorites-first modes, local ID-based favorites, incremental filtering,
+  compact count/sort headers, and numeric jump with temporary row numbers.
+  Recent-activation ordering remains deferred.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and

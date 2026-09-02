@@ -116,3 +116,6 @@ void BarSettingsInit (BarSettings_t *);
 void BarSettingsDestroy (BarSettings_t *);
 void BarSettingsRead (BarSettings_t *);
 void BarSettingsWrite (PianoStation_t *, BarSettings_t *);
+/* Caller owns the returned path. Unlike configDir, this never follows the
+ * legacy pianobar fallback. */
+char *BarSettingsSignalboxPath (const char *);

@@ -55,6 +55,8 @@ typedef struct {
 	SbUiHistoryEntry history[SB_UI_HISTORY_MAX];
 	size_t historyCount;
 	uint64_t generation;
+	/* Changes only when the canonical station collection is refreshed. */
+	uint64_t stationsGeneration;
 } SbUiModel;
 
 typedef enum {

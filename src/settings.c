@@ -83,6 +83,17 @@ static char *BarGetXdgConfigPath (const char * const filename) {
 	return NULL;
 }
 
+char *BarSettingsSignalboxPath (const char * const filename) {
+	assert (filename != NULL);
+	const size_t relativeLen = strlen ("signalbox/") + strlen (filename) + 1;
+	char * const relative = malloc (relativeLen);
+	if (relative == NULL) return NULL;
+	snprintf (relative, relativeLen, "signalbox/%s", filename);
+	char * const path = BarGetXdgConfigPath (relative);
+	free (relative);
+	return path;
+}
+
 /*	Select one configuration directory for config, state, and default FIFO.
 	Signalbox takes precedence; pianobar remains a compatibility fallback.
  */

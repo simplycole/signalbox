@@ -57,6 +57,7 @@ void SbUiModelInit (SbUiModel *model) {
 void SbUiModelSetStations (SbUiModel *model, const PianoStation_t *stations) {
 	assert (model != NULL);
 	model->stations = stations;
+	++model->stationsGeneration;
 	size_t count = 0;
 	const PianoStation_t *station = stations;
 	PianoListForeachP (station) count++;

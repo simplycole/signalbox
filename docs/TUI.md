@@ -423,9 +423,18 @@ and output-free headless startup without a TTY.
     genre detail or cancels without mutation, and seed/feedback removal asks
     for confirmation defaulting to No. The upcoming modal reads the canonical
     queue and intentionally offers no mutation or invented queue semantics.
-12. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,
+12. **Large station libraries (C5 complete):** the TUI defaults to A-Z view
+    order and cycles through original, A-Z, and favorites-first A-Z with `z`.
+    The header reports count and sort mode. `f` toggles ID-based local
+    favorites, `/` edits an incremental substring filter, and `G` selects a
+    one-based row in the current sorted/filtered view. Jump mode alone adds a
+    temporary number overlay. `*` in the first marker column means active,
+    `*` in the second means favorite, and reverse video means selected, so
+    monochrome and `NO_COLOR` remain understandable. Recent-activation sorting
+    is deferred because no persistent usage history currently exists.
+13. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,
     and macOS/Linux before changing the interactive default.
-13. **Optional integrations:** platform media hooks, useful mouse behavior, and
+14. **Optional integrations:** platform media hooks, useful mouse behavior, and
     artwork only after a separate capability/packaging decision.
 
 ### Remaining prompt inventory after C4

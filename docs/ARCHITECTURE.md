@@ -88,6 +88,21 @@ confirmation, and list prompt primitives own only local input/presentation;
 actions still own search, creation, rename, deletion, and canonical mutation.
 ncurses types remain private to `ui_renderer_curses.c`.
 
+The C5 station browser uses a lightweight view array of borrowed
+`PianoStation_t` pointers. `station_browser.c` rebuilds it only after a station
+refresh, sort change, favorite change, or filter edit; it never relinks or
+deep-copies the canonical Pandora list. Sort precedes filtering, and numeric
+jump addresses the resulting one-based visible view. A-Z comparison is
+case-insensitive, then uses exact name, stable station ID, and original
+position as deterministic tie-breakers. Renderer selection remains a view
+index while active station identity remains the canonical pointer.
+
+Favorites are keyed only by Pandora station ID and stored in
+`$XDG_CONFIG_HOME/signalbox/favorites` by writing a temporary file and renaming
+it. This local state contains no credentials or station metadata and does not
+follow the legacy pianobar configuration fallback. Browser-only operations do
+not issue Pandora requests.
+
 Phase C4 extends those synchronous primitives to advanced station operations.
 The action layer fetches genre, seed, feedback, and station-mode data and owns
 all Pandora requests. Labels are borrowed only during one blocking modal or

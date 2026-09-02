@@ -29,6 +29,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/debug.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
+		${PIANOBAR_DIR}/station_browser.c \
 		${PIANOBAR_DIR}/terminal.c \
 		${PIANOBAR_DIR}/ui_act.c \
 		${PIANOBAR_DIR}/ui.c \

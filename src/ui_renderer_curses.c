@@ -2,6 +2,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <limits.h>
 #include <locale.h>
 #include <pthread.h>
@@ -15,6 +16,7 @@
 #include <curses.h>
 
 #include "debug.h"
+#include "station_browser.h"
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
 
@@ -62,6 +64,8 @@ typedef struct {
 	bool selectionInitialized;
 	size_t selectedIndex;
 	size_t scrollOffset;
+	SbStationBrowser browser;
+	bool jumpMode;
 } SbUiCursesData;
 
 static attr_t SbUiCursesRole (const SbUiCursesData *data,
@@ -230,27 +234,47 @@ static const char *SbUiCursesRating (const PianoSong_t *song) {
 	}
 }
 
-static size_t SbUiCursesStationCount (const SbUiModel *model) {
-	size_t count = 0;
-	const PianoStation_t *station = model->stations;
-	PianoListForeachP (station) {
-		count++;
-	}
-	return count;
+static size_t SbUiCursesStationCount (const SbUiCursesData *data) {
+	return data->browser.visibleCount;
 }
 
-static const PianoStation_t *SbUiCursesStationAt (const SbUiModel *model,
+static const PianoStation_t *SbUiCursesStationAt (const SbUiCursesData *data,
 		const size_t index) {
-	const PianoStation_t *station = model->stations;
-	for (size_t i = 0; station != NULL && i < index; i++) {
-		station = PianoListNextP (station);
+	return SbStationBrowserAt (&data->browser, index);
+}
+
+static void SbUiCursesRebuildStations (SbUiCursesData *data,
+		const SbUiModel *model, const bool preserveSelection) {
+	const PianoStation_t *selected = preserveSelection ?
+			SbUiCursesStationAt (data, data->selectedIndex) : NULL;
+	if (!SbStationBrowserRebuild (&data->browser, model->stations,
+			model->stationsGeneration)) return;
+	if (!preserveSelection) data->selectionInitialized = false;
+	data->selectedIndex = 0;
+	if (selected != NULL) {
+		for (size_t i = 0; i < data->browser.visibleCount; i++) {
+			if (data->browser.visibleStations[i] == selected) {
+				data->selectedIndex = i;
+				break;
+			}
+		}
 	}
-	return station;
+	data->scrollOffset = 0;
+}
+
+static void SbUiCursesEnsureStations (SbUiCursesData *data,
+		const SbUiModel *model) {
+	if (data->browser.sourceGeneration != model->stationsGeneration) {
+		/* A refresh may have freed a deleted canonical object. Re-anchor from the
+		 * still-canonical active station instead of inspecting a stale selection. */
+		SbUiCursesRebuildStations (data, model, false);
+	}
 }
 
 static void SbUiCursesClampSelection (SbUiCursesData *data,
 		const SbUiModel *model, const size_t visibleRows) {
-	const size_t count = SbUiCursesStationCount (model);
+	SbUiCursesEnsureStations (data, model);
+	const size_t count = SbUiCursesStationCount (data);
 	if (count == 0) {
 		data->selectedIndex = data->scrollOffset = 0;
 		data->selectionInitialized = false;
@@ -258,8 +282,8 @@ static void SbUiCursesClampSelection (SbUiCursesData *data,
 	}
 	if (!data->selectionInitialized) {
 		data->selectedIndex = 0;
-		const PianoStation_t *station = model->stations;
-		for (size_t i = 0; station != NULL; i++, station = PianoListNextP (station)) {
+		for (size_t i = 0; i < count; i++) {
+			const PianoStation_t * const station = SbUiCursesStationAt (data, i);
 			if (station == model->station) {
 				data->selectedIndex = i;
 				break;
@@ -289,15 +313,22 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 		const int y, const int x, const int height, const int width) {
 	const size_t visible = height > 0 ? (size_t) height : 0;
 	SbUiCursesClampSelection (data, model, visible);
-	if (model->stations == NULL) {
+	if (data->browser.visibleCount == 0) {
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, A_DIM);
-		SbUiCursesPut (y, x, width, "No stations available");
+		char empty[192];
+		if (data->browser.totalCount > 0 && data->browser.filter[0] != '\0') {
+			snprintf (empty, sizeof (empty), "No stations match \"%s\"",
+					data->browser.filter);
+		} else {
+			strcpy (empty, "No stations available");
+		}
+		SbUiCursesPut (y, x, width, empty);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, A_DIM);
 		return;
 	}
 	for (size_t row = 0; row < visible; row++) {
 		const size_t index = data->scrollOffset + row;
-		const PianoStation_t * const station = SbUiCursesStationAt (model, index);
+		const PianoStation_t * const station = SbUiCursesStationAt (data, index);
 		if (station == NULL) {
 			break;
 		}
@@ -305,16 +336,42 @@ static void SbUiCursesStations (SbUiCursesData *data, const SbUiModel *model,
 		SbUiCursesAttrOn (data, active ? SB_TUI_COLOR_STATION_ACTIVE :
 				SB_TUI_COLOR_STATION, active ? A_BOLD : 0);
 		mvaddch (y + (int) row, x, active ? '*' : ' ');
+		mvaddch (y + (int) row, x + 1,
+				SbStationBrowserIsFavorite (&data->browser, station) ? '*' : ' ');
 		if (index == data->selectedIndex) {
 			SbUiCursesAttrOn (data, SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
-		SbUiCursesPut (y + (int) row, x + 2, width - 2, station->name);
+		int nameX = x + 3;
+		int nameWidth = width - 3;
+		if (data->jumpMode && width >= 9) {
+			char number[16];
+			snprintf (number, sizeof (number), "%zu", index + 1);
+			SbUiCursesPut (y + (int) row, nameX, 5, number);
+			nameX += 6;
+			nameWidth -= 6;
+		}
+		SbUiCursesPut (y + (int) row, nameX, nameWidth, station->name);
 		if (index == data->selectedIndex) {
 			SbUiCursesAttrOff (data, SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		SbUiCursesAttrOff (data, active ? SB_TUI_COLOR_STATION_ACTIVE :
 				SB_TUI_COLOR_STATION, active ? A_BOLD : 0);
 	}
+}
+
+static void SbUiCursesStationHeader (SbUiCursesData *data,
+		const int y, const int x, const int width) {
+	char header[256];
+	if (data->browser.filter[0] != '\0') {
+		snprintf (header, sizeof (header), "STATIONS %zu/%zu %s /%s",
+				data->browser.visibleCount, data->browser.totalCount,
+				SbStationBrowserSortName (data->browser.sort), data->browser.filter);
+	} else {
+		snprintf (header, sizeof (header), "STATIONS %zu %s",
+				data->browser.totalCount,
+				SbStationBrowserSortName (data->browser.sort));
+	}
+	SbUiCursesPut (y, x, width, header);
 }
 
 static void SbUiCursesProgress (const SbUiCursesData *data,
@@ -537,7 +594,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const int historyY = statusY - 5;
 		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
-		SbUiCursesPut (4, 2, split - 3, "STATIONS");
+		SbUiCursesStationHeader (data, 4, 2, split - 3);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
 		SbUiCursesPut (historyY, split + 2, cols - split - 4, "RECENT");
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
@@ -551,7 +608,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const int split = cols / 3;
 		mvvline (3, split, ACS_VLINE, statusY - 4);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
-		SbUiCursesPut (4, 2, split - 3, "STATIONS");
+		SbUiCursesStationHeader (data, 4, 2, split - 3);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
@@ -559,7 +616,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				cols - split - 4);
 	} else {
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
-		SbUiCursesPut (4, 2, cols - 4, "STATION");
+		SbUiCursesStationHeader (data, 4, 2, cols - 4);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		const int stationRows = (statusY - 9) / 2;
 		SbUiCursesStations (data, model, 5, 2, stationRows, cols - 4);
@@ -573,7 +630,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 
 	if (data->helpVisible) {
-		const int height = 15;
+		const int height = 17;
 		const int width = cols < 64 ? cols - 6 : 58;
 		WINDOW * const help = newwin (height, width, (rows - height) / 2,
 				(cols - width) / 2);
@@ -622,8 +679,13 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					{"rename", "delete", "QuickMix", "manage"};
 			SbUiCursesHelpCommands (help, data, 8, stationKeys2,
 					stationDescriptions2, 4, width);
+			const char stationKeys3[] = {'z', 'f', '/', 'G'};
+			const char *const stationDescriptions3[] =
+					{"sort", "favorite", "filter", "jump"};
+			SbUiCursesHelpCommands (help, data, 9, stationKeys3,
+					stationDescriptions3, 4, width);
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 9, 2, "LIBRARY");
+			mvwaddstr (help, 11, 2, "LIBRARY");
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 			const char libraryKeys[] = {
 					SbUiCursesKey (renderer, SB_UI_CMD_BOOKMARK),
@@ -632,12 +694,12 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					SbUiCursesKey (renderer, SB_UI_CMD_UPCOMING)};
 			const char *const libraryDescriptions[] =
 					{"bookmark", "from song", "history", "upcoming"};
-			SbUiCursesHelpCommands (help, data, 10, libraryKeys,
+			SbUiCursesHelpCommands (help, data, 12, libraryKeys,
 					libraryDescriptions, 4, width);
 			const char closeKeys[] = {quitKey != BAR_KS_DISABLED ? quitKey : '-',
 					helpKey != BAR_KS_DISABLED ? helpKey : '-'};
 			const char *const closeDescriptions[] = {"quit", "close help"};
-			SbUiCursesHelpCommands (help, data, 12, closeKeys,
+			SbUiCursesHelpCommands (help, data, 14, closeKeys,
 					closeDescriptions, 2, width);
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
@@ -877,6 +939,93 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 	SbUiCursesFrame (renderer, model);
 }
 
+static void SbUiCursesLocalNotice (SbUiCursesData *data, const char *notice) {
+	pthread_mutex_lock (&data->statusLock);
+	snprintf (data->status, sizeof (data->status), "%s", notice);
+	data->statusSeverity = SB_UI_NOTICE_INFO;
+	data->statusExpires = time (NULL) + 4;
+	pthread_mutex_unlock (&data->statusLock);
+}
+
+static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
+	SbUiCursesData * const data = renderer->data;
+	char filter[sizeof (data->browser.filter)];
+	strcpy (filter, data->browser.filter);
+	while (true) {
+		char prompt[192];
+		snprintf (prompt, sizeof (prompt), "Filter: %s%s", filter,
+				strlen (filter) + 1 < sizeof (filter) ? "_" : "");
+		SbUiCursesLocalNotice (data, prompt);
+		SbUiCursesFrame (renderer, model);
+		const int key = getch ();
+		if (key == ERR) continue;
+		if (key == KEY_RESIZE) {
+			clearok (stdscr, TRUE);
+			continue;
+		}
+		if (key == '\n' || key == '\r' || key == KEY_ENTER) break;
+		if (key == 27) {
+			filter[0] = '\0';
+			SbStationBrowserSetFilter (&data->browser, filter);
+			SbUiCursesRebuildStations (data, model, true);
+			break;
+		}
+		const size_t length = strlen (filter);
+		if ((key == KEY_BACKSPACE || key == 127 || key == 8) && length > 0) {
+			filter[length - 1] = '\0';
+		} else if (key >= 0 && key <= UCHAR_MAX && isprint ((unsigned char) key) &&
+				length + 1 < sizeof (filter)) {
+			filter[length] = (char) key;
+			filter[length + 1] = '\0';
+		} else {
+			continue;
+		}
+		SbStationBrowserSetFilter (&data->browser, filter);
+		SbUiCursesRebuildStations (data, model, true);
+	}
+	SbUiCursesLocalNotice (data, data->browser.filter[0] != '\0' ?
+			"Station filter active" : "Station filter cleared");
+	SbUiCursesFrame (renderer, model);
+}
+
+static void SbUiCursesJump (SbUiRenderer *renderer, const SbUiModel *model) {
+	SbUiCursesData * const data = renderer->data;
+	char digits[16] = "";
+	data->jumpMode = true;
+	while (true) {
+		char prompt[80];
+		snprintf (prompt, sizeof (prompt), "Jump to station #: %s_", digits);
+		SbUiCursesLocalNotice (data, prompt);
+		SbUiCursesFrame (renderer, model);
+		const int key = getch ();
+		if (key == ERR) continue;
+		if (key == KEY_RESIZE) {
+			clearok (stdscr, TRUE);
+			continue;
+		}
+		if (key == 27) break;
+		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			const unsigned long target = strtoul (digits, NULL, 10);
+			if (target > 0 && target <= data->browser.visibleCount) {
+				data->selectedIndex = (size_t) target - 1;
+				SbUiCursesLocalNotice (data, "Station selected");
+			} else {
+				SbUiCursesLocalNotice (data, "Station number is out of range");
+			}
+			break;
+		}
+		const size_t length = strlen (digits);
+		if ((key == KEY_BACKSPACE || key == 127 || key == 8) && length > 0) {
+			digits[length - 1] = '\0';
+		} else if (key >= '0' && key <= '9' && length + 1 < sizeof (digits)) {
+			digits[length] = (char) key;
+			digits[length + 1] = '\0';
+		}
+	}
+	data->jumpMode = false;
+	SbUiCursesFrame (renderer, model);
+}
+
 static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
@@ -894,8 +1043,8 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	if (!data->helpVisible && (key == KEY_UP || key == 'k' ||
 			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
 			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
-		const size_t count = SbUiCursesStationCount (model);
 		SbUiCursesClampSelection (data, model, 1);
+		const size_t count = SbUiCursesStationCount (data);
 		if (count > 0) {
 			if (key == KEY_UP || key == 'k') {
 				if (data->selectedIndex > 0) data->selectedIndex--;
@@ -919,11 +1068,43 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (!data->helpVisible && (key == '\n' || key == '\r' || key == KEY_ENTER)) {
-		const PianoStation_t * const station = SbUiCursesStationAt (model,
+		const PianoStation_t * const station = SbUiCursesStationAt (data,
 				data->selectedIndex);
 		return (SbUiCommandEvent) {station != NULL ?
 				SB_UI_CMD_ACTIVATE_STATION : SB_UI_CMD_NONE,
 				(PianoStation_t *) station};
+	}
+	if (!data->helpVisible && key == '/') {
+		SbUiCursesFilter (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (!data->helpVisible && key == 'G') {
+		SbUiCursesJump (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (!data->helpVisible && key == 'z') {
+		data->browser.sort = (SbStationSort) ((data->browser.sort + 1) %
+				SB_STATION_SORT_COUNT);
+		SbUiCursesRebuildStations (data, model, true);
+		SbUiCursesLocalNotice (data, SbStationBrowserSortName (data->browser.sort));
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (!data->helpVisible && key == 'f') {
+		const PianoStation_t * const station = SbUiCursesStationAt (data,
+				data->selectedIndex);
+		if (station != NULL) {
+			const bool wasFavorite = SbStationBrowserIsFavorite (&data->browser, station);
+			if (SbStationBrowserToggleFavorite (&data->browser, station)) {
+				SbUiCursesRebuildStations (data, model, true);
+				SbUiCursesLocalNotice (data, wasFavorite ?
+						"Removed from favorites" : "Added to favorites");
+			} else {
+				SbUiCursesLocalNotice (data, "Could not save favorites");
+			}
+		}
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key >= 0 && key <= UCHAR_MAX) {
 		const SbUiCommand command = BarUiCommandFromKey (renderer->settings,
@@ -971,7 +1152,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 					command == SB_UI_CMD_DELETE_STATION ||
 					command == SB_UI_CMD_SELECT_QUICKMIX ||
 					command == SB_UI_CMD_MANAGE_STATION) {
-				station = SbUiCursesStationAt (model, data->selectedIndex);
+				station = SbUiCursesStationAt (data, data->selectedIndex);
 			}
 			return (SbUiCommandEvent) {command, (PianoStation_t *) station};
 		}
@@ -1004,6 +1185,7 @@ static void SbUiCursesShutdown (SbUiRenderer *renderer) {
 		endwin ();
 		delscreen (data->screen);
 		pthread_mutex_destroy (&data->statusLock);
+		SbStationBrowserDestroy (&data->browser);
 		free (data);
 		renderer->data = NULL;
 	}
@@ -1111,8 +1293,14 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	if (data == NULL) {
 		return false;
 	}
+	if (!SbStationBrowserInit (&data->browser)) {
+		SbStationBrowserDestroy (&data->browser);
+		free (data);
+		return false;
+	}
 	data->screen = newterm (NULL, stdout, stdin);
 	if (data->screen == NULL) {
+		SbStationBrowserDestroy (&data->browser);
 		free (data);
 		return false;
 	}
@@ -1120,6 +1308,7 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	if (pthread_mutex_init (&data->statusLock, NULL) != 0) {
 		endwin ();
 		delscreen (data->screen);
+		SbStationBrowserDestroy (&data->browser);
 		free (data);
 		return false;
 	}

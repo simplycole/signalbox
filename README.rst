@@ -146,6 +146,14 @@ actions involving account settings and startup credentials remain classic-only;
 use classic mode for the complete inherited interface. The upcoming modal
 browses the already-fetched queue and deliberately adds no queue mutations.
 
+The TUI station browser defaults to case-insensitive A-Z order without changing
+Pandora's canonical order. Press ``z`` to cycle A-Z, favorites-first A-Z, and
+original/Pandora order; the compact pane header shows the station count and
+current mode. Press ``f`` to toggle a selected station as a Signalbox-local
+favorite, ``/`` for an incremental case-insensitive substring filter, and
+``G`` to jump to a one-based row in the current sorted and filtered view.
+Jump mode temporarily shows row numbers; normal browsing never does.
+
 On first run, enter Pandora credentials when prompted. TUI mode starts with the
 autostart station, or the first available station when none is configured.
 Press ``?`` for the current key bindings and ``q`` to quit. Configuration is
@@ -156,6 +164,10 @@ back to ``$XDG_CONFIG_HOME/pianobar/config`` (normally
 their configuration immediately. If both files exist, the Signalbox file wins;
 the files are never merged or copied automatically. The annotated
 `configuration example`_ documents available settings.
+Local favorite station IDs are stored one per line in
+``$XDG_CONFIG_HOME/signalbox/favorites`` using a temporary-file rename. This
+location remains Signalbox-specific even when the legacy pianobar config
+fallback is active; favorites never alter Pandora or QuickMix metadata.
 
 .. _configuration example: contrib/config-example
 
