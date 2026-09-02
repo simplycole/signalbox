@@ -26,6 +26,7 @@ endif
 PIANOBAR_DIR:=src
 PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/main.c \
+		${PIANOBAR_DIR}/credential.c \
 		${PIANOBAR_DIR}/debug.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
@@ -68,6 +69,10 @@ LIBAO_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ao)
 NCURSESW_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ncursesw)
 NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
 
+ifeq ($(shell uname),Darwin)
+	CREDENTIAL_LDFLAGS:=-framework Security -framework CoreFoundation
+endif
+
 # combine all flags
 ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
 			${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} \
@@ -76,7 +81,7 @@ ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
 ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \
-			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS}
+			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS} ${CREDENTIAL_LDFLAGS}
 
 # Be verbose if V=1 (gnu autotools’ --disable-silent-rules)
 SILENTCMD:=@

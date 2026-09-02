@@ -24,6 +24,7 @@ THE SOFTWARE.
 /* application settings */
 
 #include "config.h"
+#include "credential.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -34,6 +35,9 @@ THE SOFTWARE.
 #include <pwd.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include <piano.h>
 
@@ -154,7 +158,7 @@ void BarSettingsDestroy (BarSettings_t *settings) {
 	free (settings->proxy);
 	free (settings->bindTo);
 	free (settings->username);
-	free (settings->password);
+	SbCredentialFreeSecret (settings->password);
 	free (settings->passwordCmd);
 	free (settings->autostartStation);
 	free (settings->eventCmd);
@@ -338,9 +342,13 @@ void BarSettingsRead (BarSettings_t *settings) {
 			} else if (streq ("bind_to", key)) {
 				settings->bindTo = strdup (val);
 			} else if (streq ("user", key)) {
+				free (settings->username);
 				settings->username = strdup (val);
+				settings->usernameFromConfig = true;
 			} else if (streq ("password", key)) {
+				free (settings->password);
 				settings->password = strdup (val);
+				settings->passwordFromConfig = true;
 			} else if (streq ("password_command", key)) {
 				settings->passwordCmd = strdup (val);
 			} else if (streq ("rpc_host", key)) {
@@ -508,6 +516,77 @@ void BarSettingsRead (BarSettings_t *settings) {
 	}
 
 	free (userhome);
+	if (settings->username == NULL) BarSettingsReadAccount (settings);
+}
+
+bool BarSettingsReadAccount (BarSettings_t *settings) {
+	char *path = BarSettingsSignalboxPath ("account");
+	if (path == NULL) return false;
+	FILE *fd = fopen (path, "r");
+	free (path);
+	if (fd == NULL) return false;
+	char line[512];
+	bool found = false;
+	while (fgets (line, sizeof (line), fd) != NULL) {
+		if (strncmp (line, "user = ", 7) == 0) {
+			char *end = line + strlen (line);
+			while (end > line && (end[-1] == '\n' || end[-1] == '\r')) *--end = '\0';
+			if (line[7] != '\0') {
+				free (settings->username);
+				settings->username = strdup (line + 7);
+				found = settings->username != NULL;
+			}
+			break;
+		}
+	}
+	fclose (fd);
+	return found;
+}
+
+static bool BarSettingsEnsureSignalboxDir (char *path) {
+	char *slash = strrchr (path, '/');
+	if (slash == NULL) return false;
+	*slash = '\0';
+	const bool ok = mkdir (path, 0700) == 0 || errno == EEXIST;
+	*slash = '/';
+	return ok;
+}
+
+bool BarSettingsWriteAccount (const char *username) {
+	if (username == NULL || strchr (username, '\n') != NULL ||
+			strchr (username, '\r') != NULL) return false;
+	char *path = BarSettingsSignalboxPath ("account");
+	if (path == NULL || !BarSettingsEnsureSignalboxDir (path)) {
+		free (path); return false;
+	}
+	const size_t len = strlen (path) + 12;
+	char *temp = malloc (len);
+	if (temp == NULL) { free (path); return false; }
+	snprintf (temp, len, "%s.tmp.XXXXXX", path);
+	const int file = mkstemp (temp);
+	bool ok = false;
+	if (file >= 0) {
+		(void) fchmod (file, 0600);
+		FILE *fd = fdopen (file, "w");
+		if (fd != NULL) {
+			ok = fprintf (fd, "# Signalbox active Pandora account\nuser = %s\n",
+					username) > 0;
+			if (ok) ok = fflush (fd) == 0 && fsync (file) == 0;
+			if (fclose (fd) != 0) ok = false;
+			if (ok) ok = rename (temp, path) == 0;
+		} else close (file);
+	}
+	if (!ok) unlink (temp);
+	free (temp); free (path);
+	return ok;
+}
+
+bool BarSettingsDeleteAccount (void) {
+	char *path = BarSettingsSignalboxPath ("account");
+	if (path == NULL) return false;
+	const bool ok = unlink (path) == 0 || errno == ENOENT;
+	free (path);
+	return ok;
 }
 
 /*	write statefile

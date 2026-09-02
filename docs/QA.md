@@ -54,6 +54,18 @@ response bodies. Review the diagnostic log before sharing it anyway.
 
 ## A. Startup
 
+- **First-run matrix:** with an isolated `XDG_CONFIG_HOME`, test valid login with
+  Remember on (relaunch auto-signs in), Remember off (relaunch prompts), invalid
+  input (nothing persists), and Esc (curses/echo restore). Inspect the account
+  file permissions and confirm it contains only `user`, never `password`.
+- **Stored failure:** place an intentionally invalid password only in a test
+  Keychain entry for service `org.signalbox.pandora`; verify Retry is bounded,
+  Edit starts with an empty password, Forget deletes only that account, and
+  Cancel exits cleanly. Remove the test entry afterward.
+- **Compatibility:** separately verify Signalbox plaintext config, legacy
+  pianobar plaintext config, `password_command`, classic mode, and
+  `--forget-credentials`. None should rewrite or migrate a legacy config.
+
 - **Action:** Run `./signalbox --tui`; authenticate through the existing config,
   password helper, or masked prompt. **Expected:** curses starts, login and
   station retrieval status is visible, and playback begins on autostart or the

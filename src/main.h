@@ -48,6 +48,8 @@ typedef struct {
 	SbUiModel uiModel;
 	SbUiRenderer uiRenderer;
 	bool useTui;
+	bool passwordFromSecureStore;
+	bool rememberLogin;
 	SbTuiTheme tuiTheme;
 	unsigned int playerErrors;
 } BarApp_t;

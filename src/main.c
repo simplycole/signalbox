@@ -51,6 +51,7 @@ THE SOFTWARE.
 #include <piano.h>
 
 #include "main.h"
+#include "credential.h"
 #include "debug.h"
 #include "terminal.h"
 #include "ui.h"
@@ -60,7 +61,8 @@ THE SOFTWARE.
 
 /*	authenticate user
  */
-static bool BarMainLoginUser (BarApp_t *app) {
+static bool BarMainLoginUser (BarApp_t *app, PianoReturn_t *pianoReturn,
+		CURLcode *curlReturn) {
 	PianoReturn_t pRet;
 	CURLcode wRet;
 	PianoRequestDataLogin_t reqData;
@@ -75,7 +77,100 @@ static bool BarMainLoginUser (BarApp_t *app) {
 	BarUiStartEventCmd (&app->settings, "userlogin", NULL, NULL, &app->player,
 			NULL, pRet, wRet);
 
+	if (pianoReturn != NULL) *pianoReturn = pRet;
+	if (curlReturn != NULL) *curlReturn = wRet;
 	return ret;
+}
+
+static void BarMainReplacePassword (BarSettings_t *settings, char *password) {
+	SbCredentialFreeSecret (settings->password);
+	settings->password = password;
+}
+
+static bool BarMainPromptTuiLogin (BarApp_t *app, const char *error) {
+	char username[256] = "";
+	char password[256] = "";
+	if (app->settings.username != NULL) {
+		snprintf (username, sizeof (username), "%s", app->settings.username);
+	}
+	bool remember = SbCredentialBackendAvailable ();
+	if (!SbUiRendererPromptLogin (&app->uiRenderer, &app->uiModel, username,
+			sizeof (username), password, sizeof (password), &remember, error)) {
+		SbCredentialClear (password, sizeof (password));
+		return false;
+	}
+	char *newUser = strdup (username);
+	char *newPassword = strdup (password);
+	SbCredentialClear (password, sizeof (password));
+	if (newUser == NULL || newPassword == NULL) {
+		free (newUser); SbCredentialFreeSecret (newPassword); return false;
+	}
+	free (app->settings.username);
+	app->settings.username = newUser;
+	BarMainReplacePassword (&app->settings, newPassword);
+	app->passwordFromSecureStore = false;
+	app->rememberLogin = remember;
+	return true;
+}
+
+static SbCredentialStatus BarMainLoadSecureCredential (BarApp_t *app) {
+	if (app->settings.username == NULL || app->settings.password != NULL ||
+			app->settings.passwordCmd != NULL) return SB_CREDENTIAL_NOT_FOUND;
+	char *secret = NULL;
+	const SbCredentialStatus status = SbCredentialLoad (SB_CREDENTIAL_SERVICE,
+			app->settings.username, &secret);
+	if (status == SB_CREDENTIAL_OK) {
+		app->settings.password = secret;
+		app->passwordFromSecureStore = true;
+	}
+	tuiDebugPrint ("credential_source=%s\n", status == SB_CREDENTIAL_OK ?
+			"secure_store" : status == SB_CREDENTIAL_NOT_FOUND ? "not_found" :
+			status == SB_CREDENTIAL_UNAVAILABLE ? "unavailable" : "error");
+	return status;
+}
+
+static void BarMainPersistLogin (BarApp_t *app) {
+	if (!app->rememberLogin) return;
+	if (!SbCredentialBackendAvailable ()) {
+		BarUiMsg (&app->settings, MSG_ERR,
+				"Signed in, but secure credential storage is unavailable; using this session only.\n");
+		return;
+	}
+	if (!BarSettingsWriteAccount (app->settings.username)) {
+		BarUiMsg (&app->settings, MSG_ERR,
+				"Signed in, but the remembered account could not be saved.\n");
+		return;
+	}
+	if (SbCredentialStore (SB_CREDENTIAL_SERVICE, app->settings.username,
+			app->settings.password) != SB_CREDENTIAL_OK) {
+		BarUiMsg (&app->settings, MSG_ERR,
+				"Signed in, but the password could not be saved securely.\n");
+	}
+}
+
+static bool BarMainRecoverStoredLogin (BarApp_t *app, bool *retry) {
+	const char *items[] = {"Retry", "Edit credentials",
+			"Forget saved credentials", "Cancel"};
+	const int selected = SbUiRendererSelectList (&app->uiRenderer, &app->uiModel,
+			"STORED LOGIN REJECTED", items, 4);
+	if (selected == 0 && !*retry) { *retry = true; return true; }
+	if (selected == 1) {
+		BarMainReplacePassword (&app->settings, NULL);
+		return BarMainPromptTuiLogin (app, "Enter updated Pandora credentials");
+	}
+	if (selected == 2) {
+		const SbCredentialStatus status = SbCredentialDelete (
+				SB_CREDENTIAL_SERVICE, app->settings.username);
+		BarMainReplacePassword (&app->settings, NULL);
+		app->passwordFromSecureStore = false;
+		if (status != SB_CREDENTIAL_OK && status != SB_CREDENTIAL_NOT_FOUND) {
+			SbUiRendererTextModal (&app->uiRenderer, &app->uiModel,
+					"CREDENTIALS", "Saved credentials could not be forgotten.");
+			return false;
+		}
+		return BarMainPromptTuiLogin (app, "Saved password forgotten");
+	}
+	return false;
 }
 
 /*	ask for username/password if none were provided in settings
@@ -106,11 +201,13 @@ static bool BarMainGetLoginCredentials (BarSettings_t *settings,
 			BarUiMsg (settings, MSG_QUESTION, "Password: ");
 			if (BarReadlineStr (passBuf, sizeof (passBuf), input, BAR_RL_NOECHO) == 0) {
 				puts ("");
+				SbCredentialClear (passBuf, sizeof (passBuf));
 				return false;
 			}
 			/* write missing newline */
 			puts ("");
 			settings->password = strdup (passBuf);
+			SbCredentialClear (passBuf, sizeof (passBuf));
 		} else {
 			pid_t chld;
 			int pipeFd[2];
@@ -153,8 +250,10 @@ static bool BarMainGetLoginCredentials (BarSettings_t *settings,
 				waitpid (chld, &status, 0);
 				if (WEXITSTATUS (status) == 0) {
 					settings->password = strdup (passBuf);
+					SbCredentialClear (passBuf, sizeof (passBuf));
 					BarUiMsg (settings, MSG_NONE, "Ok.\n");
 				} else {
+					SbCredentialClear (passBuf, sizeof (passBuf));
 					BarUiMsg (settings, MSG_NONE, "Error: Exit status %i.\n", WEXITSTATUS (status));
 					return false;
 				}
@@ -199,26 +298,6 @@ static void BarMainGetInitialStation (BarApp_t *app) {
 		app->nextStation = BarUiSelectStation (app, app->ph.stations,
 				"Select station: ", NULL, app->settings.autoselect);
 	}
-}
-
-static bool BarMainEnterTui (BarApp_t *app) {
-	SbUiRendererShutdown (&app->uiRenderer);
-	if (!SbUiRendererInitCurses (&app->uiRenderer, &app->settings,
-			app->tuiTheme)) {
-		return false;
-	}
-	SbUiRendererSetActive (&app->uiRenderer);
-	FD_CLR (STDIN_FILENO, &app->input.set);
-	SbUiRendererRender (&app->uiRenderer, &app->uiModel,
-			SB_UI_RENDER_STATION);
-	return true;
-}
-
-static void BarMainLeaveTuiForPrompt (BarApp_t *app) {
-	SbUiRendererShutdown (&app->uiRenderer);
-	SbUiRendererInitClassic (&app->uiRenderer, &app->settings);
-	SbUiRendererSetActive (&app->uiRenderer);
-	FD_SET (STDIN_FILENO, &app->input.set);
 }
 
 /*	wait for user input
@@ -372,25 +451,29 @@ static void BarMainPrintTime (BarApp_t *app) {
  */
 static void BarMainLoop (BarApp_t *app) {
 	pthread_t playerThread;
-	bool resumeTui = false;
-
+	const SbCredentialStatus credentialStatus = BarMainLoadSecureCredential (app);
 	if (app->useTui && (app->settings.username == NULL ||
-			(app->settings.password == NULL &&
-			app->settings.passwordCmd == NULL))) {
-		BarMainLeaveTuiForPrompt (app);
-		resumeTui = true;
-	}
-	if (!BarMainGetLoginCredentials (&app->settings, &app->input)) {
-		return;
-	}
-	if (resumeTui && !BarMainEnterTui (app)) {
-		app->doQuit = true;
-		return;
-	}
+			(app->settings.password == NULL && app->settings.passwordCmd == NULL))) {
+		const char *credentialNotice = credentialStatus == SB_CREDENTIAL_ERROR ?
+				"Secure storage could not be accessed; sign-in will be session-only" :
+				credentialStatus == SB_CREDENTIAL_UNAVAILABLE ?
+				"Secure storage unavailable; sign-in will be session-only" : NULL;
+		if (!BarMainPromptTuiLogin (app, credentialNotice)) return;
+	} else if (!BarMainGetLoginCredentials (&app->settings, &app->input)) return;
 
-	if (!BarMainLoginUser (app)) {
-		return;
+	bool retriedStored = false;
+	for (;;) {
+		PianoReturn_t pRet = PIANO_RET_OK;
+		CURLcode wRet = CURLE_OK;
+		if (app->passwordFromSecureStore) {
+			BarUiMsg (&app->settings, MSG_INFO, "Signing in with saved credentials... ");
+		}
+		if (BarMainLoginUser (app, &pRet, &wRet)) break;
+		if (!app->useTui || !app->passwordFromSecureStore || wRet != CURLE_OK ||
+				!BarMainRecoverStoredLogin (app, &retriedStored)) return;
 	}
+	BarMainPersistLogin (app);
+	BarUiMsg (&app->settings, MSG_INFO, "Connected.\n");
 
 	if (!BarMainGetStations (app)) {
 		return;
@@ -473,6 +556,7 @@ static void BarMainSetupSigaction () {
 int main (int argc, char **argv) {
 	static BarApp_t app;
 	bool useTui = false;
+	bool forgetCredentials = false;
 	SbTuiTheme tuiTheme = SB_TUI_THEME_PHOSPHOR;
 
 	debugEnable();
@@ -483,6 +567,8 @@ int main (int argc, char **argv) {
 			useTui = true;
 		} else if (strcmp (argv[i], "--classic") == 0) {
 			useTui = false;
+		} else if (strcmp (argv[i], "--forget-credentials") == 0) {
+			forgetCredentials = true;
 		} else if (strcmp (argv[i], "--theme") == 0 && i + 1 < argc) {
 			const char * const name = argv[++i];
 			if (strcmp (name, "phosphor") == 0) tuiTheme = SB_TUI_THEME_PHOSPHOR;
@@ -494,7 +580,7 @@ int main (int argc, char **argv) {
 				return 2;
 			}
 		} else {
-			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral]\n", argv[0]);
+			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--forget-credentials]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -526,6 +612,29 @@ int main (int argc, char **argv) {
 
 	BarSettingsInit (&app.settings);
 	BarSettingsRead (&app.settings);
+	if (forgetCredentials) {
+		int result = 1;
+		if (app.settings.username == NULL) {
+			fputs ("signalbox: no configured Pandora account to forget\n", stderr);
+		} else {
+			const SbCredentialStatus status = SbCredentialDelete (
+					SB_CREDENTIAL_SERVICE, app.settings.username);
+			if (status == SB_CREDENTIAL_OK || status == SB_CREDENTIAL_NOT_FOUND) {
+				if (!app.settings.usernameFromConfig) BarSettingsDeleteAccount ();
+				puts (status == SB_CREDENTIAL_OK ? "Forgot saved Signalbox credentials." :
+						"No saved Signalbox password was found.");
+				result = 0;
+			} else if (status == SB_CREDENTIAL_UNAVAILABLE) {
+				fputs ("signalbox: secure credential storage is unavailable\n", stderr);
+			} else {
+				fputs ("signalbox: saved credentials could not be forgotten\n", stderr);
+			}
+		}
+		BarSettingsDestroy (&app.settings);
+		BarPlayerDestroy (&app.player);
+		BarTermRestore ();
+		return result;
+	}
 	SbUiModelInit (&app.uiModel);
 	SbUiModelSetVolume (&app.uiModel, app.settings.volume);
 	SbUiRendererInitClassic (&app.uiRenderer, &app.settings);

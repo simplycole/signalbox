@@ -105,6 +105,8 @@ typedef struct {
 	char *rpcHost, *rpcTlsPort, *partnerUser, *partnerPassword, *device, *inkey, *outkey, *caBundle;
 	char *audioPipe;
 	char *configDir;
+	bool usernameFromConfig;
+	bool passwordFromConfig;
 	char keys[BAR_KS_COUNT];
 	int sampleRate;
 	BarMsgFormatStr_t msgFormat[MSG_COUNT];
@@ -119,3 +121,6 @@ void BarSettingsWrite (PianoStation_t *, BarSettings_t *);
 /* Caller owns the returned path. Unlike configDir, this never follows the
  * legacy pianobar fallback. */
 char *BarSettingsSignalboxPath (const char *);
+bool BarSettingsReadAccount (BarSettings_t *);
+bool BarSettingsWriteAccount (const char *);
+bool BarSettingsDeleteAccount (void);

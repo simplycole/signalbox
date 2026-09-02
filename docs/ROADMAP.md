@@ -73,6 +73,9 @@ plans, not promises of a date or release.
   left-packed one-line layout with a width-driven two-line fallback. Tab focus
   makes the full main-pane history directly navigable without removing its modal.
   Recent-activation ordering remains deferred.
+- [x] Add native masked TUI startup login, optional remembered-account metadata,
+  automatic secure-store login, stale-credential recovery, and a narrow
+  cross-platform credential adapter while preserving classic/plaintext compatibility.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and
@@ -83,7 +86,7 @@ plans, not promises of a date or release.
 - [ ] Support media keys.
 - [ ] Publish metadata through macOS Now Playing.
 - [ ] Add native notifications.
-- [ ] Store credentials securely with Keychain.
+- [x] Store credentials securely with Keychain.
 - [ ] Maintain explicit Apple Silicon validation.
 
 ## Phase 4 — Linux integration
@@ -109,6 +112,13 @@ plans, not promises of a date or release.
 - [ ] Provide stable scripting and headless control interfaces.
 - [ ] Consider external integrations only where technically and legally
   appropriate.
+
+## Native Windows direction
+
+- [ ] Produce a native Windows `.exe` with platform-appropriate terminal and
+  audio support.
+- [ ] Add a Windows Credential Manager backend behind the existing credential
+  interface using `CredRead`, `CredWrite`, and `CredDelete`.
 
 Priorities may change as Pandora compatibility, platform behavior, and
 maintainer capacity evolve. Any phase may include documentation, testing,

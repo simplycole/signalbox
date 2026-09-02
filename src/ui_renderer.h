@@ -108,6 +108,8 @@ bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *, SbTuiTheme);
 bool SbUiRendererIsCurses (const SbUiRenderer *);
 bool SbUiRendererPromptText (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *, char *, size_t);
+bool SbUiRendererPromptLogin (SbUiRenderer *, const SbUiModel *, char *, size_t,
+		char *, size_t, bool *, const char *);
 bool SbUiRendererConfirm (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *);
 int SbUiRendererSelectList (SbUiRenderer *, const SbUiModel *,

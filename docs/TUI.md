@@ -463,9 +463,14 @@ and output-free headless startup without a TTY.
   and password replacement and requires a dedicated secure-input design.
 - **Not relevant to the TUI:** FIFO byte commands and event-command output;
   neither is an interactive terminal prompt.
-- **Deferred architecture:** startup email/password prompts and password
-  masking. They intentionally suspend the TUI and retain the inherited classic
-  path. There is no persistent history or mutable client-side queue to migrate.
+- **Native startup:** the login form edits email and masked password fields and
+  a secure-remember checkbox inside curses. Tab/Shift-Tab or arrows move fields,
+  Space toggles remembering, Enter submits, and Esc cancels with terminal state
+  restored. A rejected stored secret offers one explicit retry, editing,
+  forgetting that exact service/account entry, or cancellation.
+- **Credential availability:** macOS uses Keychain. Other platforms currently
+  explain that secure storage is unavailable and continue session-only; there
+  is no plaintext fallback. Classic mode retains inherited prompts.
 
 Automated C4 validation does not confirm any account-changing request. Native
 modal navigation, cancellation, resizing, themes, and checkbox state can be

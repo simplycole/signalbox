@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE_EXTENDED 1
 #include "config.h"
+#include "credential.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -1088,6 +1089,90 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 					(length - cursor + 1) * sizeof (*input));
 			input[cursor++] = (wchar_t) key;
 			length++;
+		}
+	}
+}
+
+bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
+		char *username, const size_t usernameSize, char *password,
+		const size_t passwordSize, bool *remember, const char *error) {
+	if (!SbUiRendererIsCurses (renderer) || usernameSize < 2 ||
+			passwordSize < 2 || remember == NULL) return false;
+	size_t userLen = strlen (username), passLen = 0;
+	if (userLen >= usernameSize) userLen = usernameSize - 1;
+	password[0] = '\0';
+	int field = username[0] == '\0' ? 0 : 1;
+	(void) curs_set (1);
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		SbUiCursesData * const data = renderer->data;
+		WINDOW *window = SbUiCursesModal (data, "SIGNALBOX LOGIN",
+				error != NULL ? error : "Sign in to Pandora", 12);
+		if (window == NULL) continue;
+		const int width = getmaxx (window);
+		if (error != NULL) {
+			mvwhline (window, 3, 2, ' ', width - 4);
+			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ERROR, A_BOLD);
+			mvwaddnstr (window, 3, 2, error, width - 4);
+			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ERROR, A_BOLD);
+		}
+		const char *labels[] = {"Pandora email:", "Password:",
+				"Remember securely:"};
+		for (int i = 0; i < 3; i++) {
+			SbUiCursesWAttrOn (window, data, i == field ? SB_TUI_COLOR_TITLE :
+					SB_TUI_COLOR_PRIMARY, i == field ? A_BOLD : 0);
+			mvwaddnstr (window, 5 + i, 2, labels[i], 20);
+			SbUiCursesWAttrOff (window, data, i == field ? SB_TUI_COLOR_TITLE :
+					SB_TUI_COLOR_PRIMARY, i == field ? A_BOLD : 0);
+		}
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST,
+				field == 0 ? A_BOLD : 0);
+		mvwaddnstr (window, 5, 22, username, width - 25);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST,
+				field == 0 ? A_BOLD : 0);
+		char masked[100];
+		const size_t visiblePass = passLen < sizeof (masked) - 1 ? passLen :
+				sizeof (masked) - 1;
+		memset (masked, '*', visiblePass); masked[visiblePass] = '\0';
+		mvwaddnstr (window, 6, 22, masked, width - 25);
+		mvwprintw (window, 7, 22, "%s", *remember ? "[x]" : "[ ]");
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_KEY, 0);
+		mvwaddnstr (window, 9, 2,
+				"Tab: next   Space: toggle   Enter: sign in   Esc: cancel",
+				width - 4);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
+		if (field == 0) wmove (window, 5, 22 + (int) userLen);
+		else if (field == 1) wmove (window, 6, 22 + (int) visiblePass);
+		else (void) curs_set (0);
+		wrefresh (window);
+		wint_t key;
+		const int result = wget_wch (window, &key);
+		delwin (window);
+		if (result == ERR) continue;
+		if (key == 27) {
+			SbCredentialClear (password, passwordSize);
+			(void) curs_set (0); SbUiCursesFrame (renderer, model); return false;
+		}
+		if (key == '\t' || key == KEY_DOWN) { field = (field + 1) % 3; continue; }
+		if (key == KEY_BTAB || key == KEY_UP) { field = (field + 2) % 3; continue; }
+		if (field == 2 && key == ' ') { *remember = !*remember; continue; }
+		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			if (field < 2) { field++; continue; }
+			if (userLen > 0 && passLen > 0) {
+				(void) curs_set (0); SbUiCursesFrame (renderer, model); return true;
+			}
+			continue;
+		}
+		char *buffer = field == 0 ? username : password;
+		size_t *length = field == 0 ? &userLen : &passLen;
+		const size_t capacity = field == 0 ? usernameSize : passwordSize;
+		if (field < 2 && (key == KEY_BACKSPACE || key == 127 || key == 8) &&
+				*length > 0) buffer[--*length] = '\0';
+		else if (field < 2 && key == KEY_DC && *length > 0)
+			buffer[--*length] = '\0';
+		else if (field < 2 && result == OK && iswprint ((wint_t) key) &&
+				*length + 1 < capacity) {
+			buffer[(*length)++] = (char) key; buffer[*length] = '\0';
 		}
 	}
 }

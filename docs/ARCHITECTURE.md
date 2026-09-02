@@ -130,14 +130,14 @@ their existing libpiano destruction paths after the modal closes.
 
 `--tui` selects the full-screen backend while classic remains the default.
 Terminal suitability is checked before termios or curses initialization. The
-inherited blocking login interaction runs in classic mode. Initial TUI station
+startup login uses a native, masked curses form. Initial TUI station
 choice uses autostart or the first station without leaving curses, while FIFO
 input remains on the existing byte-to-command path. The curses allowlist covers
 create/add-music search, rename/delete, QuickMix, hierarchical genre selection,
 shared station IDs, create-from-song, bookmarks, session history, upcoming
 display, and seed/feedback/mode management. Account settings remain disabled.
-Startup credentials deliberately retain the classic fallback so password
-masking remains unchanged.
+Classic startup retains the inherited masked readline prompt and password
+helper behavior.
 
 Other blocking prompts and full readline behavior remain on the classic path.
 Event-command serialization remains machine-facing direct
@@ -155,9 +155,29 @@ legacy `pianobar` directory when its config exists, otherwise `signalbox`. State
 and the default control FIFO use that same directory; explicit paths configured
 for the FIFO, event command, audio pipe, or CA bundle remain unchanged.
 
+The Signalbox-only ``account`` file stores the remembered active email, never a
+password. It is created with mode `0600` by temporary-file write, `fsync`, and
+rename, and is consulted only when the selected config supplies no user. The
+credential precedence is explicit plaintext `password`, explicit
+`password_command`, an exact secure-store match for the active user, then an
+interactive prompt. Signalbox does not merge, rewrite, or migrate legacy
+pianobar configuration.
+
+### Credential boundary: `src/credential.c`, `src/credential.h`
+
+Authentication calls a narrow load/store/delete/availability interface keyed
+by service `org.signalbox.pandora` and Pandora email. macOS implements it with
+Security.framework's `SecItem` APIs and updates an existing generic-password
+item rather than accumulating duplicates. Non-macOS builds currently return
+unavailable, allowing session-only TUI login and unchanged explicit classic
+configuration. A future Linux implementation can use optional Secret Service;
+a native Windows build can implement the same interface with Credential
+Manager `CredRead`, `CredWrite`, and `CredDelete` without exposing Windows
+headers to shared authentication code.
+
 ### Platform integration
 
-There is no native macOS or Linux desktop-integration layer in the core program.
+The credential adapter is the first narrow native macOS integration layer.
 Portable/POSIX facilities, libao, terminal handling, event commands, and FIFO
 control provide the current integration points. Scripts under `contrib/` offer
 examples outside the core executable.

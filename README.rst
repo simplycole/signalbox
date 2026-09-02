@@ -177,7 +177,24 @@ keypads exposed as navigation keys are ignored safely while jump mode remains
 open. Unsupported keypad sequences are consumed without dispatching commands.
 ``G`` remains the configured Genres command.
 
-On first run, enter Pandora credentials when prompted. TUI mode starts with the
+On first run, TUI mode presents a native masked Pandora login and asks whether
+to remember the account securely. On macOS, Signalbox stores the password in
+Keychain under service ``org.signalbox.pandora`` and stores only the active
+email in ``$XDG_CONFIG_HOME/signalbox/account`` (mode ``0600``). Later launches
+sign in automatically. Choosing session-only writes neither password nor
+account metadata. Linux currently has a graceful unavailable backend and never
+falls back to plaintext storage; classic prompts continue to work as before.
+Use ``signalbox --forget-credentials`` to remove the saved password for the
+configured account. Signalbox does not delete or migrate legacy credentials.
+
+Explicit ``password`` or ``password_command`` configuration takes precedence
+over secure storage. Otherwise Signalbox uses the configured/remembered user,
+then its exact matching secure-store entry, then an interactive prompt.
+Plaintext ``user`` and ``password`` remain supported in both Signalbox and the
+legacy pianobar config for compatibility, but the TUI never writes a plaintext
+password.
+
+TUI mode starts with the
 autostart station, or the first available station when none is configured.
 Press ``?`` for the current key bindings and ``q`` to quit. Configuration is
 read from ``$XDG_CONFIG_HOME/signalbox/config`` (normally
