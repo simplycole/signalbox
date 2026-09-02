@@ -111,7 +111,7 @@ Start the executable from the source tree with:
 
    ./signalbox
 
-Classic mode remains the default. To launch the experimental Phase C3
+Classic mode remains the default. To launch the experimental Phase C4
 full-screen interface, use an interactive terminal and run:
 
 .. code-block:: console
@@ -130,13 +130,15 @@ playback state and adaptive progress, transient status notices, and up to ten
 recent tracks from the current session. History is shown only when the terminal
 has room. Navigate with arrows or ``j``/``k``, press Enter to tune, and use the
 configured keys for create, rename, delete, pause/resume, next, love, ban,
-volume down/up/reset, help, and quit. Create/search uses a native text prompt
-and result selector; rename uses bounded text editing; delete uses an explicit
-confirmation. The inherited station-select key
+volume down/up/reset, help, and quit. Native management includes create/search,
+add-music search, QuickMix membership, genre browsing, shared-station IDs,
+create-from-current-song, song/artist bookmarks, session-history actions, and
+station seed/feedback/mode lists. Destructive operations use explicit
+confirmations. The inherited station-select key
 shows browser guidance instead of opening a blocking prompt. Other modal
-actions (including seed management, history/upcoming selectors, settings, and
-startup credentials) remain classic-only; use classic mode for the complete
-inherited interface.
+actions involving account settings and startup credentials remain classic-only;
+use classic mode for the complete inherited interface. The upcoming modal
+browses the already-fetched queue and deliberately adds no queue mutations.
 
 On first run, enter Pandora credentials when prompted. TUI mode starts with the
 autostart station, or the first available station when none is configured.

@@ -1,6 +1,6 @@
 # Terminal UI architecture decision
 
-Status: architecture phases A and B and renderer Phase C3 are complete. The
+Status: architecture phases A and B and renderer Phase C4 are complete. The
 ncursesw shell is experimental and opt-in, with a station browser, polished
 now-playing view, native create/search/rename/delete prompts, volume controls,
 retry/recovery notices, fixed themes, and session history.
@@ -392,18 +392,50 @@ and output-free headless startup without a TTY.
    responsive layout, and direct Enter activation.
 8. **Now playing (complete):** metadata, playback/rating, signed-dB volume,
    wide-aware truncation, and timed adaptive progress.
-9. **History/notices/help (partial):** bounded history, timed status/error
+9. **History/notices/help (complete):** bounded history, timed status/error
    notices, configured help, and request retry/recovery presentation are
-   complete; upcoming-track presentation remains.
+   complete, including a read-only upcoming-track modal over the existing queue.
 10. **Prompts/themes/accessibility (C3 complete):** bounded wide-character text
     entry, destructive confirmation, search-result selection, phosphor/amber/
     mono/neutral palettes, and `NO_COLOR`. Selection and severity retain text
     or reverse-video cues; there is no blink or animation. Startup credentials,
-    seed/settings flows, and a dedicated high-contrast palette remain deferred.
-11. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,
+    account settings, and a dedicated high-contrast palette remain deferred.
+11. **Advanced station management (C4 complete):** QuickMix uses a local
+    checkbox snapshot with explicit `[x]`/`[ ]` markers; genre creation uses
+    category then genre lists; shared IDs, create-from-song, bookmarks,
+    history actions, and seed/feedback/mode lists are native. Esc backs out of
+    genre detail or cancels without mutation, and seed/feedback removal asks
+    for confirmation defaulting to No. The upcoming modal reads the canonical
+    queue and intentionally offers no mutation or invented queue semantics.
+12. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,
     and macOS/Linux before changing the interactive default.
-12. **Optional integrations:** platform media hooks, useful mouse behavior, and
+13. **Optional integrations:** platform media hooks, useful mouse behavior, and
     artwork only after a separate capability/packaging decision.
+
+### Remaining prompt inventory after C4
+
+- **Native in C4:** QuickMix, genre category/genre browsing, shared station ID,
+  create from the current or a historical song, song/artist bookmark choice,
+  add-music search, seed and feedback removal, station mode selection, history
+  actions, and read-only upcoming-track browsing.
+- **Classic for now:** account settings, because that flow includes username
+  and password replacement and requires a dedicated secure-input design.
+- **Not relevant to the TUI:** FIFO byte commands and event-command output;
+  neither is an interactive terminal prompt.
+- **Deferred architecture:** startup email/password prompts and password
+  masking. They intentionally suspend the TUI and retain the inherited classic
+  path. There is no persistent history or mutable client-side queue to migrate.
+
+Automated C4 validation does not confirm any account-changing request. Native
+modal navigation, cancellation, resizing, themes, and checkbox state can be
+tested safely; QuickMix save, station creation, bookmarks, seed/feedback
+deletion, mode changes, and love/ban require an explicitly supervised manual
+account test.
+
+C4 keeps the established configured direct bindings instead of adding a
+station action menu. The compact help overlay groups the advanced bindings;
+the footer remains limited to navigation, tune, playback, volume, help, and
+quit.
 
 ## Research sources
 

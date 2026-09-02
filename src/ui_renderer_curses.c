@@ -431,25 +431,33 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			wattron (help, A_BOLD);
 			mvwaddstr (help, 1, 2, "SIGNALBOX HELP");
 			wattroff (help, A_BOLD);
-			mvwaddstr (help, 3, 2, "Up/Down or j/k   select station");
-			mvwaddstr (help, 4, 2, "Enter            tune selected station");
-			mvwprintw (help, 5, 2, "%c                pause/resume",
-					SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE));
-			mvwprintw (help, 6, 2, "%c                next song",
-					SbUiCursesKey (renderer, SB_UI_CMD_SKIP));
-			mvwprintw (help, 7, 2, "%c                love song",
-					SbUiCursesKey (renderer, SB_UI_CMD_LOVE));
-			mvwprintw (help, 8, 2, "%c                ban song",
+			mvwaddstr (help, 2, 2, "NAVIGATION");
+			mvwaddstr (help, 3, 2, "Up/Down or j/k select; Enter tunes");
+			mvwaddstr (help, 4, 2, "PLAYBACK");
+			mvwprintw (help, 5, 2, "%c pause/resume   %c next   %c love   %c ban",
+					SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
+					SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
+					SbUiCursesKey (renderer, SB_UI_CMD_LOVE),
 					SbUiCursesKey (renderer, SB_UI_CMD_BAN));
-			mvwprintw (help, 9, 2, "%c                create station",
-					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION));
-			mvwprintw (help, 10, 2, "%c                rename selected station",
-					SbUiCursesKey (renderer, SB_UI_CMD_RENAME_STATION));
-			mvwprintw (help, 11, 2, "%c                delete selected station",
-					SbUiCursesKey (renderer, SB_UI_CMD_DELETE_STATION));
-			mvwprintw (help, 12, 2, "%c                quit",
-					quitKey != BAR_KS_DISABLED ? quitKey : '-');
-			mvwprintw (help, 13, 2, "%c                close help",
+			mvwaddstr (help, 6, 2, "STATIONS");
+			mvwprintw (help, 7, 2, "%c create  %c genre  %c shared  %c add music",
+					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION),
+					SbUiCursesKey (renderer, SB_UI_CMD_GENRE_STATION),
+					SbUiCursesKey (renderer, SB_UI_CMD_ADD_SHARED),
+					SbUiCursesKey (renderer, SB_UI_CMD_ADD_MUSIC));
+			mvwprintw (help, 8, 2, "%c rename  %c delete  %c QuickMix  %c manage",
+					SbUiCursesKey (renderer, SB_UI_CMD_RENAME_STATION),
+					SbUiCursesKey (renderer, SB_UI_CMD_DELETE_STATION),
+					SbUiCursesKey (renderer, SB_UI_CMD_SELECT_QUICKMIX),
+					SbUiCursesKey (renderer, SB_UI_CMD_MANAGE_STATION));
+			mvwaddstr (help, 9, 2, "LIBRARY");
+			mvwprintw (help, 10, 2, "%c bookmark  %c from song  %c history  %c upcoming",
+					SbUiCursesKey (renderer, SB_UI_CMD_BOOKMARK),
+					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION_FROM_SONG),
+					SbUiCursesKey (renderer, SB_UI_CMD_HISTORY),
+					SbUiCursesKey (renderer, SB_UI_CMD_UPCOMING));
+			mvwprintw (help, 12, 2, "%c quit   %c close help",
+					quitKey != BAR_KS_DISABLED ? quitKey : '-',
 					helpKey != BAR_KS_DISABLED ? helpKey : '-');
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
@@ -594,7 +602,9 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		if (selected >= offset + visible) offset = selected - visible + 1;
 		for (size_t row = 0; row < visible && offset + row < count; row++) {
 			if (offset + row == selected) wattron (window, A_REVERSE);
-			mvwaddnstr (window, 5 + (int) row, 2, items[offset + row], ww - 4);
+			const char *item = items[offset + row] != NULL ?
+					items[offset + row] : "(unavailable)";
+			mvwaddnstr (window, 5 + (int) row, 2, item, ww - 4);
 			if (offset + row == selected) wattroff (window, A_REVERSE);
 		}
 		wrefresh (window);
@@ -606,6 +616,50 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		else if (key == KEY_HOME) selected = 0;
 		else if (key == KEY_END) selected = count - 1;
 		else if (key == '\n' || key == '\r' || key == KEY_ENTER) return (int) selected;
+	}
+}
+
+/* The checked array is caller-owned scratch state.  Canonical station flags
+ * are deliberately not exposed to or changed by the renderer. */
+bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
+		const char *title, const char *const *items, bool *checked,
+		const size_t count) {
+	if (!SbUiRendererIsCurses (renderer) || count == 0 || checked == NULL) {
+		return false;
+	}
+	size_t selected = 0, offset = 0;
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		int rows, cols;
+		getmaxyx (stdscr, rows, cols);
+		const int height = rows < 22 ? rows - 2 : 20;
+		WINDOW *window = SbUiCursesModal (title,
+				"Up/Down or j/k; Space toggles; Enter saves; Esc cancels", height);
+		if (window == NULL) continue;
+		int wh, ww;
+		getmaxyx (window, wh, ww);
+		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
+		if (selected < offset) offset = selected;
+		if (selected >= offset + visible) offset = selected - visible + 1;
+		for (size_t row = 0; row < visible && offset + row < count; row++) {
+			const size_t index = offset + row;
+			if (index == selected) wattron (window, A_REVERSE);
+			mvwprintw (window, 5 + (int) row, 2, "[%c] ",
+					checked[index] ? 'x' : ' ');
+			mvwaddnstr (window, 5 + (int) row, 6,
+					items[index] != NULL ? items[index] : "(unavailable)", ww - 8);
+			if (index == selected) wattroff (window, A_REVERSE);
+		}
+		wrefresh (window);
+		const int key = wgetch (window);
+		delwin (window);
+		if (key == 27) return false;
+		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
+		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
+		else if (key == KEY_HOME) selected = 0;
+		else if (key == KEY_END) selected = count - 1;
+		else if (key == ' ') checked[selected] = !checked[selected];
+		else if (key == '\n' || key == '\r' || key == KEY_ENTER) return true;
 	}
 }
 
@@ -692,12 +746,24 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 				command == SB_UI_CMD_BAN || command == SB_UI_CMD_VOLUME_DOWN ||
 				command == SB_UI_CMD_VOLUME_UP ||
 				command == SB_UI_CMD_VOLUME_RESET ||
+				command == SB_UI_CMD_ADD_MUSIC ||
 				command == SB_UI_CMD_CREATE_STATION ||
+				command == SB_UI_CMD_GENRE_STATION ||
+				command == SB_UI_CMD_HISTORY ||
+				command == SB_UI_CMD_ADD_SHARED ||
+				command == SB_UI_CMD_UPCOMING ||
+				command == SB_UI_CMD_SELECT_QUICKMIX ||
+				command == SB_UI_CMD_BOOKMARK ||
+				command == SB_UI_CMD_MANAGE_STATION ||
+				command == SB_UI_CMD_CREATE_STATION_FROM_SONG ||
 				command == SB_UI_CMD_RENAME_STATION ||
 				command == SB_UI_CMD_DELETE_STATION) {
 			const PianoStation_t *station = NULL;
-			if (command == SB_UI_CMD_RENAME_STATION ||
-					command == SB_UI_CMD_DELETE_STATION) {
+			if (command == SB_UI_CMD_ADD_MUSIC ||
+					command == SB_UI_CMD_RENAME_STATION ||
+					command == SB_UI_CMD_DELETE_STATION ||
+					command == SB_UI_CMD_SELECT_QUICKMIX ||
+					command == SB_UI_CMD_MANAGE_STATION) {
 				station = SbUiCursesStationAt (model, data->selectedIndex);
 			}
 			return (SbUiCommandEvent) {command, (PianoStation_t *) station};

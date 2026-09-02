@@ -50,7 +50,10 @@ plans, not promises of a date or release.
   deferred.
 - [x] Add native TUI create/search, rename, and delete prompts with bounded
   editing, confirmation, and result selection; retain classic startup
-  credential and advanced nested prompts.
+  credential and account-settings prompts.
+- [x] Add native TUI QuickMix editing, hierarchical genre selection, shared
+  station entry, create-from-song and bookmark choices, history actions, and
+  station seed/feedback/mode management with destructive confirmations.
 - [x] Add phosphor, amber, monochrome, and neutral themes with `NO_COLOR`
   degradation and no blink/animation. A dedicated high-contrast theme remains
   future work.

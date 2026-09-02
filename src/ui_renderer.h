@@ -106,6 +106,8 @@ bool SbUiRendererConfirm (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *);
 int SbUiRendererSelectList (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *const *, size_t);
+bool SbUiRendererToggleList (SbUiRenderer *, const SbUiModel *,
+		const char *, const char *const *, bool *, size_t);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);
 SbUiCommandEvent SbUiRendererReadCommand (SbUiRenderer *, const SbUiModel *);
 void SbUiRendererShutdown (SbUiRenderer *);

@@ -25,6 +25,9 @@ THE SOFTWARE.
 
 #include "config.h"
 
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -61,6 +64,81 @@ static inline void BarUiDoSkipSong (player_t * const player) {
 	pthread_mutex_lock (&player->aoplayLock);
 	pthread_cond_broadcast (&player->aoplayCond);
 	pthread_mutex_unlock (&player->aoplayLock);
+}
+
+static size_t BarUiCountStations (const PianoStation_t *item) {
+	size_t count = 0;
+	PianoListForeachP (item) count++;
+	return count;
+}
+
+static size_t BarUiCountSongs (const PianoSong_t *item) {
+	size_t count = 0;
+	PianoListForeachP (item) count++;
+	return count;
+}
+
+static size_t BarUiCountArtists (const PianoArtist_t *item) {
+	size_t count = 0;
+	PianoListForeachP (item) count++;
+	return count;
+}
+
+static PianoSong_t *BarUiTuiSelectSong (BarApp_t *app, PianoSong_t *songs,
+		const char *title) {
+	const size_t count = BarUiCountSongs (songs);
+	if (count == 0) return NULL;
+	char **labels = calloc (count, sizeof (*labels));
+	if (labels == NULL) return NULL;
+	PianoSong_t *song = songs;
+	size_t i = 0;
+	PianoListForeachP (song) {
+		const char *artist = song->artist != NULL ? song->artist : "--";
+		const char *titleText = song->title != NULL ? song->title : "--";
+		const size_t size = strlen (artist) + strlen (titleText) + 6;
+		labels[i] = malloc (size);
+		if (labels[i] != NULL) snprintf (labels[i], size, "%s — %s",
+				artist, titleText);
+		i++;
+	}
+	for (i = 0; i < count; i++) {
+		if (labels[i] == NULL) labels[i] = strdup ("(unavailable)");
+	}
+	const int selected = SbUiRendererSelectList (&app->uiRenderer,
+			&app->uiModel, title, (const char *const *) labels, count);
+	for (i = 0; i < count; i++) free (labels[i]);
+	free (labels);
+	return selected >= 0 ? PianoListGetP (songs, selected) : NULL;
+}
+
+static PianoArtist_t *BarUiTuiSelectArtist (BarApp_t *app,
+		PianoArtist_t *artists, const char *title) {
+	const size_t count = BarUiCountArtists (artists);
+	if (count == 0) return NULL;
+	const char **labels = calloc (count, sizeof (*labels));
+	if (labels == NULL) return NULL;
+	PianoArtist_t *artist = artists;
+	size_t i = 0;
+	PianoListForeachP (artist) labels[i++] = artist->name;
+	const int selected = SbUiRendererSelectList (&app->uiRenderer,
+			&app->uiModel, title, labels, count);
+	free (labels);
+	return selected >= 0 ? PianoListGetP (artists, selected) : NULL;
+}
+
+static PianoStation_t *BarUiTuiSelectStation (BarApp_t *app,
+		PianoStation_t *stations, const char *title) {
+	const size_t count = BarUiCountStations (stations);
+	if (count == 0) return NULL;
+	const char **labels = calloc (count, sizeof (*labels));
+	if (labels == NULL) return NULL;
+	PianoStation_t *station = stations;
+	size_t i = 0;
+	PianoListForeachP (station) labels[i++] = station->name;
+	const int selected = SbUiRendererSelectList (&app->uiRenderer,
+			&app->uiModel, title, labels, count);
+	free (labels);
+	return selected >= 0 ? PianoListGetP (stations, selected) : NULL;
 }
 
 /*	transform station if necessary to allow changes like rename, rate, ...
@@ -188,9 +266,18 @@ BarUiActCallback(BarUiActCreateStationFromSong) {
 	reqData.token = selSong->trackToken;
 	reqData.type = PIANO_MUSICTYPE_INVALID;
 
-	BarUiMsg (&app->settings, MSG_QUESTION, "Create station from [s]ong or [a]rtist? ");
-	BarReadline (selectBuf, sizeof (selectBuf), "sa", &app->input,
-			BAR_RL_FULLRETURN, -1);
+	if (app->useTui) {
+		const char *choices[] = {"Artist", "Song"};
+		const int selected = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, "CREATE STATION FROM", choices, 2);
+		selectBuf[0] = selected == 0 ? 'a' : selected == 1 ? 's' : '\0';
+		selectBuf[1] = '\0';
+	} else {
+		BarUiMsg (&app->settings, MSG_QUESTION,
+				"Create station from [s]ong or [a]rtist? ");
+		BarReadline (selectBuf, sizeof (selectBuf), "sa", &app->input,
+				BAR_RL_FULLRETURN, -1);
+	}
 	switch (selectBuf[0]) {
 		case 's':
 			reqData.type = PIANO_MUSICTYPE_SONG;
@@ -202,7 +289,9 @@ BarUiActCallback(BarUiActCreateStationFromSong) {
 	}
 	if (reqData.type != PIANO_MUSICTYPE_INVALID) {
 		BarUiMsg (&app->settings, MSG_INFO, "Creating station... ");
-		BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData);
+		if (BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData)) {
+			SbUiModelSetStations (&app->uiModel, app->ph.stations);
+		}
 		BarUiActDefaultEventcmd ("stationcreate");
 	}
 }
@@ -218,11 +307,25 @@ BarUiActCallback(BarUiActAddSharedStation) {
 	reqData.token = stationId;
 	reqData.type = PIANO_MUSICTYPE_INVALID;
 
-	BarUiMsg (&app->settings, MSG_QUESTION, "Station id: ");
-	if (BarReadline (stationId, sizeof (stationId), "0123456789", &app->input,
-			BAR_RL_DEFAULT, -1) > 0) {
+	stationId[0] = '\0';
+	const bool haveId = app->useTui ?
+			SbUiRendererPromptText (&app->uiRenderer, &app->uiModel,
+					"ADD SHARED STATION", "Numeric station ID:", stationId,
+					sizeof (stationId)) :
+			(BarUiMsg (&app->settings, MSG_QUESTION, "Station id: "),
+			 BarReadline (stationId, sizeof (stationId), "0123456789", &app->input,
+					BAR_RL_DEFAULT, -1) > 0);
+	bool numeric = haveId;
+	for (const char *p = stationId; numeric && *p != '\0'; p++) {
+		if (!isdigit ((unsigned char) *p)) numeric = false;
+	}
+	if (haveId && !numeric) {
+		BarUiMsg (&app->settings, MSG_ERR, "Station ID must contain only digits.\n");
+	} else if (haveId) {
 		BarUiMsg (&app->settings, MSG_INFO, "Adding shared station... ");
-		BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData);
+		if (BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData)) {
+			SbUiModelSetStations (&app->uiModel, app->ph.stations);
+		}
 		BarUiActDefaultEventcmd ("stationaddshared");
 	}
 }
@@ -313,6 +416,39 @@ BarUiActCallback(BarUiActStationFromGenre) {
 		}
 	}
 
+	if (app->useTui) {
+	chooseGenreCategory:
+		;
+		size_t categoryCount = 0;
+		curCat = app->ph.genreStations;
+		PianoListForeachP (curCat) categoryCount++;
+		const char **categories = calloc (categoryCount, sizeof (*categories));
+		if (categories == NULL) return;
+		curCat = app->ph.genreStations;
+		size_t pos = 0;
+		PianoListForeachP (curCat) categories[pos++] = curCat->name;
+		const int category = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, "GENRE CATEGORIES", categories, categoryCount);
+		free (categories);
+		if (category < 0) return;
+		curCat = PianoListGetP (app->ph.genreStations, category);
+
+		size_t genreCount = 0;
+		curGenre = curCat->genres;
+		PianoListForeachP (curGenre) genreCount++;
+		const char **genres = calloc (genreCount, sizeof (*genres));
+		if (genres == NULL) return;
+		curGenre = curCat->genres;
+		pos = 0;
+		PianoListForeachP (curGenre) genres[pos++] = curGenre->name;
+		const int genre = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, curCat->name, genres, genreCount);
+		free (genres);
+		if (genre < 0) goto chooseGenreCategory;
+		curGenre = PianoListGetP (curCat->genres, genre);
+		goto createGenre;
+	}
+
 	/* print all available categories */
 	curCat = app->ph.genreStations;
 	i = 0;
@@ -347,12 +483,16 @@ BarUiActCallback(BarUiActStationFromGenre) {
 	} while (curGenre == NULL);
 
 	/* create station */
+createGenre:
+	;
 	PianoRequestDataCreateStation_t reqData;
 	reqData.token = curGenre->musicId;
 	reqData.type = PIANO_MUSICTYPE_INVALID;
 	BarUiMsg (&app->settings, MSG_INFO, "Adding genre station \"%s\"... ",
 			curGenre->name);
-	BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData);
+	if (BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData)) {
+		SbUiModelSetStations (&app->uiModel, app->ph.stations);
+	}
 	BarUiActDefaultEventcmd ("stationaddgenre");
 }
 
@@ -558,7 +698,11 @@ BarUiActCallback(BarUiActTempBanSong) {
 BarUiActCallback(BarUiActPrintUpcoming) {
 	PianoSong_t * const nextSong = PianoListNextP (selSong);
 	if (nextSong != NULL) {
-		BarUiListSongs (app, nextSong, NULL);
+		if (app->useTui) {
+			(void) BarUiTuiSelectSong (app, nextSong, "UPCOMING TRACKS");
+		} else {
+			BarUiListSongs (app, nextSong, NULL);
+		}
 	} else {
 		BarUiMsg (&app->settings, MSG_INFO, "No songs in queue.\n");
 	}
@@ -612,6 +756,54 @@ BarUiActCallback(BarUiActSelectQuickMix) {
 	assert (selStation != NULL);
 
 	if (selStation->isQuickMix) {
+		if (app->useTui) {
+			size_t count = 0;
+			PianoStation_t *eligible = app->ph.stations;
+			PianoListForeachP (eligible) if (!eligible->isQuickMix) count++;
+			if (count == 0) {
+				BarUiMsg (&app->settings, MSG_INFO, "No stations are eligible for QuickMix.\n");
+				return;
+			}
+			const char **labels = calloc (count, sizeof (*labels));
+			bool *checked = calloc (count, sizeof (*checked));
+			bool *original = calloc (count, sizeof (*original));
+			PianoStation_t **stations = calloc (count, sizeof (*stations));
+			if (labels == NULL || checked == NULL || original == NULL ||
+					stations == NULL) {
+				free (labels); free (checked); free (original); free (stations);
+				BarUiMsg (&app->settings, MSG_ERR, "Unable to open QuickMix list.\n");
+				return;
+			}
+			size_t i = 0;
+			PianoStation_t *station = app->ph.stations;
+			PianoListForeachP (station) {
+				if (!station->isQuickMix) {
+					labels[i] = station->name;
+					original[i] = checked[i] = station->useQuickMix;
+					stations[i++] = station;
+				}
+			}
+			const bool save = SbUiRendererToggleList (&app->uiRenderer,
+					&app->uiModel, "QUICKMIX STATIONS", labels, checked, i);
+			if (save) {
+				for (size_t j = 0; j < i; j++) {
+					stations[j]->useQuickMix = checked[j];
+				}
+				BarUiMsg (&app->settings, MSG_INFO, "Setting QuickMix stations... ");
+				if (BarUiActDefaultPianoCall (PIANO_REQUEST_SET_QUICKMIX, NULL)) {
+					BarUiMsg (&app->settings, MSG_INFO, "QuickMix updated.\n");
+				} else {
+					for (size_t j = 0; j < i; j++) {
+						stations[j]->useQuickMix = original[j];
+					}
+				}
+				BarUiActDefaultEventcmd ("stationquickmixtoggle");
+			} else {
+				BarUiMsg (&app->settings, MSG_INFO, "Operation cancelled.\n");
+			}
+			free (labels); free (checked); free (original); free (stations);
+			return;
+		}
 		PianoStation_t *toggleStation;
 		while ((toggleStation = BarUiSelectStation (app, app->ph.stations,
 				"Toggle QuickMix for station: ",
@@ -640,8 +832,9 @@ BarUiActCallback(BarUiActHistory) {
 	PianoSong_t *histSong;
 
 	if (app->songHistory != NULL) {
-		histSong = BarUiSelectSong (app, app->songHistory,
-				&app->input);
+		histSong = app->useTui ?
+				BarUiTuiSelectSong (app, app->songHistory, "SONG HISTORY") :
+				BarUiSelectSong (app, app->songHistory, &app->input);
 		if (histSong != NULL) {
 			SbUiCommand command;
 			PianoStation_t *songStation = PianoFindStationById (app->ph.stations,
@@ -649,6 +842,20 @@ BarUiActCallback(BarUiActHistory) {
 
 			if (songStation == NULL) {
 				BarUiMsg (&app->settings, MSG_ERR, "Station does not exist any more.\n");
+				return;
+			}
+
+			if (app->useTui) {
+				const char *actions[] = {"Song information", "Create station",
+						"Bookmark song or artist"};
+				const SbUiCommand commands[] = {SB_UI_CMD_INFO,
+						SB_UI_CMD_CREATE_STATION_FROM_SONG, SB_UI_CMD_BOOKMARK};
+				const int selected = SbUiRendererSelectList (&app->uiRenderer,
+						&app->uiModel, "HISTORY ACTION", actions, 3);
+				if (selected >= 0) {
+					BarUiDispatchCommand (app, commands[selected], songStation,
+							histSong, false, BAR_DC_UNDEFINED);
+				}
 				return;
 			}
 
@@ -684,16 +891,26 @@ BarUiActCallback(BarUiActBookmark) {
 
 	assert (selSong != NULL);
 
-	BarUiMsg (&app->settings, MSG_QUESTION, "Bookmark [s]ong or [a]rtist? ");
-	BarReadline (selectBuf, sizeof (selectBuf), "sa", &app->input,
-			BAR_RL_FULLRETURN, -1);
+	if (app->useTui) {
+		const char *choices[] = {"Song", "Artist"};
+		const int selected = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, "BOOKMARK", choices, 2);
+		selectBuf[0] = selected == 0 ? 's' : selected == 1 ? 'a' : '\0';
+		selectBuf[1] = '\0';
+	} else {
+		BarUiMsg (&app->settings, MSG_QUESTION, "Bookmark [s]ong or [a]rtist? ");
+		BarReadline (selectBuf, sizeof (selectBuf), "sa", &app->input,
+				BAR_RL_FULLRETURN, -1);
+	}
 	if (selectBuf[0] == 's') {
 		BarUiMsg (&app->settings, MSG_INFO, "Bookmarking song... ");
-		BarUiActDefaultPianoCall (PIANO_REQUEST_BOOKMARK_SONG, selSong);
+		if (BarUiActDefaultPianoCall (PIANO_REQUEST_BOOKMARK_SONG, selSong) &&
+				app->useTui) BarUiMsg (&app->settings, MSG_INFO, "Song bookmarked.\n");
 		BarUiActDefaultEventcmd ("songbookmark");
 	} else if (selectBuf[0] == 'a') {
 		BarUiMsg (&app->settings, MSG_INFO, "Bookmarking artist... ");
-		BarUiActDefaultPianoCall (PIANO_REQUEST_BOOKMARK_ARTIST, selSong);
+		if (BarUiActDefaultPianoCall (PIANO_REQUEST_BOOKMARK_ARTIST, selSong) &&
+				app->useTui) BarUiMsg (&app->settings, MSG_INFO, "Artist bookmarked.\n");
 		BarUiActDefaultEventcmd ("artistbookmark");
 	}
 }
@@ -844,6 +1061,7 @@ BarUiActCallback(BarUiActManageStation) {
 
 	memset (&reqData, 0, sizeof (reqData));
 	reqData.station = selStation;
+	question[0] = '\0';
 
 	BarUiMsg (&app->settings, MSG_INFO, "Fetching station info... ");
 	const bool bret = BarUiActDefaultPianoCall (PIANO_REQUEST_GET_STATION_INFO,
@@ -906,13 +1124,41 @@ BarUiActCallback(BarUiActManageStation) {
 
 	assert (strlen (question) < sizeof (question) / sizeof (*question));
 
-	BarUiMsg (&app->settings, MSG_QUESTION, "%s", question);
-	if (BarReadline (selectBuf, sizeof (selectBuf), allowedActions, &app->input,
-					BAR_RL_FULLRETURN, -1)) {
+	bool haveAction;
+	if (app->useTui) {
+		const char *labels[5];
+		size_t count = 0;
+		for (const char *action = allowedActions; *action != '\0'; action++) {
+			switch (*action) {
+				case 'a': labels[count++] = "Remove artist seed"; break;
+				case 's': labels[count++] = "Remove song seed"; break;
+				case 't': labels[count++] = "Remove station seed"; break;
+				case 'f': labels[count++] = "Remove feedback"; break;
+				case 'm': labels[count++] = "Change station mode"; break;
+			}
+		}
+		const int selected = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, "MANAGE STATION", labels, count);
+		if (selected >= 0) {
+			selectBuf[0] = allowedActions[selected];
+			selectBuf[1] = '\0';
+			haveAction = true;
+		} else {
+			haveAction = false;
+		}
+	} else {
+		BarUiMsg (&app->settings, MSG_QUESTION, "%s", question);
+		haveAction = BarReadline (selectBuf, sizeof (selectBuf), allowedActions,
+				&app->input, BAR_RL_FULLRETURN, -1) > 0;
+	}
+	if (haveAction) {
 		if (selectBuf[0] == 'a') {
-			PianoArtist_t *artist = BarUiSelectArtist (app,
-					reqData.info.artistSeeds);
-			if (artist != NULL) {
+			PianoArtist_t *artist = app->useTui ? BarUiTuiSelectArtist (app,
+					reqData.info.artistSeeds, "ARTIST SEEDS") :
+					BarUiSelectArtist (app, reqData.info.artistSeeds);
+			if (artist != NULL && (!app->useTui || SbUiRendererConfirm (
+					&app->uiRenderer, &app->uiModel, "REMOVE ARTIST SEED",
+					"Remove this artist seed? This changes station personalization."))) {
 				PianoRequestDataDeleteSeed_t subReqData;
 
 				memset (&subReqData, 0, sizeof (subReqData));
@@ -923,9 +1169,12 @@ BarUiActCallback(BarUiActManageStation) {
 				BarUiActDefaultEventcmd ("stationdeleteartistseed");
 			}
 		} else if (selectBuf[0] == 's') {
-			PianoSong_t *song = BarUiSelectSong (app,
-					reqData.info.songSeeds, &app->input);
-			if (song != NULL) {
+			PianoSong_t *song = app->useTui ? BarUiTuiSelectSong (app,
+					reqData.info.songSeeds, "SONG SEEDS") :
+					BarUiSelectSong (app, reqData.info.songSeeds, &app->input);
+			if (song != NULL && (!app->useTui || SbUiRendererConfirm (
+					&app->uiRenderer, &app->uiModel, "REMOVE SONG SEED",
+					"Remove this song seed? This changes station personalization."))) {
 				PianoRequestDataDeleteSeed_t subReqData;
 
 				memset (&subReqData, 0, sizeof (subReqData));
@@ -936,10 +1185,13 @@ BarUiActCallback(BarUiActManageStation) {
 				BarUiActDefaultEventcmd ("stationdeletesongseed");
 			}
 		} else if (selectBuf[0] == 't') {
-			PianoStation_t *station = BarUiSelectStation (app,
-					reqData.info.stationSeeds, "Delete seed station: ", NULL,
-					false);
-			if (station != NULL) {
+			PianoStation_t *station = app->useTui ? BarUiTuiSelectStation (app,
+					reqData.info.stationSeeds, "STATION SEEDS") :
+					BarUiSelectStation (app, reqData.info.stationSeeds,
+							"Delete seed station: ", NULL, false);
+			if (station != NULL && (!app->useTui || SbUiRendererConfirm (
+					&app->uiRenderer, &app->uiModel, "REMOVE STATION SEED",
+					"Remove this station seed? This changes station personalization."))) {
 				PianoRequestDataDeleteSeed_t subReqData;
 
 				memset (&subReqData, 0, sizeof (subReqData));
@@ -950,9 +1202,12 @@ BarUiActCallback(BarUiActManageStation) {
 				BarUiActDefaultEventcmd ("stationdeletestationseed");
 			}
 		} else if (selectBuf[0] == 'f') {
-			PianoSong_t *song = BarUiSelectSong (app,
-					reqData.info.feedback, &app->input);
-			if (song != NULL) {
+			PianoSong_t *song = app->useTui ? BarUiTuiSelectSong (app,
+					reqData.info.feedback, "STATION FEEDBACK") :
+					BarUiSelectSong (app, reqData.info.feedback, &app->input);
+			if (song != NULL && (!app->useTui || SbUiRendererConfirm (
+					&app->uiRenderer, &app->uiModel, "DELETE FEEDBACK",
+					"Delete this feedback? This changes station personalization."))) {
 				BarUiMsg (&app->settings, MSG_INFO, "Deleting feedback... ");
 				BarUiActDefaultPianoCall (PIANO_REQUEST_DELETE_FEEDBACK, song);
 				BarUiActDefaultEventcmd ("stationdeletefeedback");
@@ -974,12 +1229,40 @@ BarUiActCallback(BarUiActManageStation) {
 				i++;
 			}
 
-			BarUiMsg (&app->settings, MSG_QUESTION, "Pick a new mode: ");
 			int selected;
-			while (true) {
-				if (BarReadlineInt (&selected, &app->input) == 0) {
-					break;
+			if (app->useTui) {
+				size_t modeCount = 0;
+				const PianoStationMode_t *mode = subReqData.retModes;
+				PianoListForeachP (mode) modeCount++;
+				char **labels = calloc (modeCount, sizeof (*labels));
+				if (labels == NULL) {
+					selected = -1;
+				} else {
+					mode = subReqData.retModes;
+					i = 0;
+					PianoListForeachP (mode) {
+						const char *name = mode->name != NULL ? mode->name : "--";
+						const char *description = mode->description != NULL ?
+								mode->description : "--";
+						const size_t size = strlen (name) + strlen (description) + 16;
+						labels[i] = malloc (size);
+						if (labels[i] != NULL) snprintf (labels[i], size, "%s — %s%s",
+								name, description, mode->active ? " [active]" : "");
+						i++;
+					}
+					for (i = 0; i < modeCount; i++) if (labels[i] == NULL)
+						labels[i] = strdup ("(unavailable)");
+					selected = SbUiRendererSelectList (&app->uiRenderer,
+							&app->uiModel, "STATION MODE",
+							(const char *const *) labels, modeCount);
+					for (i = 0; i < modeCount; i++) free (labels[i]);
+					free (labels);
 				}
+			} else {
+				BarUiMsg (&app->settings, MSG_QUESTION, "Pick a new mode: ");
+				if (BarReadlineInt (&selected, &app->input) == 0) selected = -1;
+			}
+			if (selected >= 0) {
 
 				const PianoStationMode_t * const selMode =
 						PianoListGetP (subReqData.retModes, selected);
@@ -993,7 +1276,6 @@ BarUiActCallback(BarUiActManageStation) {
 						drainPlaylist (app);
 					}
 					BarUiActDefaultEventcmd ("stationsetmode");
-					break;
 				}
 			}
 

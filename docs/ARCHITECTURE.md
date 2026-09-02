@@ -88,14 +88,25 @@ confirmation, and list prompt primitives own only local input/presentation;
 actions still own search, creation, rename, deletion, and canonical mutation.
 ncurses types remain private to `ui_renderer_curses.c`.
 
+Phase C4 extends those synchronous primitives to advanced station operations.
+The action layer fetches genre, seed, feedback, and station-mode data and owns
+all Pandora requests. Labels are borrowed only during one blocking modal or
+copied into short-lived action-owned arrays. For QuickMix, the renderer toggles
+a caller-owned boolean snapshot; `ui_act.c` copies it to canonical station
+flags only after Enter and restores the snapshot if the request fails. Esc
+therefore cannot mutate account state. Station-info and search results retain
+their existing libpiano destruction paths after the modal closes.
+
 `--tui` selects the full-screen backend while classic remains the default.
 Terminal suitability is checked before termios or curses initialization. The
 inherited blocking login interaction runs in classic mode. Initial TUI station
 choice uses autostart or the first station without leaving curses, while FIFO
-input remains on the existing byte-to-command path. Interactive legacy actions
-with nested prompts remain disabled in curses except native create/search,
-rename, and delete. Startup credentials deliberately retain the classic
-fallback so password masking remains unchanged.
+input remains on the existing byte-to-command path. The curses allowlist covers
+create/add-music search, rename/delete, QuickMix, hierarchical genre selection,
+shared station IDs, create-from-song, bookmarks, session history, upcoming
+display, and seed/feedback/mode management. Account settings remain disabled.
+Startup credentials deliberately retain the classic fallback so password
+masking remains unchanged.
 
 Other blocking prompts and full readline behavior remain on the classic path.
 Event-command serialization remains machine-facing direct
