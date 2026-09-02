@@ -47,6 +47,7 @@ typedef struct {
 	BarReadlineFds_t input;
 	SbUiModel uiModel;
 	SbUiRenderer uiRenderer;
+	bool useTui;
 	unsigned int playerErrors;
 } BarApp_t;
 

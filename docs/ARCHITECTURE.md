@@ -65,11 +65,21 @@ progress: duration, elapsed time, and playing/paused state. A monotonically
 increasing generation records updates for a future invalidation-driven
 renderer. It does not own or copy Pandora lists or objects.
 
-The renderer has a minimal `init`/`render`/`shutdown` lifecycle. Its only
-backend is currently the classic synchronous line renderer, which preserves
+The renderer has an `init`/`render`/input/notice/`shutdown` lifecycle. Its
+classic synchronous line backend preserves
 configured prefixes, postfixes, formats, ANSI erase-line behavior, flushing,
-and carriage-return progress. A future ncurses or null backend can implement
-the same lifecycle without entering playback or Pandora code.
+and carriage-return progress. Phase C0 adds an opt-in ncursesw backend that
+owns its `SCREEN`, maps ordinary keys through the shared command table, stores
+legacy notices for the status line, redraws on `KEY_RESIZE`, and calls
+`endwin()` during normal shutdown. ncurses types remain private to
+`ui_renderer_curses.c`.
+
+`--tui` selects the full-screen backend while classic remains the default.
+Terminal suitability is checked before termios or curses initialization. The
+inherited blocking login and initial-station interactions run in classic mode;
+after they finish, stdin moves to curses while FIFO input remains on the
+existing byte-to-command path. Interactive legacy actions with nested prompts
+are not yet adapted for curses and remain a Phase C1+ boundary.
 
 Blocking prompts and selection/readline editing intentionally remain on the
 classic path. Event-command serialization remains machine-facing direct

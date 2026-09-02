@@ -37,6 +37,8 @@ typedef struct SbUiRenderer SbUiRenderer;
 typedef struct {
 	void (*init) (SbUiRenderer *);
 	void (*render) (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);
+	SbUiCommand (*readCommand) (SbUiRenderer *, const SbUiModel *);
+	void (*message) (SbUiRenderer *, BarUiMsg_t, const char *, va_list);
 	void (*shutdown) (SbUiRenderer *);
 } SbUiRendererOps;
 
@@ -54,8 +56,13 @@ void SbUiModelSetProgress (SbUiModel *, unsigned int, unsigned int,
 		SbUiPlaybackState);
 
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
+bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);
+SbUiCommand SbUiRendererReadCommand (SbUiRenderer *, const SbUiModel *);
 void SbUiRendererShutdown (SbUiRenderer *);
+void SbUiRendererSetActive (SbUiRenderer *);
+SbUiRenderer *SbUiRendererGetActive (void);
+void SbUiRendererMessageV (SbUiRenderer *, BarUiMsg_t, const char *, va_list);
 
 void SbUiClassicMessageV (const BarSettings_t *, BarUiMsg_t, const char *,
 		va_list);

@@ -100,7 +100,12 @@ void BarUiMsg (const BarSettings_t *settings, const BarUiMsg_t type,
 	assert (format != NULL);
 
 	va_start (fmtargs, format);
-	SbUiClassicMessageV (settings, type, format, fmtargs);
+	SbUiRenderer * const renderer = SbUiRendererGetActive ();
+	if (renderer != NULL && renderer->settings == settings) {
+		SbUiRendererMessageV (renderer, type, format, fmtargs);
+	} else {
+		SbUiClassicMessageV (settings, type, format, fmtargs);
+	}
 	va_end (fmtargs);
 }
 

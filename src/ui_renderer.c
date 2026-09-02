@@ -157,11 +157,27 @@ static void SbUiClassicShutdown (SbUiRenderer *renderer) {
 	(void) renderer;
 }
 
+static SbUiCommand SbUiClassicReadCommand (SbUiRenderer *renderer,
+		const SbUiModel *model) {
+	(void) renderer;
+	(void) model;
+	return SB_UI_CMD_NONE;
+}
+
+static void SbUiClassicMessage (SbUiRenderer *renderer, const BarUiMsg_t type,
+		const char *format, va_list fmtargs) {
+	SbUiClassicMessageV (renderer->settings, type, format, fmtargs);
+}
+
 static const SbUiRendererOps classicOps = {
 	.init = SbUiClassicInit,
 	.render = SbUiClassicRender,
+	.readCommand = SbUiClassicReadCommand,
+	.message = SbUiClassicMessage,
 	.shutdown = SbUiClassicShutdown,
 };
+
+static SbUiRenderer *activeRenderer;
 
 void SbUiRendererInitClassic (SbUiRenderer *renderer,
 		const BarSettings_t *settings) {
@@ -179,6 +195,27 @@ void SbUiRendererRender (SbUiRenderer *renderer, const SbUiModel *model,
 	assert (renderer->ops != NULL);
 	assert (model != NULL);
 	renderer->ops->render (renderer, model, event);
+}
+
+SbUiCommand SbUiRendererReadCommand (SbUiRenderer *renderer,
+		const SbUiModel *model) {
+	assert (renderer != NULL);
+	assert (renderer->ops != NULL);
+	return renderer->ops->readCommand (renderer, model);
+}
+
+void SbUiRendererSetActive (SbUiRenderer *renderer) {
+	activeRenderer = renderer;
+}
+
+SbUiRenderer *SbUiRendererGetActive (void) {
+	return activeRenderer;
+}
+
+void SbUiRendererMessageV (SbUiRenderer *renderer, const BarUiMsg_t type,
+		const char *format, va_list fmtargs) {
+	assert (renderer != NULL);
+	renderer->ops->message (renderer, type, format, fmtargs);
 }
 
 void SbUiRendererShutdown (SbUiRenderer *renderer) {

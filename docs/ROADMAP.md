@@ -36,8 +36,9 @@ plans, not promises of a date or release.
   station, song, and playback progress state.
 - [x] Introduce the renderer lifecycle and classic backend; TUI and headless
   mode selection remain future work.
-- [ ] Add an `ncursesw` skeleton with alternate-screen safety, batched redraw,
-  resize, suspend/resume, and minimum-size behavior.
+- [x] Add an opt-in `ncursesw` skeleton with alternate-screen lifecycle,
+  resize handling, responsive/minimum-size layouts, model-driven playback
+  content, status, and configured quit/help input.
 - [ ] Add a responsive station browser with selection, scrolling, and active
   station highlighting.
 - [ ] Add now-playing metadata, playback/rating state, volume, and low-frequency

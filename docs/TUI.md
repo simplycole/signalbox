@@ -1,7 +1,7 @@
 # Terminal UI architecture decision
 
-Status: architecture phases A and B complete; no ncurses implementation is
-present.
+Status: architecture phases A and B and renderer Phase C0 are complete. The
+ncursesw shell is experimental and opt-in; station navigation is not present.
 
 ## Decision
 
@@ -362,8 +362,10 @@ and output-free headless startup without a TTY.
    snapshots before a full-screen renderer consumes mutable lists.
 5. **Mode lifecycle:** define TUI/classic/headless selection; establish true
    non-interactive startup before curses becomes default.
-6. **ncursesw skeleton:** in a future dependency change add alternate-screen,
-   input, batched redraw, resize, suspend/resume, minimum-size, and status.
+6. **ncursesw skeleton (complete):** opt-in alternate-screen lifecycle,
+   configured quit/help input, full redraw on resize, minimum-size behavior,
+   model-driven metadata/progress, and status. Explicit suspend/resume polish
+   remains alongside broader terminal recovery testing.
 7. **Station browser:** selection, scrolling, active station, responsive layout.
 8. **Now playing:** metadata, playback/rating, volume, timed progress.
 9. **History/notices/help:** upcoming/history, errors, prompts, generated help.

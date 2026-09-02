@@ -197,12 +197,40 @@ static void BarMainGetInitialStation (BarApp_t *app) {
 	}
 }
 
+static bool BarMainEnterTui (BarApp_t *app) {
+	SbUiRendererShutdown (&app->uiRenderer);
+	if (!SbUiRendererInitCurses (&app->uiRenderer, &app->settings)) {
+		return false;
+	}
+	SbUiRendererSetActive (&app->uiRenderer);
+	FD_CLR (STDIN_FILENO, &app->input.set);
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel,
+			SB_UI_RENDER_STATION);
+	return true;
+}
+
+static void BarMainLeaveTuiForPrompt (BarApp_t *app) {
+	SbUiRendererShutdown (&app->uiRenderer);
+	SbUiRendererInitClassic (&app->uiRenderer, &app->settings);
+	SbUiRendererSetActive (&app->uiRenderer);
+	FD_SET (STDIN_FILENO, &app->input.set);
+}
+
 /*	wait for user input
  */
 static void BarMainHandleUserInput (BarApp_t *app) {
+	if (app->useTui) {
+		const SbUiCommand command = SbUiRendererReadCommand (&app->uiRenderer,
+				&app->uiModel);
+		if (command != SB_UI_CMD_NONE) {
+			BarUiDispatchCommand (app, command, app->curStation, app->playlist,
+					true, BAR_DC_GLOBAL);
+		}
+	}
 	char buf[2];
 	if (BarReadline (buf, sizeof (buf), NULL, &app->input,
-			BAR_RL_FULLRETURN | BAR_RL_NOECHO | BAR_RL_NOINT, 1) > 0) {
+			BAR_RL_FULLRETURN | BAR_RL_NOECHO | BAR_RL_NOINT,
+			app->useTui ? 0 : 1) > 0) {
 		const SbUiCommand command = BarUiCommandFromKey (&app->settings, buf[0]);
 		if (command != SB_UI_CMD_NONE) {
 			BarUiDispatchCommand (app, command, app->curStation, app->playlist,
@@ -333,8 +361,19 @@ static void BarMainPrintTime (BarApp_t *app) {
  */
 static void BarMainLoop (BarApp_t *app) {
 	pthread_t playerThread;
+	bool resumeTui = false;
 
+	if (app->useTui && (app->settings.username == NULL ||
+			(app->settings.password == NULL &&
+			app->settings.passwordCmd == NULL))) {
+		BarMainLeaveTuiForPrompt (app);
+		resumeTui = true;
+	}
 	if (!BarMainGetLoginCredentials (&app->settings, &app->input)) {
+		return;
+	}
+	if (resumeTui && !BarMainEnterTui (app)) {
+		app->doQuit = true;
 		return;
 	}
 
@@ -346,7 +385,17 @@ static void BarMainLoop (BarApp_t *app) {
 		return;
 	}
 
+	resumeTui = app->useTui && (app->settings.autostartStation == NULL ||
+			PianoFindStationById (app->ph.stations,
+			app->settings.autostartStation) == NULL);
+	if (resumeTui) {
+		BarMainLeaveTuiForPrompt (app);
+	}
 	BarMainGetInitialStation (app);
+	if (resumeTui && !BarMainEnterTui (app)) {
+		app->doQuit = true;
+		return;
+	}
 
 	player_t * const player = &app->player;
 
@@ -416,10 +465,31 @@ static void BarMainSetupSigaction () {
 
 int main (int argc, char **argv) {
 	static BarApp_t app;
+	bool useTui = false;
 
 	debugEnable();
 
 	memset (&app, 0, sizeof (app));
+	for (int i = 1; i < argc; i++) {
+		if (strcmp (argv[i], "--tui") == 0) {
+			useTui = true;
+		} else if (strcmp (argv[i], "--classic") == 0) {
+			useTui = false;
+		} else {
+			fprintf (stderr, "Usage: %s [--tui|--classic]\n", argv[0]);
+			return 2;
+		}
+	}
+	if (useTui) {
+		const char * const term = getenv ("TERM");
+		if (!isatty (STDIN_FILENO) || !isatty (STDOUT_FILENO) ||
+				term == NULL || *term == '\0' || strcmp (term, "dumb") == 0) {
+			fputs ("signalbox: --tui requires an interactive terminal and a usable TERM\n",
+					stderr);
+			return 2;
+		}
+	}
+	app.useTui = useTui;
 
 	/* save terminal attributes, before disabling echoing */
 	BarTermInit ();
@@ -439,6 +509,19 @@ int main (int argc, char **argv) {
 	BarSettingsRead (&app.settings);
 	SbUiModelInit (&app.uiModel);
 	SbUiRendererInitClassic (&app.uiRenderer, &app.settings);
+	SbUiRendererSetActive (&app.uiRenderer);
+	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings)) {
+		fputs ("signalbox: unable to initialize ncursesw\n", stderr);
+		SbUiRendererSetActive (NULL);
+		BarSettingsDestroy (&app.settings);
+		BarPlayerDestroy (&app.player);
+		BarTermRestore ();
+		return 1;
+	}
+	if (app.useTui) {
+		SbUiRendererRender (&app.uiRenderer, &app.uiModel,
+				SB_UI_RENDER_STATION);
+	}
 
 	PianoReturn_t pret;
 	if ((pret = PianoInit (&app.ph, app.settings.partnerUser,
@@ -446,7 +529,12 @@ int main (int argc, char **argv) {
 			app.settings.inkey, app.settings.outkey)) != PIANO_RET_OK) {
 		BarUiMsg (&app.settings, MSG_ERR, "Initialization failed:"
 				" %s\n", PianoErrorToStr (pret));
-		return 0;
+		SbUiRendererShutdown (&app.uiRenderer);
+		SbUiRendererSetActive (NULL);
+		BarSettingsDestroy (&app.settings);
+		BarPlayerDestroy (&app.player);
+		BarTermRestore ();
+		return 1;
 	}
 
 	BarUiMsg (&app.settings, MSG_NONE,
@@ -466,7 +554,9 @@ int main (int argc, char **argv) {
 	/* init fds */
 	FD_ZERO(&app.input.set);
 	app.input.fds[0] = STDIN_FILENO;
-	FD_SET(app.input.fds[0], &app.input.set);
+	if (!app.useTui) {
+		FD_SET(app.input.fds[0], &app.input.set);
+	}
 
 	/* open fifo read/write so it won't EOF if nobody writes to it */
 	assert (sizeof (app.input.fds) / sizeof (*app.input.fds) >= 2);
@@ -506,6 +596,7 @@ int main (int argc, char **argv) {
 	curl_global_cleanup ();
 	BarPlayerDestroy (&app.player);
 	SbUiRendererShutdown (&app.uiRenderer);
+	SbUiRendererSetActive (NULL);
 	BarSettingsDestroy (&app.settings);
 
 	/* restore terminal attributes, zsh doesn't need this, bash does... */

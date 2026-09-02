@@ -75,7 +75,7 @@ dependencies:
 
 .. code-block:: console
 
-   brew install ffmpeg json-c libao libgcrypt pkgconf
+   brew install ffmpeg json-c libao libgcrypt ncurses pkgconf
 
 Then build from the repository root:
 
@@ -83,7 +83,8 @@ Then build from the repository root:
 
    gmake clean && gmake
 
-The build also requires pthreads and libcurl. They were available in the
+The build also requires pthreads, libcurl, and the wide-character ncurses
+library (``ncursesw``). pthreads and libcurl were available in the
 verified macOS environment; ``pkgconf`` must be able to locate all dependencies.
 No global installation is required.
 
@@ -109,6 +110,22 @@ Start the executable from the source tree with:
 .. code-block:: console
 
    ./signalbox
+
+Classic mode remains the default. To launch the experimental Phase C0
+full-screen interface, use an interactive terminal and run:
+
+.. code-block:: console
+
+   ./signalbox --tui
+
+The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
+it exits with a concise error instead of initializing curses otherwise. The
+shell opens immediately; when login or initial station selection needs an
+inherited blocking prompt, Signalbox temporarily restores classic mode and
+then re-enters the TUI. The current shell shows the active station,
+now-playing metadata, playback state/progress, status, resize-aware layouts,
+and working quit/help keys. Station browsing and other modal actions remain
+deferred; use classic mode for the complete inherited interface.
 
 On first run, enter Pandora credentials when prompted, then select a station.
 Press ``?`` for the current key bindings and ``q`` to quit. Configuration is
