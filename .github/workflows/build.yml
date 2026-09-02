@@ -1,21 +1,87 @@
-name: build
+name: Signalbox CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [main, develop]
   pull_request:
-    branches: [ master ]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-
+  linux:
+    name: Build (Linux)
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Install dependencies
-      run: |
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
           sudo apt-get update
-          sudo apt install libao-dev libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libcurl4-gnutls-dev libgcrypt20-dev libjson-c-dev libpth-dev pkg-config build-essential
-    - name: Build Signalbox
-      run: make
+          sudo apt-get install --no-install-recommends --yes \
+            build-essential \
+            libao-dev \
+            libavcodec-dev \
+            libavfilter-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libcurl4-gnutls-dev \
+            libgcrypt20-dev \
+            libjson-c-dev \
+            pkg-config
+
+      - name: Validate contrib script syntax
+        run: |
+          sh -n \
+            contrib/addshared.sh \
+            contrib/headless_pianobar \
+            contrib/remote.sh \
+            contrib/tls_fingerprint.sh
+          bash -n \
+            contrib/change-station-dmenu.sh \
+            contrib/eventcmd-examples/eventcmd.sh \
+            contrib/eventcmd-examples/multi.sh \
+            contrib/headless_signalbox
+          python3 -m py_compile contrib/eventcmd-examples/scrobble.py
+          perl -c contrib/eventcmd-examples/dmenu.pl
+          ruby -c contrib/eventcmd-examples/rbot.rb
+
+      - name: Build
+        run: |
+          make clean
+          make
+
+      - name: Inspect executable
+        run: |
+          test -x ./signalbox
+          file ./signalbox
+          ldd ./signalbox
+
+  macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install ffmpeg json-c libao libgcrypt make pkgconf
+
+      - name: Build
+        run: |
+          gmake clean
+          gmake
+
+      - name: Inspect executable
+        run: |
+          test -x ./signalbox
+          file ./signalbox
+          otool -L ./signalbox

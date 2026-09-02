@@ -62,10 +62,10 @@ Signalbox is intended to add:
 - optional terminal album artwork where supported
 - Homebrew and Linux packaging, CI builds, and release artifacts
 
-macOS and Linux are the target platforms. Modern macOS on Apple Silicon is the
-only environment validated by the Signalbox project so far. Linux remains a
-first-class goal and pianobar has an established history there, but Signalbox
-has not yet recorded its own Linux validation matrix.
+macOS and Linux are the target platforms. Modern macOS on Apple Silicon has
+been manually validated through playback, and CI continuously validates that
+Signalbox builds on current GitHub-hosted macOS and Ubuntu runners. Linux
+runtime playback has not yet been validated by the Signalbox project.
 
 Build from source on macOS
 --------------------------
@@ -86,6 +86,20 @@ Then build from the repository root:
 The build also requires pthreads and libcurl. They were available in the
 verified macOS environment; ``pkgconf`` must be able to locate all dependencies.
 No global installation is required.
+
+Continuous integration
+----------------------
+
+GitHub Actions builds Signalbox on ``ubuntu-latest`` and ``macos-latest`` for
+pushes and pull requests involving the ``main`` or ``develop`` branches. CI
+checks contrib script syntax, verifies that ``./signalbox`` is executable, and
+prints platform-appropriate binary linkage diagnostics.
+
+These checks only validate compilation and lightweight, non-authenticated
+artifacts. They do not use Pandora credentials and do not test authentication,
+station retrieval, network playback, audio output, or runtime configuration
+selection. The macOS playback result described above was verified manually and
+is separate from CI; Linux playback remains unverified.
 
 Usage
 -----

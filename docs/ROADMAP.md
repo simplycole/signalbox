@@ -18,7 +18,8 @@ plans, not promises of a date or release.
 - [x] Rename the executable in a dedicated, compatibility-aware change.
 - [ ] Clarify build dependencies and supported feature combinations.
 - [ ] Clean up compiler warnings without obscuring behavior changes.
-- [ ] Add repeatable compatibility tests for supported macOS and Linux systems.
+- [x] Add repeatable build validation for supported macOS and Linux systems.
+- [ ] Add repeatable runtime compatibility tests for macOS and Linux systems.
 - [x] Define the transition policy for inherited configuration paths, with a
   legacy pianobar fallback and no automatic file migration.
 - [x] Define the transition policy for remaining inherited tooling names.
@@ -54,7 +55,7 @@ plans, not promises of a date or release.
 
 - [ ] Provide a Homebrew formula.
 - [ ] Provide appropriate Linux packages.
-- [ ] Add automated CI builds and checks.
+- [x] Add automated CI builds and checks.
 - [ ] Publish reproducible release artifacts.
 - [ ] Document versioning and the release process.
 
