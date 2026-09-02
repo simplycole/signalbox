@@ -1,265 +1,215 @@
 Signalbox
 =========
 
-**A modern open-source terminal client for Pandora.**
+|CI| |License| |Platforms|
 
-Signalbox is an early-stage continuation and modernization of `pianobar`_, the
-console Pandora client created by Lars-Dominik Braun. It begins with pianobar's
-working implementation and preserved history, then aims to build a maintainable
-terminal application around that foundation.
+**Pandora radio, tuned for the terminal.**
 
-Signalbox is not yet a distinct end-user release. The current program builds
-and runs as ``signalbox`` while much of its inherited behavior and internal
-naming remains unchanged.
+Signalbox is a modern, open-source terminal client for Pandora: a responsive
+phosphor TUI, real-time audio spectrum, fast keyboard navigation, and the full
+station-management foundation inherited from pianobar.
 
-.. _pianobar: https://github.com/PromyLOPh/pianobar
+.. image:: docs/assets/signalbox-tui.svg
+   :alt: Signalbox phosphor terminal interface showing stations, now playing,
+         upcoming tracks, and listening history
+   :align: center
 
-Project status
+.. image:: docs/assets/signalbox-spectrum.svg
+   :alt: Signalbox real-time spectrum analyzer in the phosphor terminal theme
+   :align: center
+
+.. |CI| image:: https://github.com/simplycole/signalbox/actions/workflows/build.yml/badge.svg?branch=develop
+   :target: https://github.com/simplycole/signalbox/actions/workflows/build.yml
+   :alt: Build status
+.. |License| image:: https://img.shields.io/badge/license-MIT-39ff88.svg
+   :target: COPYING
+   :alt: MIT License
+.. |Platforms| image:: https://img.shields.io/badge/platform-macOS%20%7C%20Linux-58d6ff.svg
+   :alt: macOS and Linux
+
+Why Signalbox?
 --------------
 
-Development is at **Phase 1: identity and build cleanup**. The baseline is
-recorded by the tag ``upstream-baseline-2026-09-01`` and was verified on:
+Signalbox keeps pianobar's lean native-C core and proven Pandora integration,
+then builds a more discoverable terminal experience around it. It is currently
+an early-stage project: the TUI is useful and actively developed, while classic
+pianobar-compatible mode remains the default until compatibility and packaging
+work are complete.
 
-- macOS 26.6.2 on Apple Silicon (arm64)
-- Homebrew 6.0.21
-- Apple Clang 21.0.0
-- FFmpeg 9.0.1
+Highlights
+----------
 
-That baseline compiled, launched, authenticated with Pandora, retrieved the
-account's stations, and played audio. See `docs/UPSTREAM.md`_ for provenance and
-validation details and `docs/ROADMAP.md`_ for planned work.
+- Responsive ``ncursesw`` interface with phosphor, amber, neutral, and
+  monochrome themes
+- Real PCM-driven 8/12-band spectrum analyzer with smoothing and peak hold
+- Station filtering, A-Z/original/favorites-first sorting, local favorites,
+  and numeric jump
+- Now-playing metadata, adaptive progress, signed-dB volume, upcoming queue,
+  and full in-memory session history
+- Native TUI flows for station creation, rename/delete, QuickMix, genres,
+  seeds, feedback, bookmarks, and station modes
+- Configurable bindings with an in-app, responsive, scrollable HELP overlay
+- Secure saved credentials through macOS Keychain; plaintext is never written
+  by the TUI
+- Classic UI, FIFO remote control, audio pipe, proxy, and event-command
+  compatibility inherited from pianobar
 
-.. _docs/UPSTREAM.md: docs/UPSTREAM.md
-.. _docs/ROADMAP.md: docs/ROADMAP.md
+Controls
+--------
 
-Current capabilities
---------------------
+Press ``?`` in the TUI for the authoritative list: configured action bindings
+are reflected there automatically.
 
-The current code inherits pianobar's console interface and supports:
+.. list-table:: Default TUI controls
+   :header-rows: 1
+   :widths: 28 72
 
-- Pandora authentication and station playback
-- station selection, creation, renaming, deletion, and seed management
-- love, ban, tired, bookmark, and skip actions
-- song history and upcoming-track display
-- pause/resume and software volume control
-- configurable key bindings and output formats
-- proxy, FIFO remote-control, audio-pipe, and event-command interfaces
+   * - Key
+     - Action
+   * - ``↑``/``↓``, ``j``/``k``
+     - Move through the focused list
+   * - ``PgUp``/``PgDn``
+     - Move by a page
+   * - ``Home``/``End``
+     - Jump to first/last item
+   * - ``Enter``
+     - Tune station or open actions
+   * - ``Tab``/``Shift+Tab``
+     - Switch between Stations and Recent
+   * - ``/`` / ``#``
+     - Filter stations / jump to a visible station number
+   * - ``f`` / ``z``
+     - Toggle favorite / cycle station sort
+   * - ``p`` / ``n``
+     - Pause or resume / next track
+   * - ``+`` / ``-``
+     - Love / ban
+   * - ``(`` / ``)`` / ``^``
+     - Volume down / up / reset to 0 dB
+   * - ``h`` / ``u``
+     - Session history / upcoming tracks
+   * - ``V``
+     - Toggle the spectrum analyzer
+   * - ``?`` / ``q``
+     - HELP / quit
 
-These are inherited capabilities, not a claim that Signalbox's planned
-interface is complete.
+The inherited action keys can be remapped in the config. ``V`` is available
+for the visualizer only when it does not conflict with a configured action;
+lowercase ``v`` retains its pianobar action.
 
-Direction
----------
+Build and run
+-------------
 
-Signalbox is intended to add:
+Signalbox currently targets macOS and Linux. You need a C99 compiler,
+``pkg-config``, FFmpeg (``libavcodec``, ``libavformat``, ``libavutil``, and
+``libavfilter``), libcurl, libgcrypt, json-c, libao, pthreads, and ``ncursesw``.
 
-- a modern interactive TUI with station and now-playing views
-- playback progress, history, keyboard navigation, resize handling, and themes
-- macOS Now Playing, media keys, notifications, and Keychain integration
-- Linux MPRIS, desktop notifications, and secret-service integration
-- robust reconnect and error handling
-- a deliberate CLI/headless mode alongside the TUI
-- optional terminal album artwork where supported
-- Homebrew and Linux packaging, CI builds, and release artifacts
-
-macOS and Linux are the target platforms. Modern macOS on Apple Silicon has
-been manually validated through playback, and CI continuously validates that
-Signalbox builds on current GitHub-hosted macOS and Ubuntu runners. Linux
-runtime playback has not yet been validated by the Signalbox project.
-
-Build from source on macOS
---------------------------
-
-The verified build uses Homebrew packages and GNU Make. Install the current
-dependencies:
-
-.. code-block:: console
-
-   brew install ffmpeg json-c libao libgcrypt ncurses pkgconf
-
-Then build from the repository root:
-
-.. code-block:: console
-
-   gmake clean && gmake
-
-The build also requires pthreads, libcurl, and the wide-character ncurses
-library (``ncursesw``). pthreads and libcurl were available in the
-verified macOS environment; ``pkgconf`` must be able to locate all dependencies.
-No global installation is required.
-
-Continuous integration
-----------------------
-
-GitHub Actions builds Signalbox on ``ubuntu-latest`` and ``macos-latest`` for
-pushes and pull requests involving the ``main`` or ``develop`` branches. CI
-checks contrib script syntax, verifies that ``./signalbox`` is executable, and
-prints platform-appropriate binary linkage diagnostics.
-
-These checks only validate compilation and lightweight, non-authenticated
-artifacts. They do not use Pandora credentials and do not test authentication,
-station retrieval, network playback, audio output, or runtime configuration
-selection. The macOS playback result described above was verified manually and
-is separate from CI; Linux playback remains unverified.
-
-Usage
------
-
-Start the executable from the source tree with:
+macOS (Homebrew)
+~~~~~~~~~~~~~~~~
 
 .. code-block:: console
 
-   ./signalbox
+   brew install ffmpeg json-c libao libgcrypt ncurses pkgconf make
+   gmake
 
-Classic mode remains the default. To launch the experimental Phase C4
-full-screen interface, use an interactive terminal and run:
+Debian / Ubuntu
+~~~~~~~~~~~~~~~
+
+.. code-block:: console
+
+   sudo apt-get install build-essential libao-dev libavcodec-dev \
+     libavfilter-dev libavformat-dev libavutil-dev libcurl4-gnutls-dev \
+     libgcrypt20-dev libjson-c-dev libncursesw5-dev pkg-config
+   make
+
+Launch the current full-screen interface:
 
 .. code-block:: console
 
    ./signalbox --tui
 
-Choose a palette with ``--theme phosphor`` (the default), ``amber``, ``mono``,
-or ``neutral``. Themes use semantic colors for UI chrome, station state,
-now-playing metadata, progress, notices, help, and prompts. Phosphor remains a
-green-terminal design with restrained cyan, pink, purple, amber, and red
-accents; amber keeps a warm CRT baseline, while neutral uses an editor-like
-gray baseline. Eight-color terminals receive standard curses colors and
-256-color terminals receive subtle shade refinements. Setting ``NO_COLOR``
-forces the attribute-only monochrome presentation.
+Useful options:
 
-On terminals with enough right-pane space, the TUI also shows a twelve-band
-PCM-driven spectrum analyzer with held peak caps, reducing to eight bands on
-medium-width panes. It analyzes the real decoded
-audio sent to libao—there are no random or procedural bars—and is a visual
-display only: it does not equalize or otherwise modify playback. The display
-is compact at medium heights, expands vertically on tall terminals, and hides
-on constrained layouts. Use ``V`` to toggle it when that key is not assigned
-by the configured action table. Set ``visualizer = off`` in the config or pass
-``--visualizer off`` to disable analysis at startup; ``spectrum`` is the
-default for TUI mode. Classic mode never enables or renders it.
+.. code-block:: console
 
-The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
-it exits with a concise error instead of initializing curses otherwise. The
-shell opens immediately; credential prompts temporarily restore classic mode.
-The shell shows the real station list, distinct selected and active stations,
-artist/title/album/station metadata, rating, signed-dB software volume,
-playback state and adaptive progress, transient status notices, and a RECENT
-view that left-packs rating, artist, track, album, and duration as
-``♥ Artist — Track · Album · 05:18`` when width permits. Loved tracks use
-``♥`` and banned tracks use ``</3`` in a fixed-width marker field; terminals
-without a safe Unicode heart fall back to ``<3``. Narrower history rows use a two-line metadata
-fallback, and the view never draws a partial entry. Its count is the total
-full-session history, not a display cap. Press ``Tab`` to focus RECENT, browse
-the full session with arrows or ``j``/``k``, Page Up/Page Down, and Home/End,
-and press Enter for native details, Pandora's explanation, station creation, or
-bookmarks. Focus uses a ``›`` (or ``>``) marker rather than reversing the row.
-Press ``h`` for
-the newest-first session-history modal; navigate it with arrows or ``j``/``k``,
-Page Up/Page Down, and Home/End, then press Enter for the existing song actions
-or Esc to close it. History is held only in memory and clears when Signalbox
-exits. Navigate stations with arrows or ``j``/``k``, press Enter to tune, and use the
-configured keys for create, rename, delete, pause/resume, next, love, ban,
-volume down/up/reset, help, and quit. Native management includes create/search,
-add-music search, QuickMix membership, genre browsing, shared-station IDs,
-create-from-current-song, song/artist bookmarks, session-history actions, and
-station seed/feedback/mode lists. Destructive operations use explicit
-confirmations. The inherited station-select key
-shows browser guidance instead of opening a blocking prompt. Other modal
-actions involving account settings and startup credentials remain classic-only;
-use classic mode for the complete inherited interface. At 80 columns by 30
-rows or larger, a compact UPCOMING section shows up to four rows from the actual
-already-fetched queue while leaving remaining space to RECENT. The ``u`` modal
-browses that same queue; Enter opens details and existing safe song actions.
-It deliberately adds no queue mutations.
-The inherited feedback semantics remain unchanged: ``+`` submits a Love rating;
-``-`` submits a Ban rating and, when that successful ban targets the current
-song, skips it.
+   ./signalbox --tui --theme phosphor
+   ./signalbox --tui --visualizer off
+   ./signalbox --classic
+   ./signalbox --forget-credentials
 
-The TUI station browser defaults to case-insensitive A-Z order without changing
-Pandora's canonical order. Press ``z`` to cycle A-Z, favorites-first A-Z, and
-original/Pandora order; the compact pane header shows the station count and
-current mode. Press ``f`` to toggle a selected station as a Signalbox-local
-favorite, ``/`` for an incremental case-insensitive substring filter, and
-``#`` to jump to a one-based row in the current sorted and filtered view;
-confirming a valid number immediately tunes it with no second Enter.
-Jump mode temporarily shows row numbers; normal browsing never does.
-Number-row digits and xterm-style application-keypad digits are accepted;
-keypads exposed as navigation keys are ignored safely while jump mode remains
-open. Unsupported keypad sequences are consumed without dispatching commands.
-``G`` remains the configured Genres command.
+Install under ``/usr/local`` with ``sudo make install`` (or ``gmake install``
+on macOS). Override ``PREFIX`` or use ``DESTDIR`` for packaging. See the
+`annotated configuration`_ for settings and key remapping.
 
-On first run, TUI mode presents a native masked Pandora login and asks whether
-to remember the account securely. On macOS, Signalbox stores the password in
-Keychain under service ``org.signalbox.pandora`` and stores only the active
-email in ``$XDG_CONFIG_HOME/signalbox/account`` (mode ``0600``). Later launches
-sign in automatically. Choosing session-only writes neither password nor
-account metadata. Linux currently has a graceful unavailable backend and never
-falls back to plaintext storage; classic prompts continue to work as before.
-Use ``signalbox --forget-credentials`` to remove the saved password for the
-configured account. Signalbox does not delete or migrate legacy credentials.
+.. _annotated configuration: contrib/config-example
 
-Explicit ``password`` or ``password_command`` configuration takes precedence
-over secure storage. Otherwise Signalbox uses the configured/remembered user,
-then its exact matching secure-store entry, then an interactive prompt.
-Plaintext ``user`` and ``password`` remain supported in both Signalbox and the
-legacy pianobar config for compatibility, but the TUI never writes a plaintext
-password.
+Configuration and credentials
+-----------------------------
 
-TUI mode starts with the
-autostart station, or the first available station when none is configured.
-Press ``?`` for the current key bindings and ``q`` to quit. Configuration is
-read from ``$XDG_CONFIG_HOME/signalbox/config`` (normally
-``~/.config/signalbox/config``). If that file does not exist, Signalbox falls
-back to ``$XDG_CONFIG_HOME/pianobar/config`` (normally
-``~/.config/pianobar/config``), so existing pianobar users do not need to move
-their configuration immediately. If both files exist, the Signalbox file wins;
-the files are never merged or copied automatically. The annotated
-`configuration example`_ documents available settings.
-Local favorite station IDs are stored one per line in
-``$XDG_CONFIG_HOME/signalbox/favorites`` using a temporary-file rename. This
-location remains Signalbox-specific even when the legacy pianobar config
-fallback is active; favorites never alter Pandora or QuickMix metadata.
+Signalbox reads ``$XDG_CONFIG_HOME/signalbox/config`` (normally
+``~/.config/signalbox/config``). If it is absent, the legacy
+``$XDG_CONFIG_HOME/pianobar/config`` is used as a compatibility fallback; files
+are never merged or migrated automatically.
 
-.. _configuration example: contrib/config-example
+In TUI mode, macOS passwords can be stored in Keychain under
+``org.signalbox.pandora``. Only the selected account email is written to
+Signalbox's mode-``0600`` account file. Linux secure storage is the next
+platform integration and currently fails closed rather than writing plaintext.
+Explicit ``password`` and ``password_command`` settings remain supported for
+compatibility.
 
-Contrib helpers
----------------
+pianobar lineage
+----------------
 
-User-facing helper scripts and event-command examples are available in
-``contrib/``. The headless wrapper is ``contrib/headless_signalbox``; the old
-``contrib/headless_pianobar`` name remains as a lightweight compatibility entry
-point. FIFO helpers prefer the Signalbox configuration directory and follow the
-application's fallback to a legacy pianobar configuration when it is active.
+Signalbox is a continuation of `pianobar`_, created by Lars-Dominik Braun. Its
+working Pandora protocol/player implementation, MIT license, attribution, and
+complete Git history are intentionally preserved. The ``upstream`` remote
+tracks the canonical project, and ``upstream-baseline-2026-09-01`` records the
+verified starting point for Signalbox development.
 
-Development expectations
-------------------------
+Signalbox is independent and is not affiliated with or endorsed by Pandora.
+Pandora is a third-party service and trademark.
 
-The repository is intentionally close to upstream today. Changes should remain
-small and reviewable, preserve attribution, and avoid mixing identity work with
-protocol or playback changes. Compatibility claims should be backed by a
-recorded build or runtime test. The current and proposed component boundaries
-are described in `docs/ARCHITECTURE.md`_.
+.. _pianobar: https://github.com/PromyLOPh/pianobar
 
-.. _docs/ARCHITECTURE.md: docs/ARCHITECTURE.md
+Roadmap
+-------
+
+Near-term work is deliberately platform-first:
+
+1. Linux Secret Service/keyring-backed credentials
+2. Windows portability boundaries and a Credential Manager backend
+3. Classic/FIFO/headless compatibility validation, then making the TUI the
+   interactive default
+4. Persistent listening history with explicit retention and privacy behavior
+5. Richer visualizer modes and optional terminal artwork
+6. Homebrew/Linux packaging and reproducible releases
+
+Native Windows is a roadmap target, not a currently supported build. The plan
+is a native ``.exe`` with a Windows terminal/audio adaptation and
+``CredRead``/``CredWrite``/``CredDelete`` behind the existing credential
+interface. See the detailed `roadmap`_, `TUI design`_, `architecture`_,
+`upstream record`_, and `QA checklist`_.
+
+.. _roadmap: docs/ROADMAP.md
+.. _TUI design: docs/TUI.md
+.. _architecture: docs/ARCHITECTURE.md
+.. _upstream record: docs/UPSTREAM.md
+.. _QA checklist: docs/QA.md
 
 Contributing
 ------------
 
-Signalbox is at the stage where focused bug reports, platform build results,
-documentation corrections, and narrowly scoped patches are most useful. Before
-starting a substantial feature, open a discussion in the repository so its
-scope and architectural fit can be agreed. Include the platform and dependency
-versions used to test code changes, and keep unrelated cleanup in separate
-commits.
+Focused bug reports, platform build results, documentation corrections, and
+narrow patches are welcome. Include platform and dependency versions with test
+results, preserve upstream attribution, and keep unrelated behavior changes in
+separate commits.
 
-License and attribution
------------------------
+License
+-------
 
-Signalbox's inherited pianobar code is distributed under the **MIT License**, as
-stated in ``COPYING`` and the source-file headers. Copyright notices for
-Lars-Dominik Braun and other upstream contributors remain part of the source and
-must be preserved. The full upstream history is retained as an additional record
-of authorship and provenance.
+Signalbox and its inherited pianobar sources are distributed under the
+`MIT License`_. Copyright notices for Lars-Dominik Braun and other contributors
+remain in the source and history.
 
-Pandora is a third-party service and trademark. Signalbox is an independent
-open-source project and is not affiliated with or endorsed by Pandora.
+.. _MIT License: COPYING

@@ -1025,13 +1025,14 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (data->helpVisible) {
 		SbHelpRow helpRows[48];
 		const size_t helpRowCount = SbUiCursesHelpRows (renderer, helpRows);
-		const int wantedHeight = (int) helpRowCount + 4;
+		const int wantedHeight = (int) helpRowCount + 5;
 		const int height = wantedHeight < rows - 4 ? wantedHeight : rows - 4;
 		const int width = cols < 70 ? cols - 6 : 64;
 		WINDOW * const help = newwin (height, width, (rows - height) / 2,
 				(cols - width) / 2);
 		if (help != NULL) {
-			const size_t visibleRows = height > 4 ? (size_t) height - 4 : 0;
+			/* Keep the penultimate row for navigation help at every size. */
+			const size_t visibleRows = height > 5 ? (size_t) height - 5 : 0;
 			const size_t maxOffset = helpRowCount > visibleRows ?
 					helpRowCount - visibleRows : 0;
 			if (data->helpOffset > maxOffset) data->helpOffset = maxOffset;
@@ -1057,9 +1058,12 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					mvwaddnstr (help, y, 14, row->text, width - 16);
 				}
 			}
-			if (data->helpOffset > 0) mvwaddch (help, 1, width - 4, '^');
-			if (data->helpOffset < maxOffset)
-				mvwaddch (help, height - 2, width - 4, 'v');
+			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_MUTED, 0);
+			mvwaddnstr (help, height - 2, 2,
+					"Up/Down scroll  PgUp/PgDn page  Esc close", width - 6);
+			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_MUTED, 0);
+			if (data->helpOffset > 0) mvwaddch (help, 1, width - 6, '^');
+			if (data->helpOffset < maxOffset) mvwaddch (help, 1, width - 4, 'v');
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
 			doupdate ();
