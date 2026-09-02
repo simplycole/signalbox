@@ -92,11 +92,13 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 	pthread_cond_init (&p->cond, NULL);
 	pthread_mutex_init (&p->aoplayLock, NULL);
 	pthread_cond_init (&p->aoplayCond, NULL);
+	p->spectrumReady = SbSpectrumInit (&p->spectrum);
 	BarPlayerReset (p);
 	p->settings = settings;
 }
 
 void BarPlayerDestroy (player_t * const p) {
+	if (p->spectrumReady) SbSpectrumDestroy (&p->spectrum);
 	pthread_cond_destroy (&p->cond);
 	pthread_mutex_destroy (&p->lock);
 	pthread_cond_destroy (&p->aoplayCond);
@@ -109,6 +111,7 @@ void BarPlayerDestroy (player_t * const p) {
 }
 
 void BarPlayerReset (player_t * const p) {
+	if (p->spectrumReady) SbSpectrumReset (&p->spectrum);
 	p->doQuit = false;
 	p->doPause = false;
 	p->songDuration = 0;
@@ -398,6 +401,17 @@ BarPlayerMode BarPlayerGetMode (player_t * const player) {
 	return ret;
 }
 
+void BarPlayerGetSpectrum (player_t *player, SbSpectrumSnapshot *snapshot) {
+	assert (player != NULL && snapshot != NULL);
+	if (player->spectrumReady) SbSpectrumGetSnapshot (&player->spectrum, snapshot);
+	else memset (snapshot, 0, sizeof (*snapshot));
+}
+
+void BarPlayerSetSpectrumEnabled (player_t *player, const bool enabled) {
+	assert (player != NULL);
+	if (player->spectrumReady) SbSpectrumSetEnabled (&player->spectrum, enabled);
+}
+
 /*	decode and play stream. returns 0 or av error code.
  */
 static int play (player_t * const player) {
@@ -593,6 +607,16 @@ void *BarAoPlayThread (void *data) {
 
 		const int numChannels = filteredFrame->ch_layout.nb_channels;
 		const int bps = av_get_bytes_per_sample (filteredFrame->format);
+		/* Observational PCM tap: the filter sink guarantees packed native S16.
+		 * Analysis neither owns nor modifies this frame, and libao receives the
+		 * same pointer and byte count as before. */
+		if (player->spectrumReady && filteredFrame->format == AV_SAMPLE_FMT_S16) {
+			SbSpectrumIngestS16 (&player->spectrum,
+					(const int16_t *) filteredFrame->data[0],
+					(size_t) filteredFrame->nb_samples,
+					(unsigned int) numChannels,
+					(unsigned int) filteredFrame->sample_rate);
+		}
 		ao_play (player->aoDev, (char *) filteredFrame->data[0],
 				filteredFrame->nb_samples * numChannels * bps);
 

@@ -127,6 +127,17 @@ gray baseline. Eight-color terminals receive standard curses colors and
 256-color terminals receive subtle shade refinements. Setting ``NO_COLOR``
 forces the attribute-only monochrome presentation.
 
+On terminals with enough right-pane space, the TUI also shows a twelve-band
+PCM-driven spectrum analyzer with held peak caps, reducing to eight bands on
+medium-width panes. It analyzes the real decoded
+audio sent to libao—there are no random or procedural bars—and is a visual
+display only: it does not equalize or otherwise modify playback. The display
+is compact at medium heights, expands vertically on tall terminals, and hides
+on constrained layouts. Use ``V`` to toggle it when that key is not assigned
+by the configured action table. Set ``visualizer = off`` in the config or pass
+``--visualizer off`` to disable analysis at startup; ``spectrum`` is the
+default for TUI mode. Classic mode never enables or renders it.
+
 The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
 it exits with a concise error instead of initializing curses otherwise. The
 shell opens immediately; credential prompts temporarily restore classic mode.

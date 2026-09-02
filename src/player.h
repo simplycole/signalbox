@@ -38,6 +38,7 @@ THE SOFTWARE.
 #include <piano.h>
 
 #include "settings.h"
+#include "spectrum.h"
 
 typedef enum {
 	/* not running */
@@ -76,6 +77,8 @@ typedef struct {
 	sig_atomic_t interrupted;
 
 	ao_device *aoDev;
+	SbSpectrum spectrum;
+	bool spectrumReady;
 
 	/* settings (must be set before starting the thread) */
 	double gain;
@@ -92,4 +95,5 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings);
 void BarPlayerReset (player_t * const p);
 void BarPlayerDestroy (player_t * const p);
 BarPlayerMode BarPlayerGetMode (player_t * const player);
-
+void BarPlayerGetSpectrum (player_t *, SbSpectrumSnapshot *);
+void BarPlayerSetSpectrumEnabled (player_t *, bool);

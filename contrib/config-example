@@ -1,6 +1,8 @@
 # This is an example configuration file for Signalbox. You may remove the # from
 # lines you need and copy this file to ~/.config/signalbox/config
 # See manpage for a description of the config keys
+# TUI-only real PCM spectrum analyzer (spectrum or off)
+#visualizer = spectrum
 #
 # User
 #user = your@user.name

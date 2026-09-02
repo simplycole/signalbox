@@ -50,6 +50,7 @@ typedef struct {
 	bool useTui;
 	bool passwordFromSecureStore;
 	bool rememberLogin;
+	bool visualizerEnabled;
 	SbTuiTheme tuiTheme;
 	unsigned int playerErrors;
 } BarApp_t;

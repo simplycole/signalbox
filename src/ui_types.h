@@ -71,6 +71,8 @@ typedef enum {
 	SB_UI_CMD_SETTINGS,
 	/* TUI-only contextual command: activate an already selected station. */
 	SB_UI_CMD_ACTIVATE_STATION,
+	/* TUI-local; main updates analyzer/model state without network dispatch. */
+	SB_UI_CMD_TOGGLE_VISUALIZER,
 	SB_UI_CMD_COUNT,
 } SbUiCommand;
 

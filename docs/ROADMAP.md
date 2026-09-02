@@ -76,6 +76,12 @@ plans, not promises of a date or release.
 - [x] Add native masked TUI startup login, optional remembered-account metadata,
   automatic secure-store login, stale-credential recovery, and a narrow
   cross-platform credential adapter while preserving classic/plaintext compatibility.
+- [x] Add a real decoded-PCM spectrum analyzer / visual EQ display with twelve
+  approximate logarithmic bands and an eight-band medium-width fallback,
+  Hann-window FFT analysis, attack/release
+  smoothing, peak hold, responsive right-pane placement, mono/ASCII fallback,
+  and config/CLI/runtime disable controls. It is visual-only and does not apply
+  audio equalization; a future playback EQ would be a separate feature.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and

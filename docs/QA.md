@@ -110,9 +110,11 @@ response bodies. Review the diagnostic log before sharing it anyway.
 
 ## E. Volume
 
-- **Action:** Press `(`, `)`, then `^`. **Expected:** volume changes by 1 dB,
-  Now Playing reflects it, and reset returns to 0 dB. **Account:** SAFE/local.
-  **Real account:** Yes. **Cleanup:** Restore the preferred level.
+- **Action:** Open HELP and use its active volume-down, volume-up, and reset
+  bindings (defaults: `(`, `)`, and `^`). **Expected:** HELP reflects any
+  `act_voldown`, `act_volup`, or `act_volreset` remapping; volume changes by
+  1 dB, Now Playing reflects it, and reset returns to 0 dB. **Account:**
+  SAFE/local. **Real account:** Yes. **Cleanup:** Restore the preferred level.
 
 ## F. Resize
 
@@ -122,6 +124,11 @@ response bodies. Review the diagnostic log before sharing it anyway.
   redraws content and preserves/cancels modal state predictably. **Account:**
   SAFE/read-only if all mutation modals are cancelled. **Real account:** Yes.
   **Cleanup:** Press Esc in every mutation modal.
+
+- **Action:** In HELP, scroll with arrows/`j`/`k`, Page Up/Down, and Home/End
+  at tall, medium, and 50x15 sizes. **Expected:** sections retain blank-row
+  separation where visible, VOLUME remains reachable, content never crosses
+  the border, scroll indicators track available content, and Esc closes HELP.
 
 - **Action:** With a filter and non-default sort active, press `#`, `4`, and
   Enter using the number row; repeat with the physical numeric keypad. Also try
@@ -139,6 +146,25 @@ response bodies. Review the diagnostic log before sharing it anyway.
   remains legible; mono/`NO_COLOR` retains selection and warning meaning via
   text/attributes. **Account:** SAFE/local. **Real account:** Yes. **Cleanup:**
   None.
+
+## G1. Spectrum analyzer / visual EQ
+
+- **Action:** Play bass-heavy, vocal/guitar-heavy, quiet, and transitional
+  passages. **Expected:** bands follow real content, peak caps hold then fall,
+  silence/buffering/pause decays without random motion, and playback has no
+  audible stutter. This is display analysis, not audio EQ.
+- **Action:** Press `V` unless it is configured for an inherited action; launch
+  with `--visualizer off` and `visualizer = off`. **Expected:** controls agree,
+  classic mode never analyzes/renders it, and lowercase `v` retains its action.
+- **Action:** Resize while playing through 80x24, 80x30, 90x40, 143x55,
+  169x55, 219x55, narrow/stacked, and below 50x15. **Expected:** spectrum hides
+  at 80x24, is compact at medium sizes, grows on tall layouts, stays bounded
+  on wide panes, switches cleanly between twelve bands at a 69-cell right pane
+  and eight bands at 38–68 cells, and does not overlap other content. A blank
+  row remains both below SPECTRUM and between the labels and UPCOMING.
+- **Action:** Run `gmake spectrum-test`. **Expected:** low/mid/high tones,
+  right-channel-only input, mixed tones, 48 kHz remapping, silence decay, and
+  twelve-to-eight aggregation pass using approximate dominant buckets.
 
 ## H. History/upcoming
 

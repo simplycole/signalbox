@@ -306,7 +306,16 @@ static void BarMainHandleUserInput (BarApp_t *app) {
 	if (app->useTui) {
 		const SbUiCommandEvent event = SbUiRendererReadCommand (&app->uiRenderer,
 				&app->uiModel);
-		if (event.historySelected) {
+		if (event.command == SB_UI_CMD_TOGGLE_VISUALIZER) {
+			app->visualizerEnabled = !app->visualizerEnabled;
+			BarPlayerSetSpectrumEnabled (&app->player, app->visualizerEnabled);
+			SbSpectrumSnapshot snapshot;
+			BarPlayerGetSpectrum (&app->player, &snapshot);
+			SbUiModelSetSpectrum (&app->uiModel, &snapshot,
+					app->visualizerEnabled);
+			SbUiRendererRender (&app->uiRenderer, &app->uiModel,
+					SB_UI_RENDER_STATE);
+		} else if (event.historySelected) {
 			BarUiActHistorySelected (app, event.historyIndex);
 		} else if (event.command != SB_UI_CMD_NONE) {
 			BarUiDispatchCommand (app, event.command,
@@ -523,6 +532,11 @@ static void BarMainLoop (BarApp_t *app) {
 		}
 
 		BarMainHandleUserInput (app);
+		if (app->useTui && app->visualizerEnabled) {
+			SbSpectrumSnapshot snapshot;
+			BarPlayerGetSpectrum (player, &snapshot);
+			SbUiModelSetSpectrum (&app->uiModel, &snapshot, true);
+		}
 
 		/* show time */
 		if (BarPlayerGetMode (player) == PLAYER_PLAYING) {
@@ -557,6 +571,7 @@ int main (int argc, char **argv) {
 	static BarApp_t app;
 	bool useTui = false;
 	bool forgetCredentials = false;
+	int visualizerOverride = -1;
 	SbTuiTheme tuiTheme = SB_TUI_THEME_PHOSPHOR;
 
 	debugEnable();
@@ -569,6 +584,14 @@ int main (int argc, char **argv) {
 			useTui = false;
 		} else if (strcmp (argv[i], "--forget-credentials") == 0) {
 			forgetCredentials = true;
+		} else if (strcmp (argv[i], "--visualizer") == 0 && i + 1 < argc) {
+			const char * const name = argv[++i];
+			if (strcmp (name, "spectrum") == 0) visualizerOverride = 1;
+			else if (strcmp (name, "off") == 0) visualizerOverride = 0;
+			else {
+				fprintf (stderr, "signalbox: unknown visualizer '%s'\n", name);
+				return 2;
+			}
 		} else if (strcmp (argv[i], "--theme") == 0 && i + 1 < argc) {
 			const char * const name = argv[++i];
 			if (strcmp (name, "phosphor") == 0) tuiTheme = SB_TUI_THEME_PHOSPHOR;
@@ -580,7 +603,7 @@ int main (int argc, char **argv) {
 				return 2;
 			}
 		} else {
-			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--forget-credentials]\n", argv[0]);
+			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--visualizer spectrum|off] [--forget-credentials]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -612,6 +635,10 @@ int main (int argc, char **argv) {
 
 	BarSettingsInit (&app.settings);
 	BarSettingsRead (&app.settings);
+	if (visualizerOverride >= 0)
+		app.settings.visualizerSpectrum = visualizerOverride != 0;
+	app.visualizerEnabled = app.useTui && app.settings.visualizerSpectrum;
+	BarPlayerSetSpectrumEnabled (&app.player, app.visualizerEnabled);
 	if (forgetCredentials) {
 		int result = 1;
 		if (app.settings.username == NULL) {
@@ -636,6 +663,7 @@ int main (int argc, char **argv) {
 		return result;
 	}
 	SbUiModelInit (&app.uiModel);
+	app.uiModel.visualizerEnabled = app.visualizerEnabled;
 	SbUiModelSetVolume (&app.uiModel, app.settings.volume);
 	SbUiRendererInitClassic (&app.uiRenderer, &app.settings);
 	SbUiRendererSetActive (&app.uiRenderer);

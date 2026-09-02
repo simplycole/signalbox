@@ -30,6 +30,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/debug.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
+		${PIANOBAR_DIR}/spectrum.c \
 		${PIANOBAR_DIR}/station_browser.c \
 		${PIANOBAR_DIR}/terminal.c \
 		${PIANOBAR_DIR}/ui_act.c \
@@ -129,10 +130,14 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
-			${LIBPIANO_RELOBJ} ${PROGRAM} pianobar libpiano.so* \
+			${LIBPIANO_RELOBJ} ${PROGRAM} spectrum-test pianobar libpiano.so* \
 			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
+
+spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h
+	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@ tests/spectrum_test.c src/spectrum.c -lpthread -lm
+	./$@
 
 ifeq (${DYNLINK},1)
 install: ${PROGRAM} install-libpiano
@@ -162,4 +167,4 @@ uninstall:
 	${DESTDIR}/${LIBDIR}/libpiano.a \
 	${DESTDIR}/${INCDIR}/piano.h
 
-.PHONY: install install-libpiano uninstall test debug all
+.PHONY: install install-libpiano uninstall test debug all spectrum-test

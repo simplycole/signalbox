@@ -10,6 +10,31 @@ shows requesting, waiting-for-playlist, and error activity, while transient
 notices identify retries and recovery. It does not claim a persistent socket
 connection, and it does not alter retry counts or backoff.
 
+The current TUI includes a real-audio spectrum display in the right column
+between Now Playing and Upcoming. Tall layouts use six vertical rows, medium
+layouts use two to four, and small/narrow layouts omit it. A right pane of at
+least 69 cells shows twelve canonical bands; panes from 38–68 cells aggregate
+those values into eight bands, and narrower panes hide the display. The display
+stays a compact rack-component shape rather than stretching across a wide pane.
+Safe single-cell Unicode full blocks are used when available; otherwise
+`#` bars and `---` peak caps retain meaning. Theme roles keep phosphor
+green-dominant with restrained accents, amber warm-dominant, and neutral/mono
+readable without color.
+
+Only normalized bands and peaks enter `SbUiModel`; the renderer has no decoder
+or PCM access. An 80 ms input timeout caps animation near 12.5 frames/second
+without a busy loop. `visualizer = spectrum|off`, `--visualizer spectrum|off`,
+and collision-checked local `V` control the feature. Classic mode disables it,
+and modal input loops naturally suspend spectrum redraws.
+
+The HELP overlay groups navigation, playback, volume, stations, history,
+upcoming, and visualizer controls with blank rows and semantic headings. It
+reads remappable playback, volume, station-genre, history, and upcoming keys
+from the effective `act_*` map, omits unbound actions, and shows uppercase `V`
+only when that local spectrum toggle does not collide with a configured action.
+On shorter terminals the overlay scrolls with arrows or `j`/`k`, Page Up/Down,
+and Home/End; Esc closes it.
+
 ## Decision
 
 Use **ncursesw** for Signalbox's eventual full-screen interface. Keep the

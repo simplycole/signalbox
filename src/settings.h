@@ -107,6 +107,7 @@ typedef struct {
 	char *configDir;
 	bool usernameFromConfig;
 	bool passwordFromConfig;
+	bool visualizerSpectrum;
 	char keys[BAR_KS_COUNT];
 	int sampleRate;
 	BarMsgFormatStr_t msgFormat[MSG_COUNT];

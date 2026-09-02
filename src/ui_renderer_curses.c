@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <locale.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +66,7 @@ typedef struct {
 	SbUiNoticeSeverity statusSeverity;
 	time_t statusExpires;
 	bool helpVisible;
+	size_t helpOffset;
 	bool colors;
 	attr_t roleAttrs[SB_TUI_COLOR_COUNT];
 	bool selectionInitialized;
@@ -73,11 +75,16 @@ typedef struct {
 	SbStationBrowser browser;
 	bool jumpMode;
 	bool unicodeSymbols;
+	bool unicodeBlocks;
 	SbTuiFocus focus;
 	size_t recentSelected;
 	size_t recentOffset;
 	size_t observedHistoryCount;
 } SbUiCursesData;
+
+static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
+	return BarUiCommandFromKey (renderer->settings, 'V') == SB_UI_CMD_NONE;
+}
 
 static attr_t SbUiCursesRole (const SbUiCursesData *data,
 		const SbTuiColorRole role) {
@@ -208,6 +215,66 @@ static char SbUiCursesKey (const SbUiRenderer *renderer,
 	return '-';
 }
 
+typedef enum { SB_HELP_BLANK = 0, SB_HELP_HEADING, SB_HELP_COMMAND } SbHelpRowKind;
+typedef struct { SbHelpRowKind kind; char key[12]; const char *text; } SbHelpRow;
+
+static void SbUiCursesHelpAddCommand (SbHelpRow *rows, size_t *count,
+		const char *key, const char *text) {
+	SbHelpRow * const row = &rows[(*count)++];
+	row->kind = SB_HELP_COMMAND;
+	snprintf (row->key, sizeof (row->key), "%s", key);
+	row->text = text;
+}
+
+static void SbUiCursesHelpAddConfigured (const SbUiRenderer *renderer,
+		SbHelpRow *rows, size_t *count, const SbUiCommand command,
+		const char *text) {
+	const char key = SbUiCursesKey (renderer, command);
+	if (key == '-') return;
+	char label[2] = {key, '\0'};
+	SbUiCursesHelpAddCommand (rows, count, key == ' ' ? "Space" : label, text);
+}
+
+static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows) {
+	size_t count = 0;
+#define HELP_BLANK() rows[count++] = (SbHelpRow) {SB_HELP_BLANK, "", NULL}
+#define HELP_HEADING(value) rows[count++] = (SbHelpRow) {SB_HELP_HEADING, "", value}
+#define HELP_COMMAND(key, value) SbUiCursesHelpAddCommand (rows, &count, key, value)
+#define HELP_CONFIG(command, value) SbUiCursesHelpAddConfigured (renderer, rows, &count, command, value)
+	HELP_HEADING ("NAVIGATION");
+	HELP_COMMAND ("Tab", "switch pane"); HELP_COMMAND ("Shift+Tab", "switch pane backward");
+	HELP_COMMAND ("Up/Down", "navigate"); HELP_COMMAND ("j/k", "navigate");
+	HELP_COMMAND ("PgUp/PgDn", "page"); HELP_COMMAND ("Home/End", "first / last");
+	HELP_COMMAND ("Enter", "select / action"); HELP_COMMAND ("Esc", "back / close");
+	HELP_BLANK (); HELP_HEADING ("PLAYBACK");
+	HELP_CONFIG (SB_UI_CMD_TOGGLE_PAUSE, "pause / resume");
+	HELP_CONFIG (SB_UI_CMD_SKIP, "next"); HELP_CONFIG (SB_UI_CMD_LOVE, "love");
+	HELP_CONFIG (SB_UI_CMD_BAN, "ban");
+	HELP_BLANK (); HELP_HEADING ("VOLUME");
+	HELP_CONFIG (SB_UI_CMD_VOLUME_DOWN, "volume down");
+	HELP_CONFIG (SB_UI_CMD_VOLUME_UP, "volume up");
+	HELP_CONFIG (SB_UI_CMD_VOLUME_RESET, "reset to 0 dB");
+	HELP_BLANK (); HELP_HEADING ("STATIONS");
+	HELP_COMMAND ("f", "favorite / unfavorite"); HELP_COMMAND ("z", "cycle sort");
+	HELP_COMMAND ("/", "filter"); HELP_COMMAND ("#", "jump to station number");
+	HELP_CONFIG (SB_UI_CMD_GENRE_STATION, "genres");
+	HELP_BLANK (); HELP_HEADING ("HISTORY");
+	HELP_CONFIG (SB_UI_CMD_HISTORY, "full session history");
+	HELP_COMMAND ("Tab", "focus RECENT"); HELP_COMMAND ("Enter", "history action");
+	HELP_BLANK (); HELP_HEADING ("UPCOMING");
+	HELP_CONFIG (SB_UI_CMD_UPCOMING, "browse upcoming");
+	HELP_COMMAND ("Enter", "selected-track actions");
+	if (SbUiCursesVisualizerKeyAvailable (renderer)) {
+		HELP_BLANK (); HELP_HEADING ("VISUALIZER");
+		HELP_COMMAND ("V", "toggle spectrum");
+	}
+#undef HELP_BLANK
+#undef HELP_HEADING
+#undef HELP_COMMAND
+#undef HELP_CONFIG
+	return count;
+}
+
 static void SbUiCursesFooter (const SbUiRenderer *renderer, char *footer,
 		const size_t size, const int width) {
 	if (width < 80) {
@@ -247,26 +314,6 @@ static void SbUiCursesFooterDraw (const SbUiCursesData *data, const int y,
 		if (column + 2 <= x + width) mvaddnstr (y, column, "  ", 2);
 		column += 2;
 		part = gap + 2;
-	}
-}
-
-static void SbUiCursesHelpCommands (WINDOW *window,
-		const SbUiCursesData *data, const int y, const char *keys,
-		const char *const *descriptions, const size_t count, const int width) {
-	int x = 2;
-	for (size_t i = 0; i < count && x < width - 2; i++) {
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_KEY, A_BOLD);
-		mvwaddch (window, y, x++, keys[i]);
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, A_BOLD);
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
-		waddch (window, ' ');
-		waddnstr (window, descriptions[i], width - x - 2);
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
-		x += 1 + (int) strlen (descriptions[i]);
-		if (i + 1 < count && x + 3 < width - 2) {
-			waddstr (window, "   ");
-			x += 3;
-		}
 	}
 }
 
@@ -546,6 +593,66 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 	}
 }
 
+static void SbUiCursesSpectrum (const SbUiCursesData *data,
+		const SbUiModel *model, const int y, const int x, const int barRows,
+		const int width) {
+	if (barRows <= 0 || width < 38) return;
+	static const char *const wideLabels[SB_SPECTRUM_BANDS] =
+			{"50", "80", "125", "200", "315", "500", "800", "1.25k",
+			"2k", "3.15k", "5k", "10k"};
+	static const char *const compactLabels[SB_SPECTRUM_COMPACT_BANDS] =
+			{"60", "120", "250", "500", "1k", "2k", "4k", "8k"};
+	const bool wide = width >= 69;
+	const size_t bandCount = wide ? SB_SPECTRUM_BANDS : SB_SPECTRUM_COMPACT_BANDS;
+	const int bandPitch = wide ? 6 : 5;
+	const int displayWidth = bandPitch * (int) bandCount - (wide ? 3 : 2);
+	const int origin = x + (width > displayWidth ?
+			(width - displayWidth < 12 ? (width - displayWidth) / 2 : 6) : 0);
+	float levels[SB_SPECTRUM_COMPACT_BANDS], peaks[SB_SPECTRUM_COMPACT_BANDS];
+	if (!wide) {
+		SbSpectrumAggregateCompact (model->spectrum.bands, levels);
+		SbSpectrumAggregateCompact (model->spectrum.peaks, peaks);
+	}
+	for (size_t band = 0; band < bandCount; band++) {
+		float level = model->spectrum.valid ?
+				(wide ? model->spectrum.bands[band] : levels[band]) : 0.0f;
+		float peak = model->spectrum.valid ?
+				(wide ? model->spectrum.peaks[band] : peaks[band]) : 0.0f;
+		if (level < 0.0f) level = 0.0f;
+		if (level > 1.0f) level = 1.0f;
+		if (peak < 0.0f) peak = 0.0f;
+		if (peak > 1.0f) peak = 1.0f;
+		const int filled = (int) ceilf (level * barRows);
+		const int baseline = y + barRows - 1;
+		const int bodyTop = baseline - filled + 1;
+		/* Draw every active cell from the same baseline.  The old absolute-row
+		 * colour test made the hot row look like an independently positioned
+		 * marker instead of part of the body. */
+		for (int bodyRow = 0; bodyRow < filled; bodyRow++) {
+			SbTuiColorRole role = SB_TUI_COLOR_PROGRESS_FILLED;
+			if (bodyRow >= (barRows + 1) / 2) role = SB_TUI_COLOR_ARTIST;
+			if (barRows >= 4 && filled == barRows && bodyRow == barRows - 1)
+				role = SB_TUI_COLOR_TRACK;
+			SbUiCursesAttrOn (data, role, 0);
+			SbUiCursesPut (baseline - bodyRow,
+					origin + (int) band * bandPitch, 3,
+					data->unicodeBlocks ? "███" : "###");
+			SbUiCursesAttrOff (data, role, 0);
+		}
+		int peakY = baseline - (int) ceilf (peak * barRows) + 1;
+		if (peakY < y) peakY = y;
+		if (peak > 0.01f && peakY >= y && peakY < bodyTop) {
+			SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, A_BOLD);
+			SbUiCursesPut (peakY, origin + (int) band * bandPitch, 3, "---");
+			SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, A_BOLD);
+		}
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
+		mvaddnstr (y + barRows, origin + (int) band * bandPitch,
+				wide ? wideLabels[band] : compactLabels[band], bandPitch - 1);
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
+	}
+}
+
 static int SbUiCursesTextWidth (const char *text) {
 	if (text == NULL || *text == '\0') return 2;
 	wchar_t wide[SB_UI_HISTORY_TEXT_MAX];
@@ -801,8 +908,6 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 
 	const int footerY = rows - 2;
 	const int statusY = rows - 4;
-	const char quitKey = renderer->settings->keys[BAR_KS_QUIT];
-	const char helpKey = renderer->settings->keys[BAR_KS_HELP];
 	mvhline (statusY - 1, 1, ACS_HLINE, cols - 2);
 	mvhline (footerY - 1, 1, ACS_HLINE, cols - 2);
 	SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
@@ -841,9 +946,17 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		mvvline (3, split, ACS_VLINE, statusY - 4);
 		const int nowPlayingHeight = 8;
 		const size_t upcomingCount = SbUiCursesUpcomingCount (model);
+		const int rightWidth = cols - (split + 2) - 2;
+		const int spectrumRows = model->visualizerEnabled && rightWidth >= 38 ?
+				(rows >= 45 ? 6 : rows >= 39 ? 4 : rows >= 33 ? 2 : 0) : 0;
+		const int spectrumY = 6 + nowPlayingHeight + 1;
+		/* Heading + top breathing row + bars + labels + bottom breathing row. */
+		const int spectrumHeight = spectrumRows > 0 ? spectrumRows + 4 : 0;
+		const int upcomingY = spectrumY + spectrumHeight;
+		const int maxUpcoming = rows >= 44 ? 4 : rows >= 34 ? 3 : 2;
 		const int upcomingRows = upcomingCount > 0 && rows >= 30 ?
-				(int) (upcomingCount < 4 ? upcomingCount : 4) : 0;
-		const int upcomingY = 6 + nowPlayingHeight + 1;
+				(int) (upcomingCount < (size_t) maxUpcoming ? upcomingCount :
+				(size_t) maxUpcoming) : 0;
 		const int historyY = upcomingY + (upcomingRows > 0 ? upcomingRows + 2 : 0);
 		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
@@ -853,6 +966,8 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (4, split + 2, cols - split - 4, "NOW PLAYING");
+		if (spectrumRows > 0)
+			SbUiCursesPut (spectrumY, split + 2, cols - split - 4, "SPECTRUM");
 		if (upcomingRows > 0) {
 			char upcomingTitle[64];
 			snprintf (upcomingTitle, sizeof (upcomingTitle), "UPCOMING %zu",
@@ -871,8 +986,9 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD : 0);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
-		const int rightWidth = cols - rightX - 2;
 		SbUiCursesNowPlaying (data, model, 6, rightX, nowPlayingHeight, rightWidth);
+		if (spectrumRows > 0) SbUiCursesSpectrum (data, model, spectrumY + 2,
+				rightX, spectrumRows, rightWidth);
 		if (upcomingRows > 0) SbUiCursesUpcoming (data, model, upcomingY + 1,
 				rightX, upcomingRows, rightWidth);
 		SbUiCursesHistory (data, model, historyY + 1, rightX,
@@ -907,11 +1023,18 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 
 	if (data->helpVisible) {
-		const int height = 17;
-		const int width = cols < 64 ? cols - 6 : 58;
+		SbHelpRow helpRows[48];
+		const size_t helpRowCount = SbUiCursesHelpRows (renderer, helpRows);
+		const int wantedHeight = (int) helpRowCount + 4;
+		const int height = wantedHeight < rows - 4 ? wantedHeight : rows - 4;
+		const int width = cols < 70 ? cols - 6 : 64;
 		WINDOW * const help = newwin (height, width, (rows - height) / 2,
 				(cols - width) / 2);
 		if (help != NULL) {
+			const size_t visibleRows = height > 4 ? (size_t) height - 4 : 0;
+			const size_t maxOffset = helpRowCount > visibleRows ?
+					helpRowCount - visibleRows : 0;
+			if (data->helpOffset > maxOffset) data->helpOffset = maxOffset;
 			wbkgdset (help, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_BORDER, 0);
 			box (help, 0, 0);
@@ -919,65 +1042,24 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_TITLE, A_BOLD);
 			mvwaddstr (help, 1, 2, "SIGNALBOX HELP");
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_TITLE, A_BOLD);
-			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 2, 2, "NAVIGATION");
-			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 3, 2, "Tab switches pane; j/k or arrows navigate; Enter acts");
-			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 4, 2, "PLAYBACK");
-			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			const char playbackKeys[] = {
-					SbUiCursesKey (renderer, SB_UI_CMD_TOGGLE_PAUSE),
-					SbUiCursesKey (renderer, SB_UI_CMD_SKIP),
-					SbUiCursesKey (renderer, SB_UI_CMD_LOVE),
-					SbUiCursesKey (renderer, SB_UI_CMD_BAN)};
-			const char *const playbackDescriptions[] =
-					{"pause/resume", "next", "love", "ban"};
-			SbUiCursesHelpCommands (help, data, 5, playbackKeys,
-					playbackDescriptions, 4, width);
-			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 6, 2, "STATIONS");
-			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			const char stationKeys1[] = {
-					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION),
-					SbUiCursesKey (renderer, SB_UI_CMD_GENRE_STATION),
-					SbUiCursesKey (renderer, SB_UI_CMD_ADD_SHARED),
-					SbUiCursesKey (renderer, SB_UI_CMD_ADD_MUSIC)};
-			const char *const stationDescriptions1[] =
-					{"create", "genre", "shared", "add music"};
-			SbUiCursesHelpCommands (help, data, 7, stationKeys1,
-					stationDescriptions1, 4, width);
-			const char stationKeys2[] = {
-					SbUiCursesKey (renderer, SB_UI_CMD_RENAME_STATION),
-					SbUiCursesKey (renderer, SB_UI_CMD_DELETE_STATION),
-					SbUiCursesKey (renderer, SB_UI_CMD_SELECT_QUICKMIX),
-					SbUiCursesKey (renderer, SB_UI_CMD_MANAGE_STATION)};
-			const char *const stationDescriptions2[] =
-					{"rename", "delete", "QuickMix", "manage"};
-			SbUiCursesHelpCommands (help, data, 8, stationKeys2,
-					stationDescriptions2, 4, width);
-			const char stationKeys3[] = {'z', 'f', '/', '#'};
-			const char *const stationDescriptions3[] =
-					{"sort", "favorite", "filter", "jump"};
-			SbUiCursesHelpCommands (help, data, 9, stationKeys3,
-					stationDescriptions3, 4, width);
-			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			mvwaddstr (help, 11, 2, "LIBRARY");
-			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-			const char libraryKeys[] = {
-					SbUiCursesKey (renderer, SB_UI_CMD_BOOKMARK),
-					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION_FROM_SONG),
-					SbUiCursesKey (renderer, SB_UI_CMD_HISTORY),
-					SbUiCursesKey (renderer, SB_UI_CMD_UPCOMING)};
-			const char *const libraryDescriptions[] =
-					{"bookmark", "from song", "history", "upcoming"};
-			SbUiCursesHelpCommands (help, data, 12, libraryKeys,
-					libraryDescriptions, 4, width);
-			const char closeKeys[] = {quitKey != BAR_KS_DISABLED ? quitKey : '-',
-					helpKey != BAR_KS_DISABLED ? helpKey : '-'};
-			const char *const closeDescriptions[] = {"quit", "close help"};
-			SbUiCursesHelpCommands (help, data, 14, closeKeys,
-					closeDescriptions, 2, width);
+			for (size_t shown = 0; shown < visibleRows &&
+					data->helpOffset + shown < helpRowCount; shown++) {
+				const SbHelpRow * const row = &helpRows[data->helpOffset + shown];
+				const int y = 3 + (int) shown;
+				if (row->kind == SB_HELP_HEADING) {
+					SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
+					mvwaddnstr (help, y, 2, row->text, width - 4);
+					SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
+				} else if (row->kind == SB_HELP_COMMAND) {
+					SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_KEY, A_BOLD);
+					mvwaddnstr (help, y, 2, row->key, 11);
+					SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_KEY, A_BOLD);
+					mvwaddnstr (help, y, 14, row->text, width - 16);
+				}
+			}
+			if (data->helpOffset > 0) mvwaddch (help, 1, width - 4, '^');
+			if (data->helpOffset < maxOffset)
+				mvwaddch (help, height - 2, width - 4, 'v');
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
 			doupdate ();
@@ -1634,6 +1716,35 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
+	if (data->helpVisible && (key == KEY_UP || key == 'k' ||
+			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
+			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
+		SbHelpRow helpRows[48];
+		const size_t count = SbUiCursesHelpRows (renderer, helpRows);
+		int rows, cols;
+		getmaxyx (stdscr, rows, cols);
+		(void) cols;
+		const size_t page = rows > 8 ? (size_t) rows - 8 : 1;
+		if ((key == KEY_UP || key == 'k') && data->helpOffset > 0)
+			data->helpOffset--;
+		else if ((key == KEY_DOWN || key == 'j') && data->helpOffset + 1 < count)
+			data->helpOffset++;
+		else if (key == KEY_HOME) data->helpOffset = 0;
+		else if (key == KEY_END) data->helpOffset = count > 0 ? count - 1 : 0;
+		else if (key == KEY_PPAGE) data->helpOffset = data->helpOffset > page ?
+				data->helpOffset - page : 0;
+		else if (key == KEY_NPAGE) data->helpOffset =
+				data->helpOffset + page < count ? data->helpOffset + page :
+				(count > 0 ? count - 1 : 0);
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (data->helpVisible && key == 27) {
+		data->helpVisible = false;
+		data->helpOffset = 0;
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
 	if (!data->helpVisible && (key == KEY_UP || key == 'k' ||
 			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
 			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
@@ -1740,11 +1851,19 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
+	if (!data->helpVisible && key == 'V' &&
+			SbUiCursesVisualizerKeyAvailable (renderer)) {
+		SbUiCursesLocalNotice (data, model->visualizerEnabled ?
+				"Spectrum analyzer off" : "Spectrum analyzer on");
+		wtimeout (stdscr, model->visualizerEnabled ? 1000 : 80);
+		return (SbUiCommandEvent) {SB_UI_CMD_TOGGLE_VISUALIZER, NULL};
+	}
 	if (key >= 0 && key <= UCHAR_MAX) {
 		const SbUiCommand command = BarUiCommandFromKey (renderer->settings,
 				(char) key);
 		if (command == SB_UI_CMD_HELP) {
 			data->helpVisible = !data->helpVisible;
+			data->helpOffset = 0;
 			SbUiCursesFrame (renderer, model);
 			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
@@ -1951,10 +2070,11 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	data->statusSeverity = SB_UI_NOTICE_INFO;
 	data->statusExpires = time (NULL) + 4;
 	data->unicodeSymbols = wcwidth (L'♥') == 1 && wcwidth (L'›') == 1;
+	data->unicodeBlocks = wcwidth (L'█') == 1;
 	cbreak ();
 	noecho ();
 	keypad (stdscr, TRUE);
-	wtimeout (stdscr, 1000);
+	wtimeout (stdscr, settings->visualizerSpectrum ? 80 : 1000);
 	(void) curs_set (0);
 	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
 		data->colors = SbUiCursesInitPalette (data, theme);

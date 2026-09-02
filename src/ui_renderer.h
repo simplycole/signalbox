@@ -7,6 +7,7 @@
 #include <piano.h>
 
 #include "settings.h"
+#include "spectrum.h"
 #include "ui_types.h"
 
 typedef enum {
@@ -60,6 +61,8 @@ typedef struct {
 	uint64_t generation;
 	/* Changes only when the canonical station collection is refreshed. */
 	uint64_t stationsGeneration;
+	SbSpectrumSnapshot spectrum;
+	bool visualizerEnabled;
 } SbUiModel;
 
 typedef enum {
@@ -102,6 +105,7 @@ void SbUiModelSetProgress (SbUiModel *, unsigned int, unsigned int,
 		SbUiPlaybackState);
 void SbUiModelSetVolume (SbUiModel *, int);
 void SbUiModelSetActivity (SbUiModel *, SbUiActivityState);
+void SbUiModelSetSpectrum (SbUiModel *, const SbSpectrumSnapshot *, bool);
 
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
 bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *, SbTuiTheme);

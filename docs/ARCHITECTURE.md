@@ -35,6 +35,29 @@ constructs the audio-filter graph; libao sends decoded samples to the selected
 audio output. The player state exposes pause, quit, elapsed time, duration,
 volume, and lifecycle information to the rest of the application.
 
+`src/spectrum.c` is a platform-neutral observational branch at the final PCM
+boundary. FFmpeg decoding runs on the per-track player thread. Its filter graph
+applies the existing volume and `aformat` stages and produces packed,
+native-endian signed 16-bit PCM at the configured/stream sample rate and source
+channel count. The per-track audio-output thread pulls each `AVFrame`; directly
+before the unchanged synchronous `ao_play()` call it gives the analyzer a
+read-only view of that frame. Decoder frames, output format, pointer, byte count,
+gain, and timing are not changed.
+
+The analyzer keeps a fixed 1024-sample mono ring, performs at most one internal
+radix-2 FFT per 80 ms with a Hann window, and publishes twelve normalized bands
+plus peak caps under a small dedicated mutex. Bin ranges are recomputed only
+when the input sample rate changes and clip naturally at Nyquist. The UI/main
+thread only copies a
+bounded `SbSpectrumSnapshot` into `SbUiModel`; curses never sees FFmpeg state,
+and the audio thread never calls curses. No per-buffer, per-transform, or
+per-render allocation occurs. The renderer uses all twelve canonical bands when
+the right pane is at least 69 cells wide, max-aggregates them to eight display
+bands from 38–68 cells, and hides the display below 38 cells. Track and format
+changes reset its fixed state;
+stale snapshots decay during pause, buffering, and transitions. The module has
+no macOS DSP dependency and is intended to carry into Linux and future Windows.
+
 ### Current terminal interaction: `src/ui*`, `src/terminal*`
 
 The current interface is a line-oriented console UI rather than a full-screen
@@ -144,6 +167,13 @@ Event-command serialization remains machine-facing direct
 output, and fatal/developer diagnostics remain at their existing layers.
 Player-thread messages only update mutex-protected notice state and never call
 ncurses. The main thread performs all rendering on the existing refresh cadence.
+
+With spectrum enabled, curses uses an 80 ms timed input poll (otherwise the
+existing one-second cadence) and redraws only from `SbUiModel`. Approximate
+buckets are 40–90, 90–180, 180–350, 350–700, 700–1400, 1400–2800,
+2800–5600, and 5600–12000 Hz, clipped at Nyquist. The displayed center labels
+are not precision instrumentation. Uppercase `V` is local and collision-checked;
+lowercase `v` remains the inherited create-station-from-song action.
 
 ### Settings and configuration: `src/settings.c`, `src/settings.h`
 

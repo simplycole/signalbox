@@ -126,6 +126,13 @@ void SbUiModelSetProgress (SbUiModel *model, const unsigned int elapsed,
 	SbUiModelChanged (model);
 }
 
+void SbUiModelSetSpectrum (SbUiModel *model,
+		const SbSpectrumSnapshot *spectrum, const bool enabled) {
+	assert (model != NULL && spectrum != NULL);
+	model->spectrum = *spectrum;
+	model->visualizerEnabled = enabled;
+}
+
 void SbUiClassicMessageV (const BarSettings_t *settings,
 		const BarUiMsg_t type, const char *format, va_list fmtargs) {
 	assert (settings != NULL);

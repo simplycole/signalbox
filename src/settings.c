@@ -237,6 +237,7 @@ void BarSettingsRead (BarSettings_t *settings) {
 	settings->audioPipe = NULL;
 	assert (settings->fifo != NULL);
 	settings->sampleRate = 0; /* default to stream sample rate */
+	settings->visualizerSpectrum = true;
 
 	settings->msgFormat[MSG_NONE].prefix = NULL;
 	settings->msgFormat[MSG_NONE].postfix = NULL;
@@ -462,6 +463,12 @@ void BarSettingsRead (BarSettings_t *settings) {
 				settings->autoselect = atoi (val);
 			} else if (streq ("sample_rate", key)) {
 				settings->sampleRate = atoi (val);
+			} else if (streq ("visualizer", key)) {
+				if (streq (val, "spectrum")) settings->visualizerSpectrum = true;
+				else if (streq (val, "off")) settings->visualizerSpectrum = false;
+				else BarUiMsg (settings, MSG_INFO,
+						"Unknown visualizer '%s' at %s:%zu; keeping current setting\n",
+						val, path, lineNum);
 			} else if (strncmp (formatMsgPrefix, key,
 					strlen (formatMsgPrefix)) == 0) {
 				static const char *mapping[] = {"none", "info", "nowplaying",
