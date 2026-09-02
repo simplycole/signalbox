@@ -82,8 +82,8 @@ plans, not promises of a date or release.
   smoothing, peak hold, responsive right-pane placement, mono/ASCII fallback,
   and config/CLI/runtime disable controls. It is visual-only and does not apply
   audio equalization; a future playback EQ would be a separate feature.
-- [ ] Verify classic, FIFO, event-command, and headless compatibility before
-  making the TUI the interactive default.
+- [x] Make the TUI the default on supported interactive terminals, retain
+  explicit `--classic`, and preserve classic fallback for headless execution.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and
   packaging are stable.
 

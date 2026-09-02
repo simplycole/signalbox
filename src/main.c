@@ -569,7 +569,11 @@ static void BarMainSetupSigaction () {
 
 int main (int argc, char **argv) {
 	static BarApp_t app;
-	bool useTui = false;
+	enum {
+		MODE_AUTO,
+		MODE_TUI,
+		MODE_CLASSIC,
+	} mode = MODE_AUTO;
 	bool forgetCredentials = false;
 	int visualizerOverride = -1;
 	SbTuiTheme tuiTheme = SB_TUI_THEME_PHOSPHOR;
@@ -579,9 +583,24 @@ int main (int argc, char **argv) {
 	memset (&app, 0, sizeof (app));
 	for (int i = 1; i < argc; i++) {
 		if (strcmp (argv[i], "--tui") == 0) {
-			useTui = true;
+			if (mode == MODE_CLASSIC) {
+				fputs ("signalbox: --tui and --classic cannot be used together\n", stderr);
+				return 2;
+			}
+			mode = MODE_TUI;
 		} else if (strcmp (argv[i], "--classic") == 0) {
-			useTui = false;
+			if (mode == MODE_TUI) {
+				fputs ("signalbox: --tui and --classic cannot be used together\n", stderr);
+				return 2;
+			}
+			mode = MODE_CLASSIC;
+		} else if (strcmp (argv[i], "--help") == 0) {
+			printf ("Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--visualizer spectrum|off] [--forget-credentials]\n"
+					"  --tui       force curses TUI\n"
+					"  --classic   force classic terminal UI\n"
+					"TUI is selected automatically on supported interactive terminals.\n",
+					argv[0]);
+			return 0;
 		} else if (strcmp (argv[i], "--forget-credentials") == 0) {
 			forgetCredentials = true;
 		} else if (strcmp (argv[i], "--visualizer") == 0 && i + 1 < argc) {
@@ -607,16 +626,17 @@ int main (int argc, char **argv) {
 			return 2;
 		}
 	}
-	if (useTui) {
-		const char * const term = getenv ("TERM");
-		if (!isatty (STDIN_FILENO) || !isatty (STDOUT_FILENO) ||
-				term == NULL || *term == '\0' || strcmp (term, "dumb") == 0) {
-			fputs ("signalbox: --tui requires an interactive terminal and a usable TERM\n",
-					stderr);
-			return 2;
-		}
+	const char * const term = getenv ("TERM");
+	const bool terminalSupportsTui = isatty (STDIN_FILENO) &&
+			isatty (STDOUT_FILENO) && term != NULL && *term != '\0' &&
+			strcmp (term, "dumb") != 0;
+	if (mode == MODE_TUI && !terminalSupportsTui) {
+		fputs ("signalbox: --tui requires an interactive terminal and a usable TERM\n",
+				stderr);
+		return 2;
 	}
-	app.useTui = useTui;
+	app.useTui = mode == MODE_TUI ||
+			(mode == MODE_AUTO && terminalSupportsTui);
 	app.tuiTheme = tuiTheme;
 
 	/* save terminal attributes, before disabling echoing */
@@ -669,13 +689,21 @@ int main (int argc, char **argv) {
 	SbUiRendererSetActive (&app.uiRenderer);
 	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings,
 			tuiTheme)) {
-		fputs ("signalbox: unable to initialize ncursesw\n", stderr);
-		SbUiRendererSetActive (NULL);
-		SbUiModelDestroy (&app.uiModel);
-		BarSettingsDestroy (&app.settings);
-		BarPlayerDestroy (&app.player);
-		BarTermRestore ();
-		return 1;
+		if (mode == MODE_TUI) {
+			fputs ("signalbox: unable to initialize ncursesw\n", stderr);
+			SbUiRendererSetActive (NULL);
+			SbUiModelDestroy (&app.uiModel);
+			BarSettingsDestroy (&app.settings);
+			BarPlayerDestroy (&app.player);
+			BarTermRestore ();
+			return 1;
+		}
+		fputs ("signalbox: TUI unavailable; falling back to classic mode\n",
+				stderr);
+		app.useTui = false;
+		app.visualizerEnabled = false;
+		app.uiModel.visualizerEnabled = false;
+		BarPlayerSetSpectrumEnabled (&app.player, false);
 	}
 	if (app.useTui) {
 		SbUiRendererRender (&app.uiRenderer, &app.uiModel,

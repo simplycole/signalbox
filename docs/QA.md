@@ -25,6 +25,17 @@ The TUI uses configured key bindings. The keys named below are defaults (`?`,
 `v`, `(`, `)`, and `^`); use the help overlay as the authority if the config
 remaps them.
 
+## Startup mode selection
+
+- **Action:** Run `./signalbox` in a supported interactive terminal. **Expected:**
+  the TUI starts without requiring a mode flag.
+- **Action:** Run `./signalbox --tui` and `./signalbox --classic` separately.
+  **Expected:** the requested renderer starts; classic never initializes curses.
+- **Action:** pipe or redirect a no-flag invocation, and repeat with `TERM=dumb`.
+  **Expected:** Signalbox uses classic mode without attempting curses.
+- **Action:** Run `./signalbox --tui --classic` in either flag order. **Expected:**
+  startup exits with status 2 and reports that the modes conflict.
+
 ## Diagnostic capture
 
 Use the metadata-only trace for a supervised run:

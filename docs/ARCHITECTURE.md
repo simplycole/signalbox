@@ -151,7 +151,9 @@ flags only after Enter and restores the snapshot if the request fails. Esc
 therefore cannot mutate account state. Station-info and search results retain
 their existing libpiano destruction paths after the modal closes.
 
-`--tui` selects the full-screen backend while classic remains the default.
+Supported interactive terminals select the full-screen backend by default.
+`--tui` forces that backend, while `--classic` selects the line-oriented
+compatibility backend.
 Terminal suitability is checked before termios or curses initialization. The
 startup login uses a native, masked curses form. Initial TUI station
 choice uses autostart or the first station without leaving curses, while FIFO

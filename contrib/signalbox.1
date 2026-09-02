@@ -11,11 +11,24 @@ signalbox \- console pandora.com music player
 
 .SH SYNOPSIS
 .B signalbox
+.RB [ --tui | --classic ]
 
 .SH DESCRIPTION
 .B signalbox
 is a lightweight console music player for the personalized online radio
 pandora.com.
+On a supported interactive terminal, Signalbox starts its full-screen TUI by
+default. It falls back to the classic line-oriented interface when standard
+input or output is not a terminal, or when TERM is unset, empty, or "dumb".
+
+.SH OPTIONS
+.TP
+.B --tui
+Force the curses TUI. Signalbox exits with an error if the terminal is not
+suitable.
+.TP
+.B --classic
+Force the inherited classic terminal interface.
 
 .SH FILES
 .I $XDG_CONFIG_HOME/signalbox/config

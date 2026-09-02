@@ -32,9 +32,9 @@ Why Signalbox?
 
 Signalbox keeps pianobar's lean native-C core and proven Pandora integration,
 then builds a more discoverable terminal experience around it. It is currently
-an early-stage project: the TUI is useful and actively developed, while classic
-pianobar-compatible mode remains the default until compatibility and packaging
-work are complete.
+an early-stage project: the TUI is the default on supported interactive
+terminals, while classic pianobar-compatible mode remains available for
+compatibility and headless use.
 
 Highlights
 ----------
@@ -122,18 +122,20 @@ Debian / Ubuntu
      libgcrypt20-dev libjson-c-dev libncursesw5-dev libsecret-1-dev pkg-config
    make
 
-Launch the current full-screen interface:
+Launch Signalbox (the full-screen TUI is selected automatically in a supported
+interactive terminal):
 
 .. code-block:: console
 
-   ./signalbox --tui
+   ./signalbox
 
 Useful options:
 
 .. code-block:: console
 
-   ./signalbox --tui --theme phosphor
-   ./signalbox --tui --visualizer off
+   ./signalbox --theme phosphor
+   ./signalbox --visualizer off
+   ./signalbox --tui
    ./signalbox --classic
    ./signalbox --forget-credentials
 
@@ -179,7 +181,7 @@ Near-term work is deliberately platform-first:
 
 1. Linux Secret Service runtime validation across selected desktops
 2. Windows portability boundaries and a Credential Manager backend
-3. Classic/FIFO/headless compatibility validation, then making the TUI the
+3. Continue classic/FIFO/headless compatibility validation with the TUI as the
    interactive default
 4. Persistent listening history with explicit retention and privacy behavior
 5. Richer visualizer modes and optional terminal artwork

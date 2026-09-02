@@ -1,7 +1,7 @@
 # Terminal UI architecture decision
 
 Status: architecture phases A and B and renderer Phase C4 are complete. The
-ncursesw shell is experimental and opt-in, with a station browser, polished
+ncursesw shell is the default on supported interactive terminals, with a station browser, polished
 now-playing view, native create/search/rename/delete prompts, volume controls,
 retry/recovery notices, fixed themes, and session history.
 
@@ -379,8 +379,8 @@ Preserve three conceptual modes without fixing flag names yet:
 - headless with no terminal mode, curses, prompts, carriage-return progress, or
   decoration, controlled by configured startup/automation inputs.
 
-Ship TUI as opt-in first and keep classic as fallback. Change the default only
-after parity/recovery testing. `TERM=dumb`, unsuitable capabilities, or
+Ship TUI as the interactive default and keep classic as fallback. `TERM=dumb`,
+unsuitable capabilities, or
 non-interactive stdout must not initialize curses. Do not infer suitability
 from `TERM` alone. Always restore state on normal/handled fatal exit and make
 suspend/resume leave and re-enter full-screen mode cleanly.
@@ -436,9 +436,9 @@ and output-free headless startup without a TTY.
    `BarUiAct*`; represent nested prompts as explicit states.
 4. **UI model (C2 projection complete):** borrowed current state is augmented
    by scalar playback/volume state and dynamically owned session-history rows.
-5. **Mode lifecycle:** define TUI/classic/headless selection; establish true
-   non-interactive startup before curses becomes default.
-6. **ncursesw skeleton (complete):** opt-in alternate-screen lifecycle,
+5. **Mode lifecycle (complete):** automatic interactive TUI selection, explicit
+   TUI/classic overrides, and non-interactive classic fallback.
+6. **ncursesw skeleton (complete):** alternate-screen lifecycle,
    configured quit/help input, full redraw on resize, minimum-size behavior,
    model-driven metadata/progress, and status. Explicit suspend/resume polish
    remains alongside broader terminal recovery testing.
@@ -476,8 +476,8 @@ and output-free headless startup without a TTY.
     `*` in the second means favorite, and reverse video means selected, so
     monochrome and `NO_COLOR` remain understandable. Recent-activation sorting
     is deferred because no persistent usage history currently exists.
-13. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,
-    and macOS/Linux before changing the interactive default.
+13. **Parity/default (complete):** classic, FIFO, eventcmd, and headless paths
+    remain available while supported interactive terminals default to TUI.
 14. **Optional integrations:** platform media hooks, useful mouse behavior, and
     artwork only after a separate capability/packaging decision.
 

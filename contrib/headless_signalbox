@@ -103,7 +103,7 @@ launch(){
         then
                 ensure_fifo true
                 echo "Signalbox not running, launching Signalbox"
-                nohup signalbox &>$OUT &disown
+                nohup signalbox --classic &>$OUT &disown
                 sleep 1
         else
                 ensure_fifo
