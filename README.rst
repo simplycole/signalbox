@@ -111,12 +111,15 @@ Start the executable from the source tree with:
 
    ./signalbox
 
-Classic mode remains the default. To launch the experimental Phase C2
+Classic mode remains the default. To launch the experimental Phase C3
 full-screen interface, use an interactive terminal and run:
 
 .. code-block:: console
 
    ./signalbox --tui
+
+Choose a palette with ``--theme phosphor`` (the default), ``amber``, ``mono``,
+or ``neutral``. Setting ``NO_COLOR`` forces the monochrome presentation.
 
 The TUI requires stdin and stdout to be terminals and a usable ``TERM`` value;
 it exits with a concise error instead of initializing curses otherwise. The
@@ -126,10 +129,14 @@ artist/title/album/station metadata, rating, signed-dB software volume,
 playback state and adaptive progress, transient status notices, and up to ten
 recent tracks from the current session. History is shown only when the terminal
 has room. Navigate with arrows or ``j``/``k``, press Enter to tune, and use the
-configured keys for pause/resume, next, love, ban, volume down/up/reset, help,
-and quit. The inherited station-select key
+configured keys for create, rename, delete, pause/resume, next, love, ban,
+volume down/up/reset, help, and quit. Create/search uses a native text prompt
+and result selector; rename uses bounded text editing; delete uses an explicit
+confirmation. The inherited station-select key
 shows browser guidance instead of opening a blocking prompt. Other modal
-actions remain deferred; use classic mode for the complete inherited interface.
+actions (including seed management, history/upcoming selectors, settings, and
+startup credentials) remain classic-only; use classic mode for the complete
+inherited interface.
 
 On first run, enter Pandora credentials when prompted. TUI mode starts with the
 autostart station, or the first available station when none is configured.

@@ -202,7 +202,8 @@ static void BarMainGetInitialStation (BarApp_t *app) {
 
 static bool BarMainEnterTui (BarApp_t *app) {
 	SbUiRendererShutdown (&app->uiRenderer);
-	if (!SbUiRendererInitCurses (&app->uiRenderer, &app->settings)) {
+	if (!SbUiRendererInitCurses (&app->uiRenderer, &app->settings,
+			app->tuiTheme)) {
 		return false;
 	}
 	SbUiRendererSetActive (&app->uiRenderer);
@@ -254,6 +255,8 @@ static void BarMainGetPlaylist (BarApp_t *app) {
 	reqData.quality = app->settings.audioQuality;
 
 	BarUiMsg (&app->settings, MSG_INFO, "Receiving new playlist... ");
+	SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_WAITING_PLAYLIST);
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
 	if (!BarUiPianoCall (app, PIANO_REQUEST_GET_PLAYLIST,
 			&reqData, &pRet, &wRet)) {
 		app->nextStation = NULL;
@@ -467,6 +470,7 @@ static void BarMainSetupSigaction () {
 int main (int argc, char **argv) {
 	static BarApp_t app;
 	bool useTui = false;
+	SbTuiTheme tuiTheme = SB_TUI_THEME_PHOSPHOR;
 
 	debugEnable();
 
@@ -476,8 +480,18 @@ int main (int argc, char **argv) {
 			useTui = true;
 		} else if (strcmp (argv[i], "--classic") == 0) {
 			useTui = false;
+		} else if (strcmp (argv[i], "--theme") == 0 && i + 1 < argc) {
+			const char * const name = argv[++i];
+			if (strcmp (name, "phosphor") == 0) tuiTheme = SB_TUI_THEME_PHOSPHOR;
+			else if (strcmp (name, "amber") == 0) tuiTheme = SB_TUI_THEME_AMBER;
+			else if (strcmp (name, "mono") == 0) tuiTheme = SB_TUI_THEME_MONO;
+			else if (strcmp (name, "neutral") == 0) tuiTheme = SB_TUI_THEME_NEUTRAL;
+			else {
+				fprintf (stderr, "signalbox: unknown theme '%s'\n", name);
+				return 2;
+			}
 		} else {
-			fprintf (stderr, "Usage: %s [--tui|--classic]\n", argv[0]);
+			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -491,6 +505,7 @@ int main (int argc, char **argv) {
 		}
 	}
 	app.useTui = useTui;
+	app.tuiTheme = tuiTheme;
 
 	/* save terminal attributes, before disabling echoing */
 	BarTermInit ();
@@ -512,7 +527,8 @@ int main (int argc, char **argv) {
 	SbUiModelSetVolume (&app.uiModel, app.settings.volume);
 	SbUiRendererInitClassic (&app.uiRenderer, &app.settings);
 	SbUiRendererSetActive (&app.uiRenderer);
-	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings)) {
+	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings,
+			tuiTheme)) {
 		fputs ("signalbox: unable to initialize ncursesw\n", stderr);
 		SbUiRendererSetActive (NULL);
 		BarSettingsDestroy (&app.settings);

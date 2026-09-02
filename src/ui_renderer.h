@@ -14,6 +14,14 @@ typedef enum {
 	SB_UI_PLAYBACK_PAUSED,
 } SbUiPlaybackState;
 
+typedef enum {
+	SB_UI_ACTIVITY_READY = 0,
+	SB_UI_ACTIVITY_REQUESTING,
+	SB_UI_ACTIVITY_RECONNECTING,
+	SB_UI_ACTIVITY_ERROR,
+	SB_UI_ACTIVITY_WAITING_PLAYLIST,
+} SbUiActivityState;
+
 enum {
 	SB_UI_HISTORY_MAX = 10,
 	SB_UI_HISTORY_TEXT_MAX = 128,
@@ -39,6 +47,7 @@ typedef struct {
 	unsigned int duration;
 	unsigned int elapsed;
 	SbUiPlaybackState playback;
+	SbUiActivityState activity;
 	/* Software-volume offset in decibels. ReplayGain is applied separately by
 	 * the player and is deliberately not presented as user volume. */
 	int volumeDb;
@@ -52,9 +61,17 @@ typedef enum {
 	SB_UI_RENDER_STATION,
 	SB_UI_RENDER_SONG,
 	SB_UI_RENDER_PROGRESS,
+	SB_UI_RENDER_STATE,
 } SbUiRenderEvent;
 
 typedef struct SbUiRenderer SbUiRenderer;
+
+typedef enum {
+	SB_TUI_THEME_PHOSPHOR = 0,
+	SB_TUI_THEME_AMBER,
+	SB_TUI_THEME_MONO,
+	SB_TUI_THEME_NEUTRAL,
+} SbTuiTheme;
 
 typedef struct {
 	void (*init) (SbUiRenderer *);
@@ -78,9 +95,17 @@ void SbUiModelSetSong (SbUiModel *, const PianoSong_t *,
 void SbUiModelSetProgress (SbUiModel *, unsigned int, unsigned int,
 		SbUiPlaybackState);
 void SbUiModelSetVolume (SbUiModel *, int);
+void SbUiModelSetActivity (SbUiModel *, SbUiActivityState);
 
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
-bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *);
+bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *, SbTuiTheme);
+bool SbUiRendererIsCurses (const SbUiRenderer *);
+bool SbUiRendererPromptText (SbUiRenderer *, const SbUiModel *,
+		const char *, const char *, char *, size_t);
+bool SbUiRendererConfirm (SbUiRenderer *, const SbUiModel *,
+		const char *, const char *);
+int SbUiRendererSelectList (SbUiRenderer *, const SbUiModel *,
+		const char *, const char *const *, size_t);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);
 SbUiCommandEvent SbUiRendererReadCommand (SbUiRenderer *, const SbUiModel *);
 void SbUiRendererShutdown (SbUiRenderer *);

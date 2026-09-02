@@ -1,8 +1,14 @@
 # Terminal UI architecture decision
 
-Status: architecture phases A and B and renderer Phase C2 are complete. The
+Status: architecture phases A and B and renderer Phase C3 are complete. The
 ncursesw shell is experimental and opt-in, with a station browser, polished
-now-playing view, volume controls, transient notices, and session history.
+now-playing view, native create/search/rename/delete prompts, volume controls,
+retry/recovery notices, fixed themes, and session history.
+
+Connection presentation reflects the request-based protocol: the status row
+shows requesting, waiting-for-playlist, and error activity, while transient
+notices identify retries and recovery. It does not claim a persistent socket
+connection, and it does not alter retry counts or backoff.
 
 ## Decision
 
@@ -387,10 +393,13 @@ and output-free headless startup without a TTY.
 8. **Now playing (complete):** metadata, playback/rating, signed-dB volume,
    wide-aware truncation, and timed adaptive progress.
 9. **History/notices/help (partial):** bounded history, timed status/error
-   notices, and configured help are complete; upcoming tracks, reconnect state,
-   and prompts remain.
-10. **Themes/accessibility:** semantic themes, `NO_COLOR`, high contrast,
-    ASCII/monochrome, reduced motion.
+   notices, configured help, and request retry/recovery presentation are
+   complete; upcoming-track presentation remains.
+10. **Prompts/themes/accessibility (C3 complete):** bounded wide-character text
+    entry, destructive confirmation, search-result selection, phosphor/amber/
+    mono/neutral palettes, and `NO_COLOR`. Selection and severity retain text
+    or reverse-video cues; there is no blink or animation. Startup credentials,
+    seed/settings flows, and a dedicated high-contrast palette remain deferred.
 11. **Parity/default:** verify classic, FIFO, eventcmd, headless, small terminals,
     and macOS/Linux before changing the interactive default.
 12. **Optional integrations:** platform media hooks, useful mouse behavior, and

@@ -69,27 +69,36 @@ renderer. It does not own or copy Pandora lists or objects. The synchronous
 main loop serializes their lifetime; renderer-local selection and scrolling do
 not mutate the model.
 
+Phase C3 adds request activity (`requesting`, `waiting for playlist`, `error`,
+and recovered/ready) to that projection. It describes synchronous request
+activity rather than pretending Pandora maintains a continuous socket
+connection; existing curl retry policy is unchanged.
+
 The renderer has an `init`/`render`/input/notice/`shutdown` lifecycle. Its
 classic synchronous line backend preserves
 configured prefixes, postfixes, formats, ANSI erase-line behavior, flushing,
-and carriage-return progress. Phase C2's opt-in ncursesw backend
+and carriage-return progress. Phase C3's opt-in ncursesw backend
 owns its `SCREEN`, maps ordinary keys through the shared command table, stores
 captures notices under a mutex for the status line, expires normal notices
 after four seconds and errors after eight, redraws on `KEY_RESIZE`, and calls
 `endwin()` during normal shutdown. It owns station selection and scrolling,
 keeps the active station independent, and sends Enter activation plus audited
-prompt-free playback actions through named commands. ncurses types remain
-private to `ui_renderer_curses.c`.
+playback actions through named commands. Its small synchronous text,
+confirmation, and list prompt primitives own only local input/presentation;
+actions still own search, creation, rename, deletion, and canonical mutation.
+ncurses types remain private to `ui_renderer_curses.c`.
 
 `--tui` selects the full-screen backend while classic remains the default.
 Terminal suitability is checked before termios or curses initialization. The
 inherited blocking login interaction runs in classic mode. Initial TUI station
 choice uses autostart or the first station without leaving curses, while FIFO
 input remains on the existing byte-to-command path. Interactive legacy actions
-with nested prompts remain disabled in curses.
+with nested prompts remain disabled in curses except native create/search,
+rename, and delete. Startup credentials deliberately retain the classic
+fallback so password masking remains unchanged.
 
-Blocking prompts and selection/readline editing intentionally remain on the
-classic path. Event-command serialization remains machine-facing direct
+Other blocking prompts and full readline behavior remain on the classic path.
+Event-command serialization remains machine-facing direct
 output, and fatal/developer diagnostics remain at their existing layers.
 Player-thread messages only update mutex-protected notice state and never call
 ncurses. The main thread performs all rendering on the existing refresh cadence.

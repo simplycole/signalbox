@@ -169,7 +169,9 @@ BarUiActCallback(BarUiActCreateStation) {
 			"Create station from artist or title: ");
 	if (reqData.token != NULL) {
 		BarUiMsg (&app->settings, MSG_INFO, "Creating station... ");
-		BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData);
+		if (BarUiActDefaultPianoCall (PIANO_REQUEST_CREATE_STATION, &reqData)) {
+			SbUiModelSetStations (&app->uiModel, app->ph.stations);
+		}
 		free (reqData.token);
 		BarUiActDefaultEventcmd ("stationcreate");
 	}
@@ -242,12 +244,20 @@ BarUiActCallback(BarUiActDeleteStation) {
 
 	assert (selStation != NULL);
 
-	BarUiMsg (&app->settings, MSG_QUESTION, "Really delete \"%s\"? [yN] ",
-			selStation->name);
-	if (BarReadlineYesNo (false, &app->input)) {
+	char confirm[256];
+	snprintf (confirm, sizeof (confirm),
+			"Delete station \"%s\"? This cannot be undone.", selStation->name);
+	const bool confirmed = app->useTui ?
+			SbUiRendererConfirm (&app->uiRenderer, &app->uiModel,
+					"DELETE STATION", confirm) :
+			(BarUiMsg (&app->settings, MSG_QUESTION,
+					"Really delete \"%s\"? [yN] ", selStation->name),
+			 BarReadlineYesNo (false, &app->input));
+	if (confirmed) {
 		BarUiMsg (&app->settings, MSG_INFO, "Deleting station... ");
-		if (BarUiActDefaultPianoCall (PIANO_REQUEST_DELETE_STATION,
-				selStation) && selStation == app->curStation) {
+		const bool deleted = BarUiActDefaultPianoCall (PIANO_REQUEST_DELETE_STATION,
+				selStation);
+		if (deleted && selStation == app->curStation) {
 			drainPlaylist (app);
 			app->nextStation = NULL;
 			/* XXX: usually we shoudn’t touch cur*, but DELETE_STATION destroys
@@ -255,6 +265,7 @@ BarUiActCallback(BarUiActDeleteStation) {
 			app->curStation = NULL;
 			selStation = NULL;
 		}
+		if (deleted) SbUiModelSetStations (&app->uiModel, app->ph.stations);
 		BarUiActDefaultEventcmd ("stationdelete");
 	}
 }
@@ -476,8 +487,15 @@ BarUiActCallback(BarUiActRenameStation) {
 
 	assert (selStation != NULL);
 
-	BarUiMsg (&app->settings, MSG_QUESTION, "New name: ");
-	if (BarReadlineStr (lineBuf, sizeof (lineBuf), &app->input, BAR_RL_DEFAULT) > 0) {
+	snprintf (lineBuf, sizeof (lineBuf), "%s", selStation->name);
+	const bool haveName = app->useTui ?
+			SbUiRendererPromptText (&app->uiRenderer, &app->uiModel,
+					"RENAME STATION", "New station name:", lineBuf,
+					sizeof (lineBuf)) :
+			(BarUiMsg (&app->settings, MSG_QUESTION, "New name: "),
+			 BarReadlineStr (lineBuf, sizeof (lineBuf), &app->input,
+					BAR_RL_DEFAULT) > 0);
+	if (haveName) {
 		PianoRequestDataRenameStation_t reqData;
 		if (!BarTransformIfShared (app, selStation)) {
 			return;
@@ -487,7 +505,9 @@ BarUiActCallback(BarUiActRenameStation) {
 		reqData.newName = lineBuf;
 
 		BarUiMsg (&app->settings, MSG_INFO, "Renaming station... ");
-		BarUiActDefaultPianoCall (PIANO_REQUEST_RENAME_STATION, &reqData);
+		if (BarUiActDefaultPianoCall (PIANO_REQUEST_RENAME_STATION, &reqData)) {
+			SbUiModelSetStations (&app->uiModel, app->ph.stations);
+		}
 		BarUiActDefaultEventcmd ("stationrename");
 	}
 }

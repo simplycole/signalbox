@@ -80,6 +80,12 @@ void SbUiModelSetVolume (SbUiModel *model, const int volumeDb) {
 	SbUiModelChanged (model);
 }
 
+void SbUiModelSetActivity (SbUiModel *model, const SbUiActivityState activity) {
+	assert (model != NULL);
+	model->activity = activity;
+	SbUiModelChanged (model);
+}
+
 void SbUiModelSetProgress (SbUiModel *model, const unsigned int elapsed,
 		const unsigned int duration, const SbUiPlaybackState playback) {
 	assert (model != NULL);
@@ -200,6 +206,9 @@ static void SbUiClassicRender (SbUiRenderer *renderer,
 			BarUiMsg (settings, MSG_TIME, "%s\r", outstr);
 			break;
 		}
+
+		case SB_UI_RENDER_STATE:
+			break;
 	}
 }
 
@@ -256,6 +265,11 @@ SbUiCommandEvent SbUiRendererReadCommand (SbUiRenderer *renderer,
 
 void SbUiRendererSetActive (SbUiRenderer *renderer) {
 	activeRenderer = renderer;
+}
+
+bool SbUiRendererIsCurses (const SbUiRenderer *renderer) {
+	return renderer != NULL && renderer->ops != NULL &&
+			renderer->ops != &classicOps;
 }
 
 SbUiRenderer *SbUiRendererGetActive (void) {

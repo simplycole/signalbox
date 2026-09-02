@@ -45,11 +45,15 @@ plans, not promises of a date or release.
   ban, and quit controls through named commands.
 - [x] Add now-playing metadata, playback/rating state, volume, and low-frequency
   progress updates.
-- [x] Present bounded session history, expiring status/error notices, and
-  configured key help. Upcoming tracks, reconnect state, and interactive
-  prompts remain deferred.
-- [ ] Add semantic green, amber, monochrome, neutral, and high-contrast themes
-  with `NO_COLOR` degradation and reduced motion.
+- [x] Present bounded session history, expiring status/error notices,
+  request retry/recovery state, and configured key help. Upcoming tracks remain
+  deferred.
+- [x] Add native TUI create/search, rename, and delete prompts with bounded
+  editing, confirmation, and result selection; retain classic startup
+  credential and advanced nested prompts.
+- [x] Add phosphor, amber, monochrome, and neutral themes with `NO_COLOR`
+  degradation and no blink/animation. A dedicated high-contrast theme remains
+  future work.
 - [ ] Verify classic, FIFO, event-command, and headless compatibility before
   making the TUI the interactive default.
 - [ ] Evaluate optional mouse and terminal artwork only after the text TUI and

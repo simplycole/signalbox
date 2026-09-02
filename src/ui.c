@@ -257,7 +257,15 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 			if (retry >= settings->maxRetry) {
 				break;
 			}
+			if (SbUiRendererIsCurses (SbUiRendererGetActive ())) {
+				BarUiMsg (settings, MSG_QUESTION,
+						"Warning: request failed — retrying (%u/%u)",
+						retry, settings->maxRetry);
+			}
 		} else {
+			if (retry > 1 && SbUiRendererIsCurses (SbUiRendererGetActive ())) {
+				BarUiMsg (settings, MSG_INFO, "Playback request recovered");
+			}
 			break;
 		}
 	} while (true);
@@ -280,6 +288,8 @@ bool BarUiPianoCall (BarApp_t * const app, const PianoRequestType_t type,
 	PianoReturn_t pRetLocal = PIANO_RET_OK;
 	CURLcode wRetLocal = CURLE_OK;
 	bool ret = false;
+	SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_REQUESTING);
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
 
 	/* repeat as long as there are http requests to do */
 	do {
@@ -341,6 +351,9 @@ cleanup:
 
 	*pRet = pRetLocal;
 	*wRet = wRetLocal;
+	SbUiModelSetActivity (&app->uiModel,
+			ret ? SB_UI_ACTIVITY_READY : SB_UI_ACTIVITY_ERROR);
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
 
 	return ret;
 }
@@ -589,6 +602,61 @@ char *BarUiSelectMusicId (BarApp_t *app, PianoStation_t *station,
 	PianoSearchResult_t searchResult;
 	PianoArtist_t *tmpArtist;
 	PianoSong_t *tmpSong;
+
+	if (app->useTui) {
+		(void) station;
+		if (!SbUiRendererPromptText (&app->uiRenderer, &app->uiModel,
+				"SEARCH MUSIC", msg, lineBuf, sizeof (lineBuf))) {
+			return NULL;
+		}
+		PianoReturn_t pRet;
+		CURLcode wRet;
+		PianoRequestDataSearch_t reqData = {.searchStr = lineBuf};
+		BarUiMsg (&app->settings, MSG_INFO, "Searching... ");
+		if (!BarUiPianoCall (app, PIANO_REQUEST_SEARCH, &reqData, &pRet,
+				&wRet)) return NULL;
+		memcpy (&searchResult, &reqData.searchResult, sizeof (searchResult));
+		size_t count = 0;
+		PianoArtist_t *artist = searchResult.artists;
+		PianoListForeachP (artist) count++;
+		PianoSong_t *song = searchResult.songs;
+		PianoListForeachP (song) count++;
+		if (count == 0) {
+			BarUiMsg (&app->settings, MSG_INFO, "Nothing found.\n");
+			PianoDestroySearchResult (&searchResult);
+			return NULL;
+		}
+		char **labels = calloc (count, sizeof (*labels));
+		const char **ids = calloc (count, sizeof (*ids));
+		if (labels == NULL || ids == NULL) {
+			free (labels); free (ids);
+			PianoDestroySearchResult (&searchResult);
+			return NULL;
+		}
+		size_t i = 0;
+		artist = searchResult.artists;
+		PianoListForeachP (artist) {
+			labels[i] = malloc (strlen (artist->name) + 11);
+			if (labels[i] != NULL) sprintf (labels[i], "Artist: %s", artist->name);
+			ids[i++] = artist->musicId;
+		}
+		song = searchResult.songs;
+		PianoListForeachP (song) {
+			const size_t labelSize = strlen (song->artist) + strlen (song->title) + 12;
+			labels[i] = malloc (labelSize);
+			if (labels[i] != NULL) snprintf (labels[i], labelSize, "Track: %s — %s",
+					song->artist, song->title);
+			ids[i++] = song->musicId;
+		}
+		for (i = 0; i < count; i++) if (labels[i] == NULL) labels[i] = strdup ("(unavailable)");
+		const int selected = SbUiRendererSelectList (&app->uiRenderer,
+				&app->uiModel, "SEARCH RESULTS", (const char *const *) labels, count);
+		if (selected >= 0 && (size_t) selected < count) musicId = strdup (ids[selected]);
+		for (i = 0; i < count; i++) free (labels[i]);
+		free (labels); free (ids);
+		PianoDestroySearchResult (&searchResult);
+		return musicId;
+	}
 
 	BarUiMsg (&app->settings, MSG_QUESTION, "%s", msg);
 	if (BarReadlineStr (lineBuf, sizeof (lineBuf), &app->input,

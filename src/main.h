@@ -48,6 +48,7 @@ typedef struct {
 	SbUiModel uiModel;
 	SbUiRenderer uiRenderer;
 	bool useTui;
+	SbTuiTheme tuiTheme;
 	unsigned int playerErrors;
 } BarApp_t;
 

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <wchar.h>
+#include <wctype.h>
 
 #include <curses.h>
 
@@ -35,6 +36,12 @@ typedef struct {
 	size_t selectedIndex;
 	size_t scrollOffset;
 } SbUiCursesData;
+
+enum {
+	SB_TUI_PAIR_ACCENT = 1,
+	SB_TUI_PAIR_ERROR,
+	SB_TUI_PAIR_WARNING,
+};
 
 static const SbUiRendererOps cursesOps;
 
@@ -252,6 +259,16 @@ static const char *SbUiCursesPlayback (const SbUiModel *model) {
 	return "Waiting";
 }
 
+static const char *SbUiCursesActivity (const SbUiModel *model) {
+	switch (model->activity) {
+		case SB_UI_ACTIVITY_REQUESTING: return "Requesting";
+		case SB_UI_ACTIVITY_RECONNECTING: return "Reconnecting";
+		case SB_UI_ACTIVITY_ERROR: return "Error";
+		case SB_UI_ACTIVITY_WAITING_PLAYLIST: return "Waiting for playlist";
+		default: return SbUiCursesPlayback (model);
+	}
+}
+
 static void SbUiCursesNowPlaying (const SbUiModel *model, const int y,
 		const int x, const int height, const int width) {
 	if (height <= 0) return;
@@ -325,9 +342,9 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 
 	box (stdscr, 0, 0);
-	attron (A_BOLD | (data->colors ? COLOR_PAIR (1) : 0));
+	attron (A_BOLD | (data->colors ? COLOR_PAIR (SB_TUI_PAIR_ACCENT) : 0));
 	SbUiCursesPut (1, 2, cols / 2, "SIGNALBOX");
-	attroff (A_BOLD | (data->colors ? COLOR_PAIR (1) : 0));
+	attroff (A_BOLD | (data->colors ? COLOR_PAIR (SB_TUI_PAIR_ACCENT) : 0));
 	SbUiCursesPut (1, cols - 15, 13, "PANDORA RADIO");
 	mvhline (2, 1, ACS_HLINE, cols - 2);
 
@@ -340,7 +357,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	attron (A_BOLD);
 	SbUiCursesPut (statusY, 2, 8, "STATUS");
 	attroff (A_BOLD);
-	SbUiCursesPut (statusY, 11, 9, SbUiCursesPlayback (model));
+	SbUiCursesPut (statusY, 11, 20, SbUiCursesActivity (model));
 	pthread_mutex_lock (&data->statusLock);
 	if (data->statusExpires != 0 && time (NULL) >= data->statusExpires) {
 		data->status[0] = '\0';
@@ -348,14 +365,16 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
 			data->status[0] != '\0') {
-		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ? 2 : 3;
+		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ?
+				SB_TUI_PAIR_ERROR : SB_TUI_PAIR_WARNING;
 		attron (A_BOLD | (data->colors ? COLOR_PAIR (pair) : 0));
 	}
-	SbUiCursesPut (statusY, 21, cols - 23,
+	SbUiCursesPut (statusY, 32, cols - 34,
 			data->status[0] != '\0' ? data->status : "Ready");
 	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
 			data->status[0] != '\0') {
-		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ? 2 : 3;
+		const int pair = data->statusSeverity == SB_UI_NOTICE_ERROR ?
+				SB_TUI_PAIR_ERROR : SB_TUI_PAIR_WARNING;
 		attroff (A_BOLD | (data->colors ? COLOR_PAIR (pair) : 0));
 	}
 	pthread_mutex_unlock (&data->statusLock);
@@ -422,12 +441,12 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					SbUiCursesKey (renderer, SB_UI_CMD_LOVE));
 			mvwprintw (help, 8, 2, "%c                ban song",
 					SbUiCursesKey (renderer, SB_UI_CMD_BAN));
-			mvwprintw (help, 9, 2, "%c                volume down",
-					SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_DOWN));
-			mvwprintw (help, 10, 2, "%c                volume up",
-					SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_UP));
-			mvwprintw (help, 11, 2, "%c                reset volume (0 dB)",
-					SbUiCursesKey (renderer, SB_UI_CMD_VOLUME_RESET));
+			mvwprintw (help, 9, 2, "%c                create station",
+					SbUiCursesKey (renderer, SB_UI_CMD_CREATE_STATION));
+			mvwprintw (help, 10, 2, "%c                rename selected station",
+					SbUiCursesKey (renderer, SB_UI_CMD_RENAME_STATION));
+			mvwprintw (help, 11, 2, "%c                delete selected station",
+					SbUiCursesKey (renderer, SB_UI_CMD_DELETE_STATION));
 			mvwprintw (help, 12, 2, "%c                quit",
 					quitKey != BAR_KS_DISABLED ? quitKey : '-');
 			mvwprintw (help, 13, 2, "%c                close help",
@@ -440,6 +459,154 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		}
 	}
 	refresh ();
+}
+
+static WINDOW *SbUiCursesModal (const char *title, const char *prompt,
+		const int wantedHeight) {
+	int rows, cols;
+	getmaxyx (stdscr, rows, cols);
+	if (rows < 15 || cols < 50) return NULL;
+	const int width = cols < 72 ? cols - 4 : 68;
+	const int height = wantedHeight < rows - 2 ? wantedHeight : rows - 2;
+	WINDOW *window = newwin (height, width, (rows - height) / 2,
+			(cols - width) / 2);
+	if (window != NULL) {
+		box (window, 0, 0);
+		wattron (window, A_BOLD);
+		mvwaddnstr (window, 1, 2, title, width - 4);
+		wattroff (window, A_BOLD);
+		mvwaddnstr (window, 3, 2, prompt, width - 4);
+		keypad (window, TRUE);
+		wnoutrefresh (stdscr);
+	}
+	return window;
+}
+
+bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
+		const char *title, const char *prompt, char *buffer, const size_t size) {
+	if (!SbUiRendererIsCurses (renderer) || size < 2) return false;
+	wchar_t input[256];
+	mbstate_t state;
+	memset (&state, 0, sizeof (state));
+	const char *source = buffer;
+	size_t length = mbsrtowcs (input, &source,
+			sizeof (input) / sizeof (*input) - 1, &state);
+	if (length == (size_t) -1) length = 0;
+	size_t cursor = length;
+	input[length] = L'\0';
+	(void) curs_set (1);
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		WINDOW *window = SbUiCursesModal (title, prompt, 8);
+		if (window == NULL) continue;
+		int height, width;
+		getmaxyx (window, height, width);
+		(void) height;
+		mvwhline (window, 5, 2, ' ', width - 4);
+		size_t start = 0;
+		while (start < cursor && wcswidth (&input[start], cursor - start) > width - 5) {
+			start++;
+		}
+		mvwaddnwstr (window, 5, 2, &input[start], width - 5);
+		mvwaddnstr (window, 6, 2, "Enter: submit   Esc: cancel", width - 4);
+		const int cursorCells = wcswidth (&input[start], cursor - start);
+		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
+		wrefresh (window);
+		wint_t key;
+		const int result = wget_wch (window, &key);
+		delwin (window);
+		if (result == ERR) continue;
+		if (key == 27) {
+			(void) curs_set (0);
+			SbUiCursesFrame (renderer, model);
+			return false;
+		}
+		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			memset (&state, 0, sizeof (state));
+			const wchar_t *wide = input;
+			const size_t converted = wcsrtombs (buffer, &wide, size - 1, &state);
+			if (converted == (size_t) -1) buffer[0] = '\0';
+			else buffer[converted] = '\0';
+			(void) curs_set (0);
+			SbUiCursesFrame (renderer, model);
+			return buffer[0] != '\0';
+		}
+		if (key == KEY_LEFT && cursor > 0) cursor--;
+		else if (key == KEY_RIGHT && cursor < length) cursor++;
+		else if (key == KEY_HOME) cursor = 0;
+		else if (key == KEY_END) cursor = length;
+		else if ((key == KEY_BACKSPACE || key == 127 || key == 8) && cursor > 0) {
+			memmove (&input[cursor - 1], &input[cursor],
+					(length - cursor + 1) * sizeof (*input));
+			cursor--; length--;
+		} else if (key == KEY_DC && cursor < length) {
+			memmove (&input[cursor], &input[cursor + 1],
+					(length - cursor) * sizeof (*input));
+			length--;
+		} else if (result == OK && iswprint ((wint_t) key) &&
+				length + 1 < sizeof (input) / sizeof (*input)) {
+			memmove (&input[cursor + 1], &input[cursor],
+					(length - cursor + 1) * sizeof (*input));
+			input[cursor++] = (wchar_t) key;
+			length++;
+		}
+	}
+}
+
+bool SbUiRendererConfirm (SbUiRenderer *renderer, const SbUiModel *model,
+		const char *title, const char *prompt) {
+	if (!SbUiRendererIsCurses (renderer)) return false;
+	bool yes = false;
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		WINDOW *window = SbUiCursesModal (title, prompt, 8);
+		if (window == NULL) continue;
+		mvwprintw (window, 5, 2, "%s   %s", yes ? "[YES]" : " Yes ",
+				yes ? " No " : "[NO]");
+		mvwaddnstr (window, 6, 2,
+				"y/n or arrows; Enter confirms selection; Esc cancels", getmaxx (window) - 4);
+		wrefresh (window);
+		const int key = wgetch (window);
+		delwin (window);
+		if (key == 27 || key == 'n' || key == 'N') return false;
+		if (key == 'y' || key == 'Y') return true;
+		if (key == KEY_LEFT || key == KEY_RIGHT || key == '\t') yes = !yes;
+		if (key == '\n' || key == '\r' || key == KEY_ENTER) return yes;
+	}
+}
+
+int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
+		const char *title, const char *const *items, const size_t count) {
+	if (!SbUiRendererIsCurses (renderer) || count == 0) return -1;
+	size_t selected = 0, offset = 0;
+	for (;;) {
+		SbUiCursesFrame (renderer, model);
+		int rows, cols;
+		getmaxyx (stdscr, rows, cols);
+		const int height = rows < 22 ? rows - 2 : 20;
+		WINDOW *window = SbUiCursesModal (title,
+				"Up/Down or j/k; Enter selects; Esc cancels", height);
+		if (window == NULL) continue;
+		int wh, ww;
+		getmaxyx (window, wh, ww);
+		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
+		if (selected < offset) offset = selected;
+		if (selected >= offset + visible) offset = selected - visible + 1;
+		for (size_t row = 0; row < visible && offset + row < count; row++) {
+			if (offset + row == selected) wattron (window, A_REVERSE);
+			mvwaddnstr (window, 5 + (int) row, 2, items[offset + row], ww - 4);
+			if (offset + row == selected) wattroff (window, A_REVERSE);
+		}
+		wrefresh (window);
+		const int key = wgetch (window);
+		delwin (window);
+		if (key == 27) return -1;
+		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
+		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
+		else if (key == KEY_HOME) selected = 0;
+		else if (key == KEY_END) selected = count - 1;
+		else if (key == '\n' || key == '\r' || key == KEY_ENTER) return (int) selected;
+	}
 }
 
 static void SbUiCursesInit (SbUiRenderer *renderer) {
@@ -524,8 +691,16 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 				command == SB_UI_CMD_SKIP || command == SB_UI_CMD_LOVE ||
 				command == SB_UI_CMD_BAN || command == SB_UI_CMD_VOLUME_DOWN ||
 				command == SB_UI_CMD_VOLUME_UP ||
-				command == SB_UI_CMD_VOLUME_RESET) {
-			return (SbUiCommandEvent) {command, NULL};
+				command == SB_UI_CMD_VOLUME_RESET ||
+				command == SB_UI_CMD_CREATE_STATION ||
+				command == SB_UI_CMD_RENAME_STATION ||
+				command == SB_UI_CMD_DELETE_STATION) {
+			const PianoStation_t *station = NULL;
+			if (command == SB_UI_CMD_RENAME_STATION ||
+					command == SB_UI_CMD_DELETE_STATION) {
+				station = SbUiCursesStationAt (model, data->selectedIndex);
+			}
+			return (SbUiCommandEvent) {command, (PianoStation_t *) station};
 		}
 	}
 	return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
@@ -538,6 +713,10 @@ static void SbUiCursesMessage (SbUiRenderer *renderer, const BarUiMsg_t type,
 	vsnprintf (data->status, sizeof (data->status), format, fmtargs);
 	data->status[strcspn (data->status, "\r\n")] = '\0';
 	data->statusSeverity = SbUiCursesNoticeSeverity (type);
+	if (type == MSG_NONE && (strncmp (data->status, "Error:", 6) == 0 ||
+			strncmp (data->status, "Network error:", 14) == 0)) {
+		data->statusSeverity = SB_UI_NOTICE_ERROR;
+	}
 	/* Errors remain visible longer; all other messages are concise transient
 	 * notices. The main thread expires them during its existing 1 Hz redraw. */
 	data->statusExpires = time (NULL) +
@@ -565,7 +744,7 @@ static const SbUiRendererOps cursesOps = {
 };
 
 bool SbUiRendererInitCurses (SbUiRenderer *renderer,
-		const BarSettings_t *settings) {
+		const BarSettings_t *settings, const SbTuiTheme theme) {
 	assert (renderer != NULL);
 	assert (settings != NULL);
 	setlocale (LC_ALL, "");
@@ -593,14 +772,16 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	keypad (stdscr, TRUE);
 	wtimeout (stdscr, 1000);
 	(void) curs_set (0);
-	if (has_colors ()) {
+	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
 		start_color ();
 #ifdef NCURSES_VERSION
 		use_default_colors ();
 #endif
-		init_pair (1, COLOR_GREEN, -1);
-		init_pair (2, COLOR_RED, -1);
-		init_pair (3, COLOR_YELLOW, -1);
+		const short accent = theme == SB_TUI_THEME_AMBER ? COLOR_YELLOW :
+				(theme == SB_TUI_THEME_NEUTRAL ? COLOR_CYAN : COLOR_GREEN);
+		init_pair (SB_TUI_PAIR_ACCENT, accent, -1);
+		init_pair (SB_TUI_PAIR_ERROR, COLOR_RED, -1);
+		init_pair (SB_TUI_PAIR_WARNING, COLOR_YELLOW, -1);
 		data->colors = true;
 	}
 	renderer->ops = &cursesOps;
