@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "player.h"
 #include "settings.h"
 #include "ui_readline.h"
+#include "ui_renderer.h"
 
 typedef struct {
 	PianoHandle_t ph;
@@ -44,9 +45,10 @@ typedef struct {
 	PianoStation_t *curStation, *nextStation;
 	sig_atomic_t doQuit;
 	BarReadlineFds_t input;
+	SbUiModel uiModel;
+	SbUiRenderer uiRenderer;
 	unsigned int playerErrors;
 } BarApp_t;
 
 #include <signal.h>
 extern sig_atomic_t *interrupted;
-
