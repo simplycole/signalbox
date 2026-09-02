@@ -203,8 +203,11 @@ static void BarMainHandleUserInput (BarApp_t *app) {
 	char buf[2];
 	if (BarReadline (buf, sizeof (buf), NULL, &app->input,
 			BAR_RL_FULLRETURN | BAR_RL_NOECHO | BAR_RL_NOINT, 1) > 0) {
-		BarUiDispatch (app, buf[0], app->curStation, app->playlist, true,
-				BAR_DC_GLOBAL);
+		const SbUiCommand command = BarUiCommandFromKey (&app->settings, buf[0]);
+		if (command != SB_UI_CMD_NONE) {
+			BarUiDispatchCommand (app, command, app->curStation, app->playlist,
+					true, BAR_DC_GLOBAL);
+		}
 	}
 }
 

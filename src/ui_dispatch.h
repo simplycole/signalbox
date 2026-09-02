@@ -31,6 +31,40 @@ typedef enum {
 	BAR_DC_SONG = 4, /* song selected */
 } BarUiDispatchContext_t;
 
+typedef enum {
+	SB_UI_CMD_NONE = 0,
+	SB_UI_CMD_HELP,
+	SB_UI_CMD_LOVE,
+	SB_UI_CMD_BAN,
+	SB_UI_CMD_ADD_MUSIC,
+	SB_UI_CMD_CREATE_STATION,
+	SB_UI_CMD_DELETE_STATION,
+	SB_UI_CMD_EXPLAIN,
+	SB_UI_CMD_GENRE_STATION,
+	SB_UI_CMD_HISTORY,
+	SB_UI_CMD_INFO,
+	SB_UI_CMD_ADD_SHARED,
+	SB_UI_CMD_SKIP,
+	SB_UI_CMD_TOGGLE_PAUSE,
+	SB_UI_CMD_QUIT,
+	SB_UI_CMD_RENAME_STATION,
+	SB_UI_CMD_SELECT_STATION,
+	SB_UI_CMD_TIRED,
+	SB_UI_CMD_UPCOMING,
+	SB_UI_CMD_SELECT_QUICKMIX,
+	SB_UI_CMD_DEBUG,
+	SB_UI_CMD_BOOKMARK,
+	SB_UI_CMD_VOLUME_DOWN,
+	SB_UI_CMD_VOLUME_UP,
+	SB_UI_CMD_MANAGE_STATION,
+	SB_UI_CMD_CREATE_STATION_FROM_SONG,
+	SB_UI_CMD_PLAY,
+	SB_UI_CMD_PAUSE,
+	SB_UI_CMD_VOLUME_RESET,
+	SB_UI_CMD_SETTINGS,
+	SB_UI_CMD_COUNT,
+} SbUiCommand;
+
 #include "settings.h"
 #include "main.h"
 
@@ -39,77 +73,19 @@ typedef void (*BarKeyShortcutFunc_t) (BarApp_t *, PianoStation_t *,
 
 typedef struct {
 	char defaultKey;
+	SbUiCommand command;
 	BarUiDispatchContext_t context;
-	BarKeyShortcutFunc_t function;
 	const char * const helpText;
 	const char * const configKey;
 } BarUiDispatchAction_t;
 
-#include "ui_act.h"
-
 /* see settings.h */
-static const BarUiDispatchAction_t dispatchActions[BAR_KS_COUNT] = {
-		{'?', BAR_DC_UNDEFINED, BarUiActHelp, NULL, "act_help"},
-		{'+', BAR_DC_SONG, BarUiActLoveSong, "love song",
-				"act_songlove"},
-		{'-',  BAR_DC_SONG, BarUiActBanSong, "ban song", "act_songban"},
-		{'a', BAR_DC_STATION, BarUiActAddMusic, "add music to station",
-				"act_stationaddmusic"},
-		{'c', BAR_DC_GLOBAL, BarUiActCreateStation, "create new station",
-				"act_stationcreate"},
-		{'d', BAR_DC_STATION, BarUiActDeleteStation, "delete station",
-				"act_stationdelete"},
-		{'e', BAR_DC_SONG, BarUiActExplain, "explain why this song is played",
-				"act_songexplain"},
-		{'g', BAR_DC_GLOBAL, BarUiActStationFromGenre, "add genre station",
-				"act_stationaddbygenre"},
-		{'h', BAR_DC_GLOBAL, BarUiActHistory, "song history", "act_history"},
-		{'i', BAR_DC_GLOBAL | BAR_DC_STATION | BAR_DC_SONG, BarUiActSongInfo,
-				"print information about song/station", "act_songinfo"},
-		{'j', BAR_DC_GLOBAL, BarUiActAddSharedStation, "add shared station",
-				"act_addshared"},
-		{'n', BAR_DC_GLOBAL | BAR_DC_STATION, BarUiActSkipSong, "next song",
-				"act_songnext"},
-		{'p', BAR_DC_GLOBAL | BAR_DC_STATION, BarUiActTogglePause, "pause/resume playback",
-				"act_songpausetoggle"},
-		{'q', BAR_DC_GLOBAL, BarUiActQuit, "quit", "act_quit"},
-		{'r', BAR_DC_STATION, BarUiActRenameStation, "rename station",
-				"act_stationrename"},
-		{'s', BAR_DC_GLOBAL, BarUiActSelectStation, "change station",
-				"act_stationchange"},
-		{'t', BAR_DC_SONG, BarUiActTempBanSong, "tired (ban song for 1 month)",
-				"act_songtired"},
-		{'u', BAR_DC_GLOBAL | BAR_DC_STATION, BarUiActPrintUpcoming,
-				"upcoming songs", "act_upcoming"},
-		{'x', BAR_DC_STATION, BarUiActSelectQuickMix, "select quickmix stations",
-				"act_stationselectquickmix"},
-		{'$', BAR_DC_SONG, BarUiActDebug, NULL, "act_debug"},
-		{'b', BAR_DC_SONG, BarUiActBookmark, "bookmark song/artist",
-				"act_bookmark"},
-		{'(', BAR_DC_GLOBAL, BarUiActVolDown, "decrease volume",
-				"act_voldown"},
-		{')', BAR_DC_GLOBAL, BarUiActVolUp, "increase volume",
-				"act_volup"},
-		{'=', BAR_DC_STATION, BarUiActManageStation, "manage station seeds/feedback/mode",
-				"act_managestation"},
-		{' ', BAR_DC_GLOBAL | BAR_DC_STATION, BarUiActTogglePause, NULL,
-				"act_songpausetoggle2"},
-		{'v', BAR_DC_SONG, BarUiActCreateStationFromSong,
-				"create new station from song or artist", "act_stationcreatefromsong"},
-		{'P', BAR_DC_GLOBAL | BAR_DC_STATION, BarUiActPlay, "resume playback",
-				"act_songplay"},
-		{'S', BAR_DC_GLOBAL | BAR_DC_STATION, BarUiActPause, "pause playback",
-				"act_songpause"},
-		{'^', BAR_DC_GLOBAL, BarUiActVolReset, "reset volume",
-				"act_volreset"},
-		{'!', BAR_DC_GLOBAL, BarUiActSettings, "change settings",
-				"act_settings"},
-		};
+extern const BarUiDispatchAction_t dispatchActions[BAR_KS_COUNT];
 
 #include <piano.h>
 #include <stdbool.h>
 #include <stdio.h>
 
-BarKeyShortcutId_t BarUiDispatch (BarApp_t *, const char, PianoStation_t *, PianoSong_t *,
-		const bool, BarUiDispatchContext_t);
-
+SbUiCommand BarUiCommandFromKey (const BarSettings_t *, char);
+bool BarUiDispatchCommand (BarApp_t *, SbUiCommand, PianoStation_t *, PianoSong_t *,
+		bool, BarUiDispatchContext_t);

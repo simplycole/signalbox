@@ -30,7 +30,7 @@ plans, not promises of a date or release.
   renderer.
 - [ ] Remove direct terminal output from playback/service code while preserving
   classic output through structured notices and state snapshots.
-- [ ] Introduce named commands and separate key/FIFO decoding from action
+- [x] Introduce named commands and separate key/FIFO decoding from action
   execution without changing inherited bindings.
 - [ ] Establish canonical application state and a read-only transient UI model.
 - [ ] Define explicit TUI, classic, and headless front-end lifecycles.

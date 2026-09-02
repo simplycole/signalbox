@@ -43,8 +43,9 @@ requests and prompts block this thread. Audio decode/output use worker threads.
 ### Input and dispatch
 
 `BarReadline()` in `src/ui_readline.c` calls `select()` over stdin and the FIFO.
-Top-level input reads one byte, then `BarUiDispatch()` maps it through the
-configured shortcut table. The same reader implements blocking string,
+Top-level input reads one byte, then `BarUiCommandFromKey()` maps it through the
+configured shortcut table to an `SbUiCommand`. `BarUiDispatchCommand()` routes
+that command to the existing action. The same reader implements blocking string,
 integer, yes/no, filtering, and selection prompts. It has UTF-8-aware deletion
 for simple code points, discards simple escape sequences, and does not produce
 structured special-key events. FIFO bytes therefore share the keyboard path.
@@ -54,10 +55,10 @@ complete raw mode: signal generation and other flags remain active. `SIGCONT`
 reapplies this mode. There is no TTY/capability check, alternate screen, cursor
 lifecycle, or renderer-aware suspend handling.
 
-`src/ui_dispatch.c` binds shortcut IDs to default single-byte keys, contexts,
-callbacks, help, and configuration keys. `BarUiDispatch()` derives song/station
-context and directly invokes a `BarUiAct*` function. Help is already generated
-from this table, an idea worth preserving when keys map to named commands.
+`src/ui_dispatch.c` binds shortcut IDs to default single-byte keys, named
+commands, contexts, help, and configuration keys. A separate command-handler
+table binds each command to a `BarUiAct*` function. Help remains generated from
+the binding metadata.
 
 ### Output and events
 
@@ -93,8 +94,8 @@ layout, mouse input, frame model, dirty state, or redraw scheduler.
   Background output would corrupt curses.
 - `BarReadline()` merges terminal input, FIFO commands, prompt editing, and
   refresh timing. Terminal key events must not become the scripting API.
-- `dispatchActions` couples bytes to callback functions and cannot naturally
-  express named commands, special keys, focus, overlays, or non-key sources.
+- `BarReadline()` still represents only bytes and simple escape filtering; it
+  cannot yet express structured special keys, focus, or overlays.
 - `BarSettings_t` combines core/network/audio settings with bindings and output
   formats; consumers need narrower views even if parsing stays unified.
 - `BarUiStartEventCmd()` consumes broad internal state instead of a stable,
@@ -321,8 +322,8 @@ and output-free headless startup without a TTY.
 
 1. **Observation seam:** stop player/background terminal writes; publish
    structured notices and snapshots while classic output preserves text.
-2. **Command seam:** add command IDs and separate key/FIFO decoding from action
-   execution without changing bindings.
+2. **Command seam (complete):** command IDs separate legacy key/FIFO decoding
+   from action execution without changing bindings.
 3. **Application actions:** move service/player mutations and validation out of
    `BarUiAct*`; represent nested prompts as explicit states.
 4. **UI model:** project canonical station, queue, history, playback, and notice

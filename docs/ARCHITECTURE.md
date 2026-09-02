@@ -44,7 +44,8 @@ TUI:
   event commands.
 - `ui_act.c` implements user actions such as station selection, love, ban,
   history, pause, and volume changes.
-- `ui_dispatch.c` maps configured keys to actions.
+- `ui_dispatch.c` maps configured keys to named `SbUiCommand` values, then
+  dispatches commands to the inherited actions.
 - `ui_readline.c` provides terminal input and filtered selection.
 - `terminal.c` establishes and restores terminal attributes.
 

@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "ui.h"
 #include "ui_readline.h"
 #include "ui_dispatch.h"
+#include "ui_act.h"
 
 /*	standard eventcmd call
  */
@@ -595,7 +596,7 @@ BarUiActCallback(BarUiActHistory) {
 		histSong = BarUiSelectSong (app, app->songHistory,
 				&app->input);
 		if (histSong != NULL) {
-			BarKeyShortcutId_t action;
+			SbUiCommand command;
 			PianoStation_t *songStation = PianoFindStationById (app->ph.stations,
 					histSong->stationId);
 
@@ -605,7 +606,7 @@ BarUiActCallback(BarUiActHistory) {
 			}
 
 			do {
-				action = BAR_KS_COUNT;
+				command = SB_UI_CMD_NONE;
 
 				BarUiMsg (&app->settings, MSG_QUESTION, "What to do with this song? ");
 
@@ -613,10 +614,13 @@ BarUiActCallback(BarUiActHistory) {
 						BAR_RL_FULLRETURN, -1) > 0) {
 					/* actions assume that selStation is the song's original
 					 * station */
-					action = BarUiDispatch (app, buf[0], songStation, histSong,
-							false, BAR_DC_UNDEFINED);
+					command = BarUiCommandFromKey (&app->settings, buf[0]);
+					if (command != SB_UI_CMD_NONE) {
+						BarUiDispatchCommand (app, command, songStation, histSong,
+								false, BAR_DC_UNDEFINED);
+					}
 				}
-			} while (action == BAR_KS_HELP);
+			} while (command == SB_UI_CMD_HELP);
 		} /* end if histSong != NULL */
 	} else {
 		BarUiMsg (&app->settings, MSG_INFO, (app->settings.history == 0) ? "History disabled.\n" :
