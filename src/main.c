@@ -232,6 +232,7 @@ static void BarMainGetPlaylist (BarApp_t *app) {
 		}
 	}
 	app->curStation = app->nextStation;
+	SbUiModelSetStation (&app->uiModel, app->curStation);
 	BarUiStartEventCmd (&app->settings, "stationfetchplaylist",
 			app->curStation, app->playlist, &app->player, app->ph.stations,
 			pRet, wRet);
@@ -246,9 +247,9 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 	const PianoSong_t * const curSong = app->playlist;
 	assert (curSong != NULL);
 
-	BarUiPrintSong (&app->settings, curSong, app->curStation->isQuickMix ?
-			PianoFindStationById (app->ph.stations,
-			curSong->stationId) : NULL);
+	SbUiModelSetSong (&app->uiModel, curSong, app->curStation->isQuickMix ?
+			PianoFindStationById (app->ph.stations, curSong->stationId) : NULL);
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_SONG);
 
 	static const char httpPrefix[] = "http://";
 	/* avoid playing local files */
@@ -314,37 +315,18 @@ static void BarMainPlayerCleanup (BarApp_t *app, pthread_t *playerThread) {
 /*	print song duration
  */
 static void BarMainPrintTime (BarApp_t *app) {
-	unsigned int songRemaining;
-	char sign[2] = {0, 0};
 	player_t * const player = &app->player;
 
 	pthread_mutex_lock (&player->lock);
 	const unsigned int songDuration = player->songDuration;
 	const unsigned int songPlayed = player->songPlayed;
+	const bool doPause = player->doPause;
 	pthread_mutex_unlock (&player->lock);
 
-	if (songPlayed <= songDuration) {
-		songRemaining = songDuration - songPlayed;
-		sign[0] = '-';
-	} else {
-		/* longer than expected */
-		songRemaining = songPlayed - songDuration;
-		sign[0] = '+';
-	}
-
-	char outstr[512], totalFormatted[16], remainingFormatted[16],
-			elapsedFormatted[16];
-	const char *vals[] = {totalFormatted, remainingFormatted,
-			elapsedFormatted, sign};
-	snprintf (totalFormatted, sizeof (totalFormatted), "%02u:%02u",
-			songDuration/60, songDuration%60);
-	snprintf (remainingFormatted, sizeof (remainingFormatted), "%02u:%02u",
-			songRemaining/60, songRemaining%60);
-	snprintf (elapsedFormatted, sizeof (elapsedFormatted), "%02u:%02u",
-			songPlayed/60, songPlayed%60);
-	BarUiCustomFormat (outstr, sizeof (outstr), app->settings.timeFormat,
-			"tres", vals);
-	BarUiMsg (&app->settings, MSG_TIME, "%s\r", outstr);
+	SbUiModelSetProgress (&app->uiModel, songPlayed, songDuration,
+			doPause ? SB_UI_PLAYBACK_PAUSED : SB_UI_PLAYBACK_PLAYING);
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel,
+			SB_UI_RENDER_PROGRESS);
 }
 
 /*	main loop
@@ -389,7 +371,9 @@ static void BarMainLoop (BarApp_t *app) {
 			}
 			if (app->playlist == NULL && app->nextStation != NULL && !app->doQuit) {
 				if (app->nextStation != app->curStation) {
-					BarUiPrintStation (&app->settings, app->nextStation);
+					SbUiModelSetStation (&app->uiModel, app->nextStation);
+					SbUiRendererRender (&app->uiRenderer, &app->uiModel,
+							SB_UI_RENDER_STATION);
 				}
 				BarMainGetPlaylist (app);
 			}
@@ -453,6 +437,8 @@ int main (int argc, char **argv) {
 
 	BarSettingsInit (&app.settings);
 	BarSettingsRead (&app.settings);
+	SbUiModelInit (&app.uiModel);
+	SbUiRendererInitClassic (&app.uiRenderer, &app.settings);
 
 	PianoReturn_t pret;
 	if ((pret = PianoInit (&app.ph, app.settings.partnerUser,
@@ -519,6 +505,7 @@ int main (int argc, char **argv) {
 	curl_easy_cleanup (app.http);
 	curl_global_cleanup ();
 	BarPlayerDestroy (&app.player);
+	SbUiRendererShutdown (&app.uiRenderer);
 	BarSettingsDestroy (&app.settings);
 
 	/* restore terminal attributes, zsh doesn't need this, bash does... */

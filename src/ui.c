@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "ui.h"
 #include "debug.h"
 #include "ui_readline.h"
+#include "ui_renderer.h"
 
 typedef int (*BarSortFunc_t) (const void *, const void *);
 
@@ -98,34 +99,9 @@ void BarUiMsg (const BarSettings_t *settings, const BarUiMsg_t type,
 	assert (type < MSG_COUNT);
 	assert (format != NULL);
 
-	switch (type) {
-		case MSG_INFO:
-		case MSG_PLAYING:
-		case MSG_TIME:
-		case MSG_ERR:
-		case MSG_QUESTION:
-		case MSG_LIST:
-			/* print ANSI clear line */
-			fputs ("\033[2K", stdout);
-			break;
-
-		default:
-			break;
-	}
-
-	if (settings->msgFormat[type].prefix != NULL) {
-		fputs (settings->msgFormat[type].prefix, stdout);
-	}
-
 	va_start (fmtargs, format);
-	vprintf (format, fmtargs);
+	SbUiClassicMessageV (settings, type, format, fmtargs);
 	va_end (fmtargs);
-
-	if (settings->msgFormat[type].postfix != NULL) {
-		fputs (settings->msgFormat[type].postfix, stdout);
-	}
-
-	fflush (stdout);
 }
 
 typedef struct {
@@ -745,13 +721,13 @@ static void BarUiAppendNewline (char *s, size_t maxlen) {
  */
 void BarUiPrintStation (const BarSettings_t *settings,
 		PianoStation_t *station) {
-	char outstr[512];
-	const char *vals[] = {station->name, station->id};
-
-	BarUiCustomFormat (outstr, sizeof (outstr), settings->npStationFormat,
-			"ni", vals);
-	BarUiAppendNewline (outstr, sizeof (outstr));
-	BarUiMsg (settings, MSG_PLAYING, "%s", outstr);
+	SbUiModel model;
+	SbUiRenderer renderer;
+	SbUiModelInit (&model);
+	SbUiRendererInitClassic (&renderer, settings);
+	SbUiModelSetStation (&model, station);
+	SbUiRendererRender (&renderer, &model, SB_UI_RENDER_STATION);
+	SbUiRendererShutdown (&renderer);
 }
 
 static const char *ratingToIcon (const BarSettings_t * const settings,
@@ -778,17 +754,13 @@ static const char *ratingToIcon (const BarSettings_t * const settings,
  */
 void BarUiPrintSong (const BarSettings_t *settings,
 		const PianoSong_t *song, const PianoStation_t *station) {
-	char outstr[512];
-	const char *vals[] = {song->title, song->artist, song->album,
-			ratingToIcon (settings, song),
-			station != NULL ? settings->atIcon : "",
-			station != NULL ? station->name : "",
-			song->detailUrl};
-
-	BarUiCustomFormat (outstr, sizeof (outstr), settings->npSongFormat,
-			"talr@su", vals);
-	BarUiAppendNewline (outstr, sizeof (outstr));
-	BarUiMsg (settings, MSG_PLAYING, "%s", outstr);
+	SbUiModel model;
+	SbUiRenderer renderer;
+	SbUiModelInit (&model);
+	SbUiRendererInitClassic (&renderer, settings);
+	SbUiModelSetSong (&model, song, station);
+	SbUiRendererRender (&renderer, &model, SB_UI_RENDER_SONG);
+	SbUiRendererShutdown (&renderer);
 }
 
 /*	Print list of songs
@@ -1026,4 +998,3 @@ void BarUiHistoryPrepend (BarApp_t *app, PianoSong_t *song) {
 		PianoDestroyPlaylist (song);
 	}
 }
-

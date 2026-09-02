@@ -1,6 +1,7 @@
 # Terminal UI architecture decision
 
-Status: research decision; no TUI implementation is present.
+Status: architecture phases A and B complete; no ncurses implementation is
+present.
 
 ## Decision
 
@@ -76,6 +77,35 @@ the screen. Event-command children are asynchronous; rendering itself is not.
 
 No code queries terminal rows/columns. There is no `SIGWINCH`, responsive
 layout, mouse input, frame model, dirty state, or redraw scheduler.
+
+### Implemented Phase B seam
+
+`BarApp_t` owns one `SbUiModel` and one `SbUiRenderer`. The model is a small
+renderer-facing projection containing borrowed current-station/current-song
+references, the optional real song station used by QuickMix formatting,
+elapsed/duration, playback state, and a generation counter. Pandora and player
+structures remain canonical; the model neither copies nor owns them.
+
+The renderer interface in `src/ui_renderer.h` has `init`, event-oriented
+`render`, and `shutdown` operations. The classic backend in
+`src/ui_renderer.c` is the sole implementation. Current station announcements,
+current-song announcements, and progress are now model updates followed by
+renderer calls. `BarUiMsg()` delegates to the same classic implementation and
+retains its inherited signature for incremental compatibility.
+
+There is no frame loop. Each model mutation increments `generation`, while the
+classic renderer continues printing synchronously at exactly the existing
+events. A future ncurses renderer can compare generations or introduce finer
+dirty categories when its snapshot and event queue exist. A null/headless
+renderer can use no-op lifecycle/render operations without changing canonical
+state ownership.
+
+Prompts, selection lists, and readline cursor editing stay classic/direct
+because they are blocking interactions rather than passive model rendering.
+Event-command pipe output is serialization, not terminal UI. Player-thread
+errors remain on the inherited message path until structured notices can be
+queued to the main/UI thread; calling ncurses from those threads would be
+unsafe.
 
 ## Coupling to remove incrementally
 
@@ -320,14 +350,16 @@ and output-free headless startup without a TTY.
 
 ## Migration plan
 
-1. **Observation seam:** stop player/background terminal writes; publish
-   structured notices and snapshots while classic output preserves text.
+1. **Observation seam (partial):** current station/song/progress use the UI
+   model and classic renderer; player/background notices still need a safe
+   main-thread queue.
 2. **Command seam (complete):** command IDs separate legacy key/FIFO decoding
    from action execution without changing bindings.
 3. **Application actions:** move service/player mutations and validation out of
    `BarUiAct*`; represent nested prompts as explicit states.
-4. **UI model:** project canonical station, queue, history, playback, and notice
-   state into safe snapshots with dirty generations.
+4. **UI model (minimal phase complete):** expand the existing borrowed
+   current-view projection into safe station, queue, history, and notice
+   snapshots before a full-screen renderer consumes mutable lists.
 5. **Mode lifecycle:** define TUI/classic/headless selection; establish true
    non-interactive startup before curses becomes default.
 6. **ncursesw skeleton:** in a future dependency change add alternate-screen,

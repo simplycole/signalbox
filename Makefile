@@ -32,6 +32,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/terminal.c \
 		${PIANOBAR_DIR}/ui_act.c \
 		${PIANOBAR_DIR}/ui.c \
+		${PIANOBAR_DIR}/ui_renderer.c \
 		${PIANOBAR_DIR}/ui_readline.c \
 		${PIANOBAR_DIR}/ui_dispatch.c
 PIANOBAR_OBJ:=${PIANOBAR_SRC:.c=.o}

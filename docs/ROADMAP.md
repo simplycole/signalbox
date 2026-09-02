@@ -32,8 +32,10 @@ plans, not promises of a date or release.
   classic output through structured notices and state snapshots.
 - [x] Introduce named commands and separate key/FIFO decoding from action
   execution without changing inherited bindings.
-- [ ] Establish canonical application state and a read-only transient UI model.
-- [ ] Define explicit TUI, classic, and headless front-end lifecycles.
+- [x] Establish a minimal read-only transient UI model over canonical current
+  station, song, and playback progress state.
+- [x] Introduce the renderer lifecycle and classic backend; TUI and headless
+  mode selection remain future work.
 - [ ] Add an `ncursesw` skeleton with alternate-screen safety, batched redraw,
   resize, suspend/resume, and minimum-size behavior.
 - [ ] Add a responsive station browser with selection, scrolling, and active

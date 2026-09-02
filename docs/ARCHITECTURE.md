@@ -50,7 +50,33 @@ TUI:
 - `terminal.c` establishes and restores terminal attributes.
 
 These files both present information and participate in application control, so
-the current UI boundary is not isolated from orchestration or service calls.
+the current UI boundary is not fully isolated from orchestration or service
+calls. Phase B adds a narrow implemented seam in `ui_renderer.h`: `BarApp_t`
+owns an `SbUiModel` and `SbUiRenderer`, and the current station, current song,
+and progress flow through that model to the classic renderer. `BarUiMsg()` now
+delegates its byte-for-byte-compatible formatting to the classic renderer
+implementation. The inherited message API remains a compatibility facade while
+call sites are migrated incrementally.
+
+`SbUiModel` is view state, not a second application model. It borrows pointers
+to the current canonical `PianoStation_t` and `PianoSong_t` objects owned by the
+application, and stores only the small playback projection needed to render
+progress: duration, elapsed time, and playing/paused state. A monotonically
+increasing generation records updates for a future invalidation-driven
+renderer. It does not own or copy Pandora lists or objects.
+
+The renderer has a minimal `init`/`render`/`shutdown` lifecycle. Its only
+backend is currently the classic synchronous line renderer, which preserves
+configured prefixes, postfixes, formats, ANSI erase-line behavior, flushing,
+and carriage-return progress. A future ncurses or null backend can implement
+the same lifecycle without entering playback or Pandora code.
+
+Blocking prompts and selection/readline editing intentionally remain on the
+classic path. Event-command serialization remains machine-facing direct
+output, and fatal/developer diagnostics remain at their existing layers.
+Player-thread errors also remain classic direct messages: safely feeding them
+to a full-screen renderer requires a main-thread event/notice queue, which is
+outside this no-new-threading phase.
 
 ### Settings and configuration: `src/settings.c`, `src/settings.h`
 
@@ -113,8 +139,9 @@ resize behavior, accessible reduced/non-animated behavior, and human-readable
 status and error presentation. It must not become the only way to operate the
 application.
 
-The architecture decision is to use `ncursesw` behind a small
-Signalbox-specific renderer boundary. Terminal input should map to named
+The architecture decision is to use `ncursesw` behind the small
+Signalbox-specific renderer boundary now established in `ui_renderer.h`.
+Terminal input should map to named
 application commands, and the renderer should consume a read-only UI model
 rather than mutable libpiano/player internals. Rendering should be event-driven
 with a bounded progress timer and batched curses updates. The current-state
