@@ -122,10 +122,19 @@ plans, not promises of a date or release.
 
 ## Native Windows direction
 
-- [ ] Produce a native Windows `.exe` with platform-appropriate terminal and
-  audio support.
-- [ ] Add a Windows Credential Manager backend behind the existing credential
-  interface using `CredRead`, `CredWrite`, and `CredDelete`.
+- [x] Complete the W0 source/dependency audit and define the platform boundaries,
+  toolchain, packaging policy, risks, and staged implementation plan in
+  [`WINDOWS.md`](WINDOWS.md).
+- [ ] W1: produce a native MSYS2 UCRT64 `signalbox.exe` and pass a `--help`
+  smoke test without requiring TUI/audio parity.
+- [ ] W2: support the full PDCursesMod VT TUI in Windows Terminal.
+- [ ] W3: support stable native audio playback while preserving PCM-driven
+  spectrum analysis.
+- [ ] W4: add a Windows Credential Manager backend behind the existing
+  `CredReadW`, `CredWriteW`, and `CredDeleteW` interface boundary.
+- [ ] W5: add per-user Windows Named Pipe command control.
+- [ ] W6: add Windows build, spectrum test, smoke test, and artifact CI.
+- [ ] W7: ship and fresh-VM validate a self-contained x64 ZIP.
 
 Priorities may change as Pandora compatibility, platform behavior, and
 maintainer capacity evolve. Any phase may include documentation, testing,

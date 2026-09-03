@@ -215,6 +215,15 @@ Portable/POSIX facilities, libao, terminal handling, event commands, and FIFO
 control provide the current integration points. Scripts under `contrib/` offer
 examples outside the core executable.
 
+The Windows W0 audit defines the next platform seams without changing current
+runtime behavior. Paths/durable files, monotonic/local time, terminal/shutdown,
+threads, audio output, and local command transport will receive narrow selected
+implementations; callers should not accumulate platform conditionals. UTF-8
+remains the internal string encoding, with UTF-16 conversion only at Win32 API
+boundaries. The established renderer and credential interfaces remain the TUI
+and secure-store seams. See [`WINDOWS.md`](WINDOWS.md) for the audited blocker
+matrix, UCRT64/PDCursesMod strategy, and W1–W7 sequence.
+
 ## Target state
 
 Signalbox should preserve a small, testable protocol core while separating
