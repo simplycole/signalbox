@@ -32,8 +32,16 @@ THE SOFTWARE.
 #include <limits.h>
 #include <assert.h>
 #include <sys/types.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#define access _access
+#define unlink _unlink
+#define mkdir(path, mode) _mkdir(path)
+#else
 #include <pwd.h>
 #include <unistd.h>
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -42,6 +50,7 @@ THE SOFTWARE.
 #include <piano.h>
 
 #include "settings.h"
+#include "platform.h"
 #include "config.h"
 #include "ui.h"
 #include "ui_dispatch.h"
@@ -51,6 +60,9 @@ THE SOFTWARE.
 /*	Get current user’s home directory
  */
 static char *BarSettingsGetHome () {
+#ifdef _WIN32
+	return SbPlatformConfigPath ("");
+#else
 	char *home;
 
 	/* try environment variable */
@@ -65,6 +77,7 @@ static char *BarSettingsGetHome () {
 	}
 
 	return NULL;
+#endif
 }
 
 /*	Construct a path below the XDG config directory, which is set by
@@ -88,20 +101,17 @@ static char *BarGetXdgConfigPath (const char * const filename) {
 }
 
 char *BarSettingsSignalboxPath (const char * const filename) {
-	assert (filename != NULL);
-	const size_t relativeLen = strlen ("signalbox/") + strlen (filename) + 1;
-	char * const relative = malloc (relativeLen);
-	if (relative == NULL) return NULL;
-	snprintf (relative, relativeLen, "signalbox/%s", filename);
-	char * const path = BarGetXdgConfigPath (relative);
-	free (relative);
-	return path;
+	return SbPlatformConfigPath (filename);
 }
 
 /*	Select one configuration directory for config, state, and default FIFO.
 	Signalbox takes precedence; pianobar remains a compatibility fallback.
  */
 static char *BarSettingsGetConfigDir (bool * const legacy) {
+#ifdef _WIN32
+	*legacy = false;
+	return SbPlatformConfigPath ("");
+#else
 	char * const signalboxConfig = BarGetXdgConfigPath ("signalbox/config");
 	char * const pianobarConfig = BarGetXdgConfigPath ("pianobar/config");
 	assert (signalboxConfig != NULL);
@@ -113,6 +123,7 @@ static char *BarSettingsGetConfigDir (bool * const legacy) {
 	free (pianobarConfig);
 
 	return BarGetXdgConfigPath (*legacy ? "pianobar" : "signalbox");
+#endif
 }
 
 static char *BarSettingsConfigPath (const BarSettings_t * const settings,
@@ -121,10 +132,7 @@ static char *BarSettingsConfigPath (const BarSettings_t * const settings,
 	assert (settings->configDir != NULL);
 	assert (filename != NULL);
 
-	const size_t len = strlen (settings->configDir) + 1 + strlen (filename) + 1;
-	char * const path = malloc (len * sizeof (*path));
-	snprintf (path, len, "%s/%s", settings->configDir, filename);
-	return path;
+	return SbPlatformJoinPath (settings->configDir, filename);
 }
 
 /*	Expand ~/ to user’s home directory
@@ -196,11 +204,13 @@ void BarSettingsRead (BarSettings_t *settings) {
 	char * const userhome = BarSettingsGetHome ();
 	bool legacyConfig;
 	assert (userhome != NULL);
+#ifndef _WIN32
 	/* set xdg config path (if not set) */
 	char * const defaultxdg = malloc (strlen (userhome) + strlen ("/.config") + 1);
 	sprintf (defaultxdg, "%s/.config", userhome);
 	setenv ("XDG_CONFIG_HOME", defaultxdg, 0);
 	free (defaultxdg);
+#endif
 	settings->configDir = BarSettingsGetConfigDir (&legacyConfig);
 	assert (settings->configDir != NULL);
 
@@ -519,7 +529,11 @@ void BarSettingsRead (BarSettings_t *settings) {
 
 	/* ffmpeg does not support setting an http proxy explicitly */
 	if (settings->proxy != NULL) {
+#ifdef _WIN32
+		_putenv_s ("http_proxy", settings->proxy);
+#else
 		setenv ("http_proxy", settings->proxy, 1);
+#endif
 	}
 
 	free (userhome);
@@ -551,11 +565,22 @@ bool BarSettingsReadAccount (BarSettings_t *settings) {
 }
 
 static bool BarSettingsEnsureSignalboxDir (char *path) {
-	char *slash = strrchr (path, '/');
+	char *slash = strrchr (path,
+#ifdef _WIN32
+			'\\'
+#else
+			'/'
+#endif
+			);
 	if (slash == NULL) return false;
 	*slash = '\0';
 	const bool ok = mkdir (path, 0700) == 0 || errno == EEXIST;
-	*slash = '/';
+	*slash =
+#ifdef _WIN32
+			'\\';
+#else
+			'/';
+#endif
 	return ok;
 }
 
@@ -566,6 +591,11 @@ bool BarSettingsWriteAccount (const char *username) {
 	if (path == NULL || !BarSettingsEnsureSignalboxDir (path)) {
 		free (path); return false;
 	}
+#ifdef _WIN32
+	/* Durable UTF-16 replacement is intentionally deferred with credentials. */
+	free (path);
+	return false;
+#else
 	const size_t len = strlen (path) + 12;
 	char *temp = malloc (len);
 	if (temp == NULL) { free (path); return false; }
@@ -586,6 +616,7 @@ bool BarSettingsWriteAccount (const char *username) {
 	if (!ok) unlink (temp);
 	free (temp); free (path);
 	return ok;
+#endif
 }
 
 bool BarSettingsDeleteAccount (void) {

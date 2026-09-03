@@ -21,6 +21,7 @@
 #include "station_browser.h"
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
+#include "platform.h"
 
 typedef enum {
 	SB_UI_NOTICE_INFO = 0,
@@ -1395,7 +1396,7 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 			char played[8] = "--:--";
 			struct tm local;
 			if (model->history[index].playedAt != (time_t) 0 &&
-					localtime_r (&model->history[index].playedAt, &local) != NULL) {
+					SbPlatformLocalTime (model->history[index].playedAt, &local)) {
 				strftime (played, sizeof (played), "%H:%M", &local);
 			}
 			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
@@ -1486,7 +1487,7 @@ void SbUiRendererSongDetails (SbUiRenderer *renderer, const SbUiModel *model,
 	SbUiCursesTime (duration, sizeof (duration), song->length);
 	if (playedAt != (time_t) 0) {
 		struct tm local;
-		if (localtime_r (&playedAt, &local) != NULL)
+		if (SbPlatformLocalTime (playedAt, &local))
 			strftime (played, sizeof (played), "%Y-%m-%d %H:%M:%S", &local);
 	}
 	SbUiCursesData * const data = renderer->data;

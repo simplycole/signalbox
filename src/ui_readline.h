@@ -24,7 +24,9 @@ THE SOFTWARE.
 #pragma once
 
 #include <stdbool.h>
+#ifndef _WIN32
 #include <sys/select.h>
+#endif
 
 /* bitfield */
 typedef enum {
@@ -35,7 +37,9 @@ typedef enum {
 } BarReadlineFlags_t;
 
 typedef struct {
+#ifndef _WIN32
 	fd_set set;
+#endif
 	int maxfd;
 	int fds[2];
 } BarReadlineFds_t;
@@ -46,4 +50,3 @@ size_t BarReadlineStr (char *, const size_t,
 		BarReadlineFds_t *, const BarReadlineFlags_t);
 size_t BarReadlineInt (int *, BarReadlineFds_t *);
 bool BarReadlineYesNo (bool, BarReadlineFds_t *);
-

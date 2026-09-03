@@ -1,7 +1,13 @@
 # makefile of pianobar
 
 PKG_CONFIG?=pkg-config
-PROGRAM:=signalbox
+PROGRAM_BASE:=signalbox
+HOST_OS:=$(shell uname -s 2>/dev/null)
+ifneq ($(filter Windows_NT MINGW% MSYS%,$(OS) $(HOST_OS)),)
+	WINDOWS:=1
+	EXEEXT:=.exe
+endif
+PROGRAM:=$(PROGRAM_BASE)$(EXEEXT)
 PREFIX:=/usr/local
 BINDIR:=${PREFIX}/bin
 LIBDIR:=${PREFIX}/lib
@@ -11,12 +17,13 @@ DYNLINK:=0
 CFLAGS?=-O2 -DNDEBUG
 
 ifeq (${CC},cc)
-	OS := $(shell uname)
-	ifeq (${OS},Darwin)
+	ifeq (${WINDOWS},1)
 		CC:=gcc -std=c99
-	else ifeq (${OS},FreeBSD)
+	else ifeq (${HOST_OS},Darwin)
+		CC:=gcc -std=c99
+	else ifeq (${HOST_OS},FreeBSD)
 		CC:=cc -std=c99
-	else ifeq (${OS},OpenBSD)
+	else ifeq (${HOST_OS},OpenBSD)
 		CC:=cc -std=c99
 	else
 		CC:=c99
@@ -26,19 +33,26 @@ endif
 PIANOBAR_DIR:=src
 PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/main.c \
+		${PIANOBAR_DIR}/platform.c \
 		${PIANOBAR_DIR}/credential.c \
 		${PIANOBAR_DIR}/debug.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
 		${PIANOBAR_DIR}/spectrum.c \
 		${PIANOBAR_DIR}/station_browser.c \
-		${PIANOBAR_DIR}/terminal.c \
 		${PIANOBAR_DIR}/ui_act.c \
 		${PIANOBAR_DIR}/ui.c \
 		${PIANOBAR_DIR}/ui_renderer.c \
-		${PIANOBAR_DIR}/ui_renderer_curses.c \
-		${PIANOBAR_DIR}/ui_readline.c \
 		${PIANOBAR_DIR}/ui_dispatch.c
+ifeq (${WINDOWS},1)
+	PIANOBAR_SRC+=${PIANOBAR_DIR}/terminal_win32.c \
+		${PIANOBAR_DIR}/ui_renderer_curses_win32.c \
+		${PIANOBAR_DIR}/ui_readline_win32.c
+else
+	PIANOBAR_SRC+=${PIANOBAR_DIR}/terminal.c \
+		${PIANOBAR_DIR}/ui_renderer_curses.c \
+		${PIANOBAR_DIR}/ui_readline.c
+endif
 PIANOBAR_OBJ:=${PIANOBAR_SRC:.c=.o}
 
 LIBPIANO_DIR:=src/libpiano
@@ -67,10 +81,12 @@ LIBJSONC_LDFLAGS:=$(shell $(PKG_CONFIG) --libs json-c 2>/dev/null || $(PKG_CONFI
 LIBAO_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ao)
 LIBAO_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ao)
 
-NCURSESW_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ncursesw)
-NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
+ifneq (${WINDOWS},1)
+	NCURSESW_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ncursesw)
+	NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
+endif
 
-ifeq ($(shell uname),Darwin)
+ifeq (${HOST_OS},Darwin)
 	CREDENTIAL_LDFLAGS:=-framework Security -framework CoreFoundation
 else ifeq ($(shell $(PKG_CONFIG) --exists libsecret-1 && echo yes),yes)
 	CREDENTIAL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libsecret-1) -DHAVE_LIBSECRET
@@ -86,6 +102,10 @@ ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \
 			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS} ${CREDENTIAL_LDFLAGS}
+ifeq (${WINDOWS},1)
+	ALL_CFLAGS+=-D_WIN32_WINNT=0x0600
+	ALL_LDFLAGS+=-lshell32 -lole32
+endif
 
 # Be verbose if V=1 (gnu autotools’ --disable-silent-rules)
 SILENTCMD:=@
@@ -133,14 +153,14 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
-			${LIBPIANO_RELOBJ} ${PROGRAM} spectrum-test pianobar libpiano.so* \
+			${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe pianobar libpiano.so* \
 			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
 
-spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h
-	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@ tests/spectrum_test.c src/spectrum.c -lpthread -lm
-	./$@
+spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h src/platform.c src/platform.h
+	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32)
+	./$@$(EXEEXT)
 
 ifeq (${DYNLINK},1)
 install: ${PROGRAM} install-libpiano

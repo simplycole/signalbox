@@ -6,9 +6,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#define strcasecmp _stricmp
+#define unlink _unlink
+#define mkdir(path, mode) _mkdir(path)
+#else
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #include "settings.h"
 #include "station_browser.h"

@@ -127,6 +127,9 @@ plans, not promises of a date or release.
   [`WINDOWS.md`](WINDOWS.md).
 - [ ] W1: produce a native MSYS2 UCRT64 `signalbox.exe` and pass a `--help`
   smoke test without requiring TUI/audio parity.
+  The source/build foundation is implemented and passes macOS regression and
+  CLI smoke tests; native UCRT64 production and execution are still awaiting a
+  Windows environment.
 - [ ] W2: support the full PDCursesMod VT TUI in Windows Terminal.
 - [ ] W3: support stable native audio playback while preserving PCM-driven
   spectrum analysis.

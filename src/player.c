@@ -34,15 +34,12 @@ THE SOFTWARE.
 
 #include "config.h"
 
-#include <unistd.h>
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <assert.h>
 #include <inttypes.h>
-#include <arpa/inet.h>
 #include <sys/stat.h>
 
 #include <libavcodec/avcodec.h>
@@ -351,6 +348,11 @@ static bool openDevice (player_t * const player) {
 
 	int driver = -1;
 	if (player->settings->audioPipe) {
+#ifdef _WIN32
+		BarUiMsg (player->settings, MSG_ERR,
+				"Audio pipes are unavailable on Windows W1.\n");
+		return false;
+#else
 		// using audio pipe
 		struct stat st;
 		if (stat (player->settings->audioPipe, &st)) {
@@ -366,6 +368,7 @@ static bool openDevice (player_t * const player) {
 			BarUiMsg (player->settings, MSG_ERR, "Cannot open audio pipe file.\n");
 			return false;
 		}
+#endif
 	} else {
 		// use driver from libao configuration
 		driver = ao_default_driver_id ();

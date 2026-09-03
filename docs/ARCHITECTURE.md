@@ -224,6 +224,15 @@ boundaries. The established renderer and credential interfaces remain the TUI
 and secure-store seams. See [`WINDOWS.md`](WINDOWS.md) for the audited blocker
 matrix, UCRT64/PDCursesMod strategy, and W1–W7 sequence.
 
+The W1 implementation adds `platform.h`/`platform.c` as the shared boundary
+for configuration-path construction, monotonic milliseconds, safe local-time
+conversion, and shutdown notification. Its Windows implementation owns Known
+Folder lookup and UTF-16/UTF-8 conversion and maps console control events to a
+deferred shutdown request. The Makefile substitutes small Windows terminal,
+readline, and no-TUI renderer files so POSIX terminal/curses code is not pulled
+into the native W1 build. These stubs are milestone boundaries, not supported
+Windows terminal or playback implementations.
+
 ## Target state
 
 Signalbox should preserve a small, testable protocol core while separating

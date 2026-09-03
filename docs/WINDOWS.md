@@ -1,7 +1,52 @@
-# Windows portability plan (W0)
+# Windows portability plan
 
-This document records the Phase W0 source audit and an implementation plan. It
-is a design document, not a claim that Windows is currently supported.
+This document records the Phase W0 source audit, implementation plan, and the
+W1 compile foundation. Windows remains a developer target until the UCRT64
+build and smoke tests below have run on Windows.
+
+## W1 native compile foundation
+
+W1 adds a small `src/platform.c` boundary for UTF-8 configuration paths,
+monotonic time, local time, and shutdown notification. Windows configuration
+paths come from `FOLDERID_RoamingAppData` and resolve to
+`%APPDATA%\Signalbox\config`, `account`, and `favorites`; conversion to UTF-8
+happens inside the platform module. Unix continues to use
+`$XDG_CONFIG_HOME/signalbox`.
+
+GNU Make now detects `Windows_NT`, `MINGW*`, and `MSYS*`, emits
+`signalbox.exe`, excludes ncurses from W1, and selects Windows-only terminal,
+readline, and curses stubs. `--help` returns before terminal, settings,
+credentials, audio, or network initialization. `--tui` reports that the TUI
+is unavailable in this W1 build. The classic input stub exists only to keep the
+real application linkable; authenticated playback and audio are not W1 claims.
+
+In an MSYS2 UCRT64 shell:
+
+```sh
+pacman -S --needed make \
+  mingw-w64-ucrt-x86_64-gcc \
+  mingw-w64-ucrt-x86_64-pkgconf \
+  mingw-w64-ucrt-x86_64-ffmpeg \
+  mingw-w64-ucrt-x86_64-curl \
+  mingw-w64-ucrt-x86_64-json-c \
+  mingw-w64-ucrt-x86_64-libgcrypt \
+  mingw-w64-ucrt-x86_64-libao
+make clean all
+make spectrum-test
+./signalbox.exe --help
+./signalbox.exe --help > help.txt
+```
+
+GCC brings the UCRT64 winpthreads dependency. W1 retains pthread calls and
+links `-lpthread`. libao is retained only as a link-time dependency; Windows
+device playback has not been validated. Credential Manager, durable account
+writes, event/password subprocesses, audio/FIFO paths, and Named Pipe control
+are unavailable. Unix `contrib/` tools remain Unix-only.
+
+The code and commands above were prepared on macOS, where the spectrum test,
+full build, and CLI smoke tests pass. No Windows toolchain was available in
+that environment, so producing `signalbox.exe` and running the Windows smoke
+tests remain required before checking off W1.
 
 ## Executive summary
 
@@ -459,4 +504,3 @@ not.
 - [Microsoft Known Folders](https://learn.microsoft.com/windows/win32/shell/known-folders)
 - [Microsoft WASAPI](https://learn.microsoft.com/windows/win32/coreaudio/wasapi)
 - [GitHub-hosted runner images](https://github.com/actions/runner-images)
-

@@ -3,8 +3,8 @@
 #include <assert.h>
 #include <math.h>
 #include <string.h>
-#include <time.h>
 
+#include "platform.h"
 #include "spectrum.h"
 
 #ifndef M_PI
@@ -37,9 +37,7 @@ static void SbSpectrumMapBins (SbSpectrum *s) {
 }
 
 static uint64_t SbSpectrumNowMs (void) {
-	struct timespec now;
-	clock_gettime (CLOCK_MONOTONIC, &now);
-	return (uint64_t) now.tv_sec * 1000u + (uint64_t) now.tv_nsec / 1000000u;
+	return SbPlatformMonotonicMs ();
 }
 
 static void SbSpectrumFft (float *real, float *imag) {

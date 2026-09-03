@@ -1,5 +1,25 @@
 # TUI supervised authenticated QA
 
+## Windows W1 compile and CLI smoke
+
+From an MSYS2 UCRT64 shell with the packages listed in `WINDOWS.md`:
+
+```sh
+make clean all
+make spectrum-test
+./signalbox.exe --help
+./signalbox.exe --help > help.txt
+./signalbox.exe --tui --classic
+./signalbox.exe --classic --tui
+```
+
+The build must produce `signalbox.exe`; the spectrum test and both help calls
+must exit 0. Each conflicting-mode call must print a clear diagnostic and exit
+2. Help must not create configuration files, initialize curses/audio, prompt
+for credentials, or contact the network. `--tui` by itself must report that it
+is unavailable in the Windows W1 build. Playback, credentials, event/password
+commands, audio/FIFO paths, and local command transport are outside W1.
+
 This checklist prepares a manual session against a real Pandora account. It
 does not authorize automated account changes. Perform the read-only sections
 first, and stop before any mutation you do not explicitly want on the account.

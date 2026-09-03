@@ -27,30 +27,42 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#else
 /* fork () */
 #include <unistd.h>
 #include <sys/select.h>
+#endif
 #include <time.h>
 #include <ctype.h>
 /* open () */
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#ifndef _WIN32
 /* tcset/getattr () */
 #include <termios.h>
+#endif
 #include <pthread.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <limits.h>
 #include <signal.h>
+#ifndef _WIN32
 /* waitpid () */
 #include <sys/types.h>
 #include <sys/wait.h>
+#endif
 
 /* pandora.com library */
 #include <piano.h>
 
 #include "main.h"
+#include "platform.h"
 #include "credential.h"
 #include "debug.h"
 #include "terminal.h"
@@ -209,6 +221,11 @@ static bool BarMainGetLoginCredentials (BarSettings_t *settings,
 			settings->password = strdup (passBuf);
 			SbCredentialClear (passBuf, sizeof (passBuf));
 		} else {
+#ifdef _WIN32
+			BarUiMsg (settings, MSG_NONE,
+					"Error: password_command is unavailable on Windows W1.\n");
+			return false;
+#else
 			pid_t chld;
 			int pipeFd[2];
 
@@ -258,6 +275,7 @@ static bool BarMainGetLoginCredentials (BarSettings_t *settings,
 					return false;
 				}
 			}
+#endif
 		} /* end else passwordCmd */
 	}
 
@@ -558,13 +576,12 @@ static void intHandler (int signal) {
 	}
 }
 
+static void BarMainRequestShutdown (void) {
+	intHandler (0);
+}
+
 static void BarMainSetupSigaction () {
-	struct sigaction act = {
-			.sa_handler = intHandler,
-			.sa_flags = 0,
-			};
-	sigemptyset (&act.sa_mask);
-	sigaction (SIGINT, &act, NULL);
+	(void) SbPlatformInstallShutdownHandler (BarMainRequestShutdown);
 }
 
 int main (int argc, char **argv) {
@@ -643,7 +660,9 @@ int main (int argc, char **argv) {
 	BarTermInit ();
 
 	/* signals */
+#ifndef _WIN32
 	signal (SIGPIPE, SIG_IGN);
+#endif
 	BarMainSetupSigaction ();
 	interrupted = &app.doQuit;
 
@@ -690,7 +709,12 @@ int main (int argc, char **argv) {
 	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings,
 			tuiTheme)) {
 		if (mode == MODE_TUI) {
+#ifdef _WIN32
+			fputs ("signalbox: TUI is not available in this Windows W1 build\n",
+					stderr);
+#else
 			fputs ("signalbox: unable to initialize ncursesw\n", stderr);
+#endif
 			SbUiRendererSetActive (NULL);
 			SbUiModelDestroy (&app.uiModel);
 			BarSettingsDestroy (&app.settings);
@@ -740,6 +764,15 @@ int main (int argc, char **argv) {
 	assert (app.http != NULL);
 
 	/* init fds */
+#ifdef _WIN32
+	app.input.fds[0] = STDIN_FILENO;
+	app.input.fds[1] = -1;
+	app.input.maxfd = 1;
+	if (app.settings.fifo != NULL) {
+		BarUiMsg (&app.settings, MSG_INFO,
+				"Control FIFO is unavailable on Windows W1.\n");
+	}
+#else
 	FD_ZERO(&app.input.set);
 	app.input.fds[0] = STDIN_FILENO;
 	if (!app.useTui) {
@@ -767,11 +800,14 @@ int main (int argc, char **argv) {
 	app.input.maxfd = app.input.fds[0] > app.input.fds[1] ? app.input.fds[0] :
 			app.input.fds[1];
 	++app.input.maxfd;
+#endif
 
 	BarMainLoop (&app);
 
 	if (app.input.fds[1] != -1) {
+#ifndef _WIN32
 		close (app.input.fds[1]);
+#endif
 	}
 
 	/* write statefile */

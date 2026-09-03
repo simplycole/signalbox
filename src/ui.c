@@ -27,17 +27,23 @@ THE SOFTWARE.
 
 #include <stdio.h>
 #include <stdarg.h>
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#else
 #include <unistd.h>
+#include <strings.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <strings.h>
 #include <assert.h>
 #include <ctype.h> /* tolower() */
 
+#ifndef _WIN32
 /* waitpid () */
 #include <sys/types.h>
 #include <sys/wait.h>
+#endif
 
 #include "ui.h"
 #include "debug.h"
@@ -945,6 +951,15 @@ void BarUiStartEventCmd (const BarSettings_t *settings, const char *type,
 		const PianoStation_t *curStation, const PianoSong_t *curSong,
 		player_t * const player, PianoStation_t *stations,
 		PianoReturn_t pRet, CURLcode wRet) {
+	#ifdef _WIN32
+	(void) type; (void) curStation; (void) curSong; (void) player;
+	(void) stations; (void) pRet; (void) wRet;
+	if (settings->eventCmd != NULL) {
+		BarUiMsg (settings, MSG_ERR,
+				"Event commands are unavailable on Windows W1.\n");
+	}
+	return;
+	#else
 	pid_t chld;
 	int pipeFd[2];
 
@@ -1047,6 +1062,7 @@ void BarUiStartEventCmd (const BarSettings_t *settings, const char *type,
 		/* wait to get rid of the zombie */
 		waitpid (chld, &status, 0);
 	}
+	#endif
 }
 
 /*	prepend song to history
