@@ -16,6 +16,7 @@
 #include <wctype.h>
 
 #ifdef SIGNALBOX_PDCURSESMOD
+#include <windows.h>
 #include <pdcurses.h>
 #else
 #include <curses.h>
@@ -122,7 +123,13 @@ static int SbUiCursesTextWidth (const char *text);
 
 static int SbUiCursesCellWidth (const wchar_t value) {
 #ifdef SIGNALBOX_PDCURSESMOD
-	return PDC_wcwidth ((int) value);
+	WORD type;
+	if (value == L'\0') return 0;
+	if (iswcntrl (value)) return -1;
+	if (!GetStringTypeW (CT_CTYPE3, &value, 1, &type)) return 1;
+	if (type & (C3_NONSPACING | C3_DIACRITIC | C3_VOWELMARK)) return 0;
+	if (type & (C3_FULLWIDTH | C3_IDEOGRAPH)) return 2;
+	return 1;
 #else
 	return wcwidth (value);
 #endif
@@ -266,13 +273,13 @@ static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows)
 #define HELP_BLANK() rows[count++] = (SbHelpRow) {SB_HELP_BLANK, "", NULL}
 #define HELP_HEADING(value) rows[count++] = (SbHelpRow) {SB_HELP_HEADING, "", value}
 #define HELP_SECTION(value) HELP_HEADING (value); HELP_BLANK ()
-#define HELP_COMMAND(key, value) SbUiCursesHelpAddCommand (rows, &count, key, value)
+#define SB_TUI_HELP_COMMAND(key, value) SbUiCursesHelpAddCommand (rows, &count, key, value)
 #define HELP_CONFIG(command, value) SbUiCursesHelpAddConfigured (renderer, rows, &count, command, value)
 	HELP_SECTION ("NAVIGATION");
-	HELP_COMMAND ("Tab", "switch pane"); HELP_COMMAND ("Shift+Tab", "switch pane backward");
-	HELP_COMMAND ("Up/Down", "navigate"); HELP_COMMAND ("j/k", "navigate");
-	HELP_COMMAND ("PgUp/PgDn", "page"); HELP_COMMAND ("Home/End", "first / last");
-	HELP_COMMAND ("Enter", "select / action"); HELP_COMMAND ("Esc", "back / close");
+	SB_TUI_HELP_COMMAND ("Tab", "switch pane"); SB_TUI_HELP_COMMAND ("Shift+Tab", "switch pane backward");
+	SB_TUI_HELP_COMMAND ("Up/Down", "navigate"); SB_TUI_HELP_COMMAND ("j/k", "navigate");
+	SB_TUI_HELP_COMMAND ("PgUp/PgDn", "page"); SB_TUI_HELP_COMMAND ("Home/End", "first / last");
+	SB_TUI_HELP_COMMAND ("Enter", "select / action"); SB_TUI_HELP_COMMAND ("Esc", "back / close");
 	HELP_BLANK (); HELP_SECTION ("PLAYBACK");
 	HELP_CONFIG (SB_UI_CMD_TOGGLE_PAUSE, "pause / resume");
 	HELP_CONFIG (SB_UI_CMD_SKIP, "next track");
@@ -283,23 +290,23 @@ static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows)
 	HELP_CONFIG (SB_UI_CMD_VOLUME_UP, "volume up");
 	HELP_CONFIG (SB_UI_CMD_VOLUME_RESET, "reset to 0 dB");
 	HELP_BLANK (); HELP_SECTION ("STATIONS");
-	HELP_COMMAND ("f", "favorite / unfavorite"); HELP_COMMAND ("z", "cycle sort");
-	HELP_COMMAND ("/", "filter stations"); HELP_COMMAND ("#", "jump to station number");
+	SB_TUI_HELP_COMMAND ("f", "favorite / unfavorite"); SB_TUI_HELP_COMMAND ("z", "cycle sort");
+	SB_TUI_HELP_COMMAND ("/", "filter stations"); SB_TUI_HELP_COMMAND ("#", "jump to station number");
 	HELP_CONFIG (SB_UI_CMD_GENRE_STATION, "genres");
 	HELP_BLANK (); HELP_SECTION ("HISTORY");
 	HELP_CONFIG (SB_UI_CMD_HISTORY, "full session history");
-	HELP_COMMAND ("Tab", "focus RECENT"); HELP_COMMAND ("Enter", "history action");
+	SB_TUI_HELP_COMMAND ("Tab", "focus RECENT"); SB_TUI_HELP_COMMAND ("Enter", "history action");
 	HELP_BLANK (); HELP_SECTION ("UPCOMING");
 	HELP_CONFIG (SB_UI_CMD_UPCOMING, "browse upcoming");
-	HELP_COMMAND ("Enter", "selected-track actions");
+	SB_TUI_HELP_COMMAND ("Enter", "selected-track actions");
 	if (SbUiCursesVisualizerKeyAvailable (renderer)) {
 		HELP_BLANK (); HELP_SECTION ("VISUALIZER");
-		HELP_COMMAND ("V", "toggle spectrum");
+		SB_TUI_HELP_COMMAND ("V", "toggle spectrum");
 	}
 #undef HELP_BLANK
 #undef HELP_HEADING
 #undef HELP_SECTION
-#undef HELP_COMMAND
+#undef SB_TUI_HELP_COMMAND
 #undef HELP_CONFIG
 	return count;
 }
