@@ -96,6 +96,19 @@ uint64_t SbPlatformMonotonicMs (void) {
 #endif
 }
 
+#ifdef _WIN32
+bool SbPlatformWaitForConsoleInput (const int timeoutMs) {
+	const HANDLE input = GetStdHandle (STD_INPUT_HANDLE);
+	if (input == NULL || input == INVALID_HANDLE_VALUE) return false;
+	const DWORD timeout = timeoutMs < 0 ? INFINITE : (DWORD) timeoutMs;
+	return WaitForSingleObject (input, timeout) == WAIT_OBJECT_0;
+}
+
+void SbPlatformSleepMs (const unsigned int milliseconds) {
+	Sleep ((DWORD) milliseconds);
+}
+#endif
+
 bool SbPlatformLocalTime (const time_t value, struct tm *result) {
 	if (result == NULL) return false;
 #ifdef _WIN32
