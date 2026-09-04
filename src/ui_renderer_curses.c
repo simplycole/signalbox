@@ -519,6 +519,54 @@ static void SbUiCursesLoginResizeDiagnostic (const char *format, ...) {
 	}
 	va_end (fmtargs);
 }
+
+static void SbUiCursesResizeAxisDiagnostic (const int oldCols,
+		const int oldRows, const int newCols, const int newRows) {
+	FILE *outputs[] = {SbUiCursesKeyLog, tuiDebugEnable () ? stderr : NULL};
+	for (size_t i = 0; i < sizeof (outputs) / sizeof (*outputs); i++) {
+		FILE * const output = outputs[i];
+		if (output == NULL || (i > 0 && output == outputs[0])) continue;
+		fprintf (output,
+				"[signalbox:resize-axis] old=%dx%d new=%dx%d "
+				"width_changed=%s height_changed=%s\n",
+				oldCols, oldRows, newCols, newRows,
+				oldCols != newCols ? "yes" : "no",
+				oldRows != newRows ? "yes" : "no");
+		fflush (output);
+	}
+}
+
+#if defined(SIGNALBOX_PDCURSES_WINCON) && defined(_WIN32)
+static bool SbUiCursesClearActiveViewport (void) {
+	/* CONOUT$ names PDCurses WinCon's active alternate buffer; the inherited
+	 * stdout handle may still name the original console buffer. */
+	HANDLE const output = CreateFileW (L"CONOUT$", GENERIC_READ | GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (output == INVALID_HANDLE_VALUE) return false;
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	bool cleared = false;
+	if (GetConsoleScreenBufferInfo (output, &info)) {
+		const DWORD width = (DWORD) (info.srWindow.Right -
+				info.srWindow.Left + 1);
+		const int firstRow = info.srWindow.Top;
+		const int lastRow = info.srWindow.Bottom;
+		cleared = true;
+		for (int row = firstRow; row <= lastRow; row++) {
+			const COORD start = {info.srWindow.Left, (SHORT) row};
+			DWORD charsWritten = 0, attrsWritten = 0;
+			if (!FillConsoleOutputCharacterW (output, L' ', width, start,
+					&charsWritten) || charsWritten != width ||
+					!FillConsoleOutputAttribute (output, info.wAttributes, width,
+							start, &attrsWritten) || attrsWritten != width) {
+				cleared = false;
+				break;
+			}
+		}
+	}
+	CloseHandle (output);
+	return cleared;
+}
+#endif
 #endif
 
 static bool SbUiCursesResize (SbUiCursesData *data) {
@@ -561,6 +609,8 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	if (rows == data->screenRows && cols == data->screenCols) return false;
+	const int oldRows = data->screenRows;
+	const int oldCols = data->screenCols;
 	const SbTuiSizeState previousState = data->sizeState;
 	const SbTuiSizeState nextState = rows < 15 || cols < 50 ?
 			SB_TUI_SIZE_TOO_SMALL : SB_TUI_SIZE_NORMAL;
@@ -573,6 +623,10 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	/* Every adopted geometry invalidates the physical cell map.  This matters
 	 * while growing as well as shrinking: otherwise old borders can survive as
 	 * diagonal/stair-step remnants until a later complete refresh. */
+#if defined(SIGNALBOX_PDCURSES_WINCON) && defined(_WIN32)
+	const bool activeViewportCleared = oldCols != cols ?
+			SbUiCursesClearActiveViewport () : false;
+#endif
 	erase ();
 	clearok (stdscr, TRUE);
 	touchwin (stdscr);
@@ -582,6 +636,7 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 		data->helpOffset = 0;
 	}
 #ifdef SIGNALBOX_PDCURSESMOD
+	SbUiCursesResizeAxisDiagnostic (oldCols, oldRows, cols, rows);
 	if (previousState != nextState) {
 		SbUiCursesResizeDiagnostic ("from=%s to=%s cols=%d rows=%d",
 				SbUiCursesSizeStateName (previousState),
@@ -596,6 +651,11 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 			"app_windows_recreated=no",
 			cols, rows, visibleCols, visibleRows,
 			resizeResult == ERR ? "failed" : "ok", queuedResizes);
+#if defined(SIGNALBOX_PDCURSES_WINCON) && defined(_WIN32)
+	if (oldCols != cols)
+		SbUiCursesResizeDiagnostic ("width_clear=%s",
+				activeViewportCleared ? "ok" : "failed");
+#endif
 #endif
 	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
 			shrinking ? "yes" : "no");
