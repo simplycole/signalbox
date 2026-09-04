@@ -319,6 +319,11 @@ typedef struct {
 } SbTuiInput;
 
 #ifdef SIGNALBOX_PDCURSESMOD
+/* Developer-only key diagnostics are truncated for each TUI session.  Writing
+ * directly to this file keeps PDCursesMod's VT stdout/stderr streams intact. */
+#define SB_TUI_KEY_LOG_PATH "signalbox-keys.log"
+static FILE *SbUiCursesKeyLog;
+
 static const char *SbUiCursesKeyName (const int key) {
 	switch (key) {
 		case KEY_UP: return "KEY_UP";
@@ -354,38 +359,52 @@ static bool SbUiCursesDebugKeys (void) {
 	return value != NULL && value[0] != '\0' && value[0] != '0';
 }
 
+static void SbUiCursesOpenKeyLog (void) {
+	if (SbUiCursesDebugKeys ()) {
+		SbUiCursesKeyLog = fopen (SB_TUI_KEY_LOG_PATH, "w");
+	}
+}
+
+static void SbUiCursesCloseKeyLog (void) {
+	if (SbUiCursesKeyLog != NULL) {
+		fclose (SbUiCursesKeyLog);
+		SbUiCursesKeyLog = NULL;
+	}
+}
+
 static void SbUiCursesDebugKey (const SbTuiInput input,
 		const SbTuiInputContext context, const bool passwordActive) {
-	if (!SbUiCursesDebugKeys ()) return;
+	FILE * const output = SbUiCursesKeyLog;
+	if (output == NULL) return;
 	const char *status = input.status == OK ? "OK" :
 			(input.status == KEY_CODE_YES ? "KEY_CODE_YES" : "ERR");
-	fputs ("[signalbox:key] function=wget_wch ", stderr);
+	fputs ("[signalbox:key] function=wget_wch ", output);
 	if (passwordActive && input.status == OK) {
-		fprintf (stderr, "status=%s ordinary_character_received context=%s\n",
+		fprintf (output, "status=%s ordinary_character_received context=%s\n",
 				status, SbUiCursesInputContextName (context));
 	} else if (input.status == ERR) {
-		fprintf (stderr, "status=%s context=%s normalized=ERR\n", status,
+		fprintf (output, "status=%s context=%s normalized=ERR\n", status,
 				SbUiCursesInputContextName (context));
 	} else if (input.status == KEY_CODE_YES) {
-		fprintf (stderr,
+		fprintf (output,
 				"status=%s raw=%d hex=0x%X special=%s context=%s normalized=%d\n",
 				status, input.rawKey, (unsigned int) input.rawKey,
 				SbUiCursesKeyName (input.rawKey),
 				SbUiCursesInputContextName (context), input.key);
 	} else if (input.rawKey >= 0x20 && input.rawKey <= 0x7e) {
-		fprintf (stderr,
+		fprintf (output,
 				"status=%s raw=%d hex=0x%X codepoint=U+%04X printable='%c' context=%s normalized=%d\n",
 				status, input.rawKey, (unsigned int) input.rawKey,
 				(unsigned int) input.rawKey, input.rawKey,
 				SbUiCursesInputContextName (context), input.key);
 	} else {
-		fprintf (stderr,
+		fprintf (output,
 				"status=%s raw=%d hex=0x%X codepoint=U+%04X context=%s normalized=%d\n",
 				status, input.rawKey, (unsigned int) input.rawKey,
 				(unsigned int) input.rawKey,
 				SbUiCursesInputContextName (context), input.key);
 	}
-	fflush (stderr);
+	fflush (output);
 }
 #endif
 
@@ -2238,6 +2257,9 @@ static void SbUiCursesShutdown (SbUiRenderer *renderer) {
 	SbUiCursesData * const data = renderer->data;
 	if (data != NULL) {
 		tuiDebugPrint ("renderer_shutdown\n");
+#ifdef SIGNALBOX_PDCURSESMOD
+		SbUiCursesCloseKeyLog ();
+#endif
 		endwin ();
 		delscreen (data->screen);
 		pthread_mutex_destroy (&data->statusLock);
@@ -2386,6 +2408,9 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	renderer->ops = &cursesOps;
 	renderer->settings = settings;
 	renderer->data = data;
+#ifdef SIGNALBOX_PDCURSESMOD
+	SbUiCursesOpenKeyLog ();
+#endif
 	tuiDebugPrint ("renderer_init theme=%d colors=%s\n", (int) theme,
 			data->colors ? "yes" : "no");
 	return true;
