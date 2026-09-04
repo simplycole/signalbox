@@ -611,47 +611,28 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 			{"60", "120", "250", "500", "1k", "2k", "4k", "8k"};
 	const bool wide = width >= 69;
 	const size_t bandCount = wide ? SB_SPECTRUM_BANDS : SB_SPECTRUM_COMPACT_BANDS;
-	const int bandPitch = wide ? 6 : 5;
 	const int barWidth = 3;
+	int gapWidth = 2;
+	if (wide) {
+		const int gapCount = (int) bandCount - 1;
+		const int targetWidth = (width * 85 + 50) / 100;
+		gapWidth = (targetWidth - (int) bandCount * barWidth +
+				gapCount / 2) / gapCount;
+		if (gapWidth < 3) gapWidth = 3;
+		if (gapWidth > 8) gapWidth = 8;
+	}
+	const int bandPitch = barWidth + gapWidth;
+	const int gridWidth = (int) bandCount * barWidth +
+			((int) bandCount - 1) * gapWidth;
+	const int gridLeft = x + (width - gridWidth) / 2;
 	const char *const *labels = wide ? wideLabels : compactLabels;
 	int labelX[SB_SPECTRUM_BANDS];
 	int labelWidth[SB_SPECTRUM_BANDS];
-	int labelOffset[SB_SPECTRUM_BANDS];
-	int visualLeft = 0;
-	int visualRight = 0;
 	for (size_t band = 0; band < bandCount; band++) {
-		const int barX = (int) band * bandPitch;
+		const int barX = gridLeft + (int) band * bandPitch;
 		labelWidth[band] = SbUiCursesTextWidth (labels[band]);
-		const int barCenter = 2 * barX + barWidth;
-		const int idealLeft = barCenter - labelWidth[band];
-		labelOffset[band] = idealLeft / 2;
-		/* Resolve half-cell ties to the right instead of leaving a left bias. */
-		if (idealLeft > 0 && idealLeft % 2 != 0) labelOffset[band]++;
-		if (barX < visualLeft) visualLeft = barX;
-		if (labelOffset[band] < visualLeft) visualLeft = labelOffset[band];
-		if (barX + barWidth > visualRight) visualRight = barX + barWidth;
-		if (labelOffset[band] + labelWidth[band] > visualRight)
-			visualRight = labelOffset[band] + labelWidth[band];
-	}
-	const int spectrumTotalWidth = visualRight - visualLeft;
-	const int opticalAdjustment = wide ? 2 : 0;
-	const int origin = x + (width - spectrumTotalWidth) / 2 - visualLeft +
-			opticalAdjustment;
-	for (size_t band = 0; band < bandCount; band++) {
-		labelX[band] = origin + labelOffset[band];
-		if (labelX[band] < x) labelX[band] = x;
-		if (labelX[band] + labelWidth[band] > x + width)
-			labelX[band] = x + width - labelWidth[band];
-		if (band > 0 && labelX[band] <
-				labelX[band - 1] + labelWidth[band - 1])
-			labelX[band] = labelX[band - 1] + labelWidth[band - 1];
-	}
-	for (size_t band = bandCount; band-- > 0;) {
-		const int rightLimit = band + 1 < bandCount ? labelX[band + 1] :
-				x + width;
-		if (labelX[band] + labelWidth[band] > rightLimit)
-			labelX[band] = rightLimit - labelWidth[band];
-		if (labelX[band] < x) labelX[band] = x;
+		/* Work in half cells and resolve an exact half-cell tie to the right. */
+		labelX[band] = (2 * barX + barWidth - labelWidth[band] + 1) / 2;
 	}
 	float levels[SB_SPECTRUM_COMPACT_BANDS], peaks[SB_SPECTRUM_COMPACT_BANDS];
 	if (!wide) {
@@ -680,7 +661,7 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 				role = SB_TUI_COLOR_TRACK;
 			SbUiCursesAttrOn (data, role, 0);
 			SbUiCursesPut (baseline - bodyRow,
-					origin + (int) band * bandPitch, barWidth,
+					gridLeft + (int) band * bandPitch, barWidth,
 					data->unicodeBlocks ? "███" : "###");
 			SbUiCursesAttrOff (data, role, 0);
 		}
@@ -688,7 +669,7 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 		if (peakY < y) peakY = y;
 		if (peak > 0.01f && peakY >= y && peakY < bodyTop) {
 			SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, A_BOLD);
-			SbUiCursesPut (peakY, origin + (int) band * bandPitch, barWidth, "---");
+			SbUiCursesPut (peakY, gridLeft + (int) band * bandPitch, barWidth, "---");
 			SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, A_BOLD);
 		}
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, 0);
