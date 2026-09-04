@@ -125,6 +125,23 @@ SbTerminalInputEvent SbTerminalReadInput (int timeoutMs) {
 		SbTerminalInputTrace (debugOutput, "event_type", timeoutMs,
 				record.EventType, remaining);
 		if (record.EventType == WINDOW_BUFFER_SIZE_EVENT) {
+			/* A drag can enqueue many intermediate geometries.  Leave keyboard and
+			 * other event types in order, but collapse an adjacent resize run into
+			 * one logical KEY_RESIZE.  The renderer then queries the active viewport,
+			 * which gives it the newest dimensions represented by the drained run. */
+			DWORD coalesced = 1;
+			for (;;) {
+				INPUT_RECORD next;
+				DWORD peeked = 0;
+				if (PeekConsoleInputW (input, &next, 1, &peeked) == 0 ||
+						peeked != 1 || next.EventType != WINDOW_BUFFER_SIZE_EVENT)
+					break;
+				if (ReadConsoleInputW (input, &record, 1, &count) == 0 ||
+						count != 1) break;
+				coalesced++;
+			}
+			SbTerminalInputTrace (debugOutput, "resize_coalesced", timeoutMs,
+					coalesced, remaining);
 			return (SbTerminalInputEvent) {
 				.status = KEY_CODE_YES, .key = KEY_RESIZE,
 				.source = SB_TERMINAL_INPUT_WIN32_EVENT,

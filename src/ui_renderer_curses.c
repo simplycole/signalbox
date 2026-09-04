@@ -498,6 +498,27 @@ static void SbUiCursesResizeDiagnostic (const char *format, ...) {
 	}
 	va_end (fmtargs);
 }
+
+static void SbUiCursesLoginResizeDiagnostic (const char *format, ...) {
+	va_list fmtargs;
+	va_start (fmtargs, format);
+	if (SbUiCursesKeyLog != NULL) {
+		va_list copy;
+		va_copy (copy, fmtargs);
+		fputs ("[signalbox:login-resize] ", SbUiCursesKeyLog);
+		vfprintf (SbUiCursesKeyLog, format, copy);
+		fputc ('\n', SbUiCursesKeyLog);
+		fflush (SbUiCursesKeyLog);
+		va_end (copy);
+	}
+	if (tuiDebugEnable ()) {
+		fputs ("[signalbox:login-resize] ", stderr);
+		vfprintf (stderr, format, fmtargs);
+		fputc ('\n', stderr);
+		fflush (stderr);
+	}
+	va_end (fmtargs);
+}
 #endif
 
 static bool SbUiCursesResize (SbUiCursesData *data) {
@@ -1602,11 +1623,42 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 	(void) curs_set (1);
 	SbUiCursesFrame (renderer, model);
 	WINDOW *window = NULL;
+	bool recreatePending = false;
 	for (;;) {
 		SbUiCursesData * const data = renderer->data;
+		if (data->sizeState == SB_TUI_SIZE_TOO_SMALL) {
+			/* No modal exists while suspended.  Continue consuming native resize
+			 * events through stdscr so recovery cannot spin on newwin(NULL). */
+			(void) curs_set (0);
+			const SbTuiInput read = SbUiCursesReadKey (stdscr,
+					SB_TUI_INPUT_LOGIN, false, -1);
+			if (read.status == ERR) continue;
+			if (read.key == KEY_RESIZE) {
+				SbUiCursesResize (data);
+				SbUiCursesFrame (renderer, model);
+				if (data->sizeState == SB_TUI_SIZE_NORMAL)
+					recreatePending = true;
+				continue;
+			}
+			if (read.key >= 0 && read.key <= UCHAR_MAX &&
+					BarUiCommandFromKey (renderer->settings,
+							(char) read.key) == SB_UI_CMD_QUIT) {
+				SbCredentialClear (password, passwordSize);
+				return false;
+			}
+			continue;
+		}
 		if (window == NULL) window = SbUiCursesModal (data, "SIGNALBOX LOGIN",
 				error != NULL ? error : "Sign in to Pandora", 12);
 		if (window == NULL) continue;
+		if (recreatePending) {
+#ifdef SIGNALBOX_PDCURSESMOD
+			SbUiCursesLoginResizeDiagnostic ("recreate cols=%d rows=%d",
+					data->screenCols, data->screenRows);
+			SbUiCursesLoginResizeDiagnostic ("field=%s", field == 0 ?
+					"username" : (field == 1 ? "password" : "remember"));
+#endif
+		}
 		const int width = getmaxx (window);
 		/* Redrawing this small window updates only changed cells.  In particular,
 		 * keep stdscr out of the per-keystroke refresh path on PDCurses VT. */
@@ -1632,11 +1684,12 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			SbUiCursesWAttrOff (window, data, i == field ? SB_TUI_COLOR_TITLE :
 					SB_TUI_COLOR_PRIMARY, i == field ? A_BOLD : 0);
 		}
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST,
-				field == 0 ? A_BOLD : 0);
+		/* Keep entered text on the theme's field color.  Focus is already shown
+		 * by the bold label and cursor; changing the text attribute made WinCon
+		 * remap active username cells to a different console color. */
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, 0);
 		SbUiCursesWPut (window, 5, 22, width - 25, username);
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST,
-				field == 0 ? A_BOLD : 0);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, 0);
 		char masked[100];
 		const size_t visiblePass = passLen < sizeof (masked) - 1 ? passLen :
 				sizeof (masked) - 1;
@@ -1648,11 +1701,21 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 				"Tab: next   Space: toggle   Enter: sign in   Esc: cancel",
 				width - 4);
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
-		if (field == 0) wmove (window, 5, 22 + (int) userLen);
-		else if (field == 1) wmove (window, 6, 22 + (int) visiblePass);
-		else (void) curs_set (0);
+		if (field == 0) {
+			(void) curs_set (1);
+			wmove (window, 5, 22 + (int) userLen);
+		} else if (field == 1) {
+			(void) curs_set (1);
+			wmove (window, 6, 22 + (int) visiblePass);
+		} else (void) curs_set (0);
 		wnoutrefresh (window);
 		doupdate ();
+		if (recreatePending) {
+#ifdef SIGNALBOX_PDCURSESMOD
+			SbUiCursesLoginResizeDiagnostic ("rebuild_complete");
+#endif
+			recreatePending = false;
+		}
 		const SbTuiInput read = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_LOGIN, field == 1, -1);
 		const int result = read.status;
@@ -1661,7 +1724,15 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (key == KEY_RESIZE) {
 			delwin (window);
 			window = NULL;
-			if (SbUiCursesResize (data)) SbUiCursesFrame (renderer, model);
+			SbUiCursesResize (data);
+			if (data->sizeState == SB_TUI_SIZE_TOO_SMALL) {
+				(void) curs_set (0);
+#ifdef SIGNALBOX_PDCURSESMOD
+				SbUiCursesLoginResizeDiagnostic ("suspend cols=%d rows=%d",
+						data->screenCols, data->screenRows);
+#endif
+			}
+			SbUiCursesFrame (renderer, model);
 			continue;
 		}
 		if (key == 27) {
