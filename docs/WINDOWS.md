@@ -80,7 +80,19 @@ With `SIGNALBOX_DEBUG_KEYS=1`, the start of `signalbox-keys.log` reports
 `GetFileType`, `GetConsoleMode`, the relevant mode bits, and whether
 `PeekConsoleInputW` succeeds. Each subsequent input line reports
 `source=win32_event`, the raw virtual key and Unicode value, and the normalized
-logical key. Password characters are redacted.
+logical key. Main-loop diagnostics also report the requested timeout, wait
+result, queue depth, record count and type, key-up/key-down state, ignored
+records, and remaining deadline budget. Password characters are redacted.
+
+Login and modal reads explicitly request an infinite native wait. The main TUI
+passes its renderer cadence directly to the adapter (80 ms with the spectrum,
+otherwise 1000 ms); it does not infer that value from `wtimeout`, `nodelay`, or
+`wgetdelay`. A short 35 ms bounded read is used only while completing an
+application-keypad escape sequence. On Windows each bounded read uses one
+`GetTickCount64` deadline: `WaitForSingleObject` waits only for the remaining
+budget, then `ReadConsoleInputW` consumes records until it finds a key-down or
+resize event. Key-up, mouse, focus, and menu records are consumed without
+turning the read into an immediate `ERR`.
 
 The former VT timing workaround was removed. Real Windows tests showed that
 PDCursesMod's VT decoder fragmented escape sequences, while its WinCon decoder

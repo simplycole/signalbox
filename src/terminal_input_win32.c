@@ -73,7 +73,18 @@ static SbTerminalInputEvent SbTerminalKeyEvent (const KEY_EVENT_RECORD *key) {
 	return event;
 }
 
-SbTerminalInputEvent SbTerminalReadInput (const int timeoutMs) {
+static void SbTerminalInputTrace (FILE * const output, const char * const action,
+		const int timeoutMs, const DWORD value, const ULONGLONG remaining) {
+	if (output == NULL) return;
+	fprintf (output,
+			"[signalbox:input-read] action=%s timeout_ms=%d value=%lu remaining_ms=%llu\n",
+			action, timeoutMs, (unsigned long) value,
+			(unsigned long long) remaining);
+	fflush (output);
+}
+
+SbTerminalInputEvent SbTerminalReadInput (const int timeoutMs,
+		FILE * const debugOutput) {
 	if (inputState.remaining > 0) {
 		inputState.remaining--;
 		return inputState.event;
@@ -81,27 +92,52 @@ SbTerminalInputEvent SbTerminalReadInput (const int timeoutMs) {
 	HANDLE const input = GetStdHandle (STD_INPUT_HANDLE);
 	if (input == INVALID_HANDLE_VALUE || input == NULL) return SbTerminalNoInput ();
 	const ULONGLONG started = GetTickCount64 ();
+	const ULONGLONG deadline = timeoutMs >= 0 ?
+			started + (ULONGLONG) timeoutMs : 0;
 	for (;;) {
 		DWORD wait = INFINITE;
+		ULONGLONG remaining = (ULONGLONG) -1;
 		if (timeoutMs >= 0) {
-			const ULONGLONG elapsed = GetTickCount64 () - started;
-			if (elapsed >= (ULONGLONG) timeoutMs && timeoutMs != 0)
+			const ULONGLONG now = GetTickCount64 ();
+			if (timeoutMs != 0 && now >= deadline) {
+				SbTerminalInputTrace (debugOutput, "deadline_expired", timeoutMs, 0, 0);
 				return SbTerminalNoInput ();
-			wait = timeoutMs == 0 ? 0 : (DWORD) ((ULONGLONG) timeoutMs - elapsed);
+			}
+			remaining = timeoutMs == 0 ? 0 : deadline - now;
+			wait = remaining > MAXDWORD ? MAXDWORD : (DWORD) remaining;
 		}
-		if (WaitForSingleObject (input, wait) != WAIT_OBJECT_0)
+		const DWORD waitResult = WaitForSingleObject (input, wait);
+		SbTerminalInputTrace (debugOutput, "wait", timeoutMs, waitResult, remaining);
+		if (waitResult != WAIT_OBJECT_0)
 			return SbTerminalNoInput ();
+		DWORD pending = 0;
+		if (GetNumberOfConsoleInputEvents (input, &pending) != 0)
+			SbTerminalInputTrace (debugOutput, "queue_depth", timeoutMs,
+					pending, remaining);
 		INPUT_RECORD record;
 		DWORD count = 0;
-		if (ReadConsoleInputW (input, &record, 1, &count) == 0 || count != 1)
+		if (ReadConsoleInputW (input, &record, 1, &count) == 0 || count != 1) {
+			SbTerminalInputTrace (debugOutput, "read_failed", timeoutMs, count, remaining);
 			return SbTerminalNoInput ();
+		}
+		SbTerminalInputTrace (debugOutput, "record_read", timeoutMs, count, remaining);
+		SbTerminalInputTrace (debugOutput, "event_type", timeoutMs,
+				record.EventType, remaining);
 		if (record.EventType == WINDOW_BUFFER_SIZE_EVENT) {
 			return (SbTerminalInputEvent) {
 				.status = KEY_CODE_YES, .key = KEY_RESIZE,
 				.source = SB_TERMINAL_INPUT_WIN32_EVENT,
 			};
 		}
-		if (record.EventType != KEY_EVENT || !record.Event.KeyEvent.bKeyDown)
+		if (record.EventType != KEY_EVENT) {
+			SbTerminalInputTrace (debugOutput, "ignored_record", timeoutMs,
+					record.EventType, remaining);
+			continue;
+		}
+		SbTerminalInputTrace (debugOutput,
+				record.Event.KeyEvent.bKeyDown ? "key_down" : "key_up",
+				timeoutMs, record.Event.KeyEvent.wRepeatCount, remaining);
+		if (!record.Event.KeyEvent.bKeyDown)
 			continue;
 		SbTerminalInputEvent event = SbTerminalKeyEvent (&record.Event.KeyEvent);
 		if (event.status == ERR) continue;
