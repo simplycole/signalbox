@@ -106,7 +106,7 @@ ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS} ${CREDENTIAL_LDFLAGS}
 ifeq (${WINDOWS},1)
 	ALL_CFLAGS+=-D_WIN32_WINNT=0x0600
-	ALL_LDFLAGS+=-lshell32 -lole32
+	ALL_LDFLAGS+=-lshell32 -lole32 -luuid
 endif
 
 # Be verbose if V=1 (gnu autotools’ --disable-silent-rules)
@@ -173,7 +173,7 @@ clean:
 all: ${PROGRAM}
 
 spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h src/platform.c src/platform.h
-	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32)
+	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 ifeq (${DYNLINK},1)
