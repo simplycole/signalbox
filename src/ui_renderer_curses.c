@@ -121,6 +121,73 @@ static const SbUiRendererOps cursesOps;
 
 static int SbUiCursesTextWidth (const char *text);
 
+static size_t SbUiCursesUtf8ToWide (wchar_t *dest, const size_t destSize,
+		const char *source) {
+	if (destSize == 0) return (size_t) -1;
+#ifdef SIGNALBOX_PDCURSESMOD
+	if (source == NULL || strlen (source) > INT_MAX) return (size_t) -1;
+	const int converted = MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS,
+			source, -1, dest, (int) destSize);
+	if (converted == 0) return (size_t) -1;
+	return (size_t) converted - 1;
+#else
+	mbstate_t state;
+	memset (&state, 0, sizeof (state));
+	const char *next = source;
+	const size_t converted = mbsrtowcs (dest, &next, destSize - 1, &state);
+	if (converted == (size_t) -1) return converted;
+	dest[converted] = L'\0';
+	return converted;
+#endif
+}
+
+static size_t SbUiCursesWideToUtf8 (char *dest, const size_t destSize,
+		const wchar_t *source) {
+	if (destSize == 0) return (size_t) -1;
+#ifdef SIGNALBOX_PDCURSESMOD
+	const int converted = WideCharToMultiByte (CP_UTF8, WC_ERR_INVALID_CHARS,
+			source, -1, dest, (int) destSize, NULL, NULL);
+	if (converted == 0) return (size_t) -1;
+	return (size_t) converted - 1;
+#else
+	mbstate_t state;
+	memset (&state, 0, sizeof (state));
+	const wchar_t *next = source;
+	const size_t converted = wcsrtombs (dest, &next, destSize - 1, &state);
+	if (converted == (size_t) -1) return converted;
+	dest[converted] = '\0';
+	return converted;
+#endif
+}
+
+static void SbUiCursesBox (WINDOW *window) {
+#ifdef SIGNALBOX_PDCURSESMOD
+	(void) wborder_set (window, WACS_VLINE, WACS_VLINE, WACS_HLINE,
+			WACS_HLINE, WACS_ULCORNER, WACS_URCORNER, WACS_LLCORNER,
+			WACS_LRCORNER);
+#else
+	(void) box (window, 0, 0);
+#endif
+}
+
+static void SbUiCursesHLine (WINDOW *window, const int y, const int x,
+		const int length) {
+#ifdef SIGNALBOX_PDCURSESMOD
+	(void) mvwhline_set (window, y, x, WACS_HLINE, length);
+#else
+	(void) mvwhline (window, y, x, ACS_HLINE, length);
+#endif
+}
+
+static void SbUiCursesVLine (WINDOW *window, const int y, const int x,
+		const int length) {
+#ifdef SIGNALBOX_PDCURSESMOD
+	(void) mvwvline_set (window, y, x, WACS_VLINE, length);
+#else
+	(void) mvwvline (window, y, x, ACS_VLINE, length);
+#endif
+}
+
 static int SbUiCursesCellWidth (const wchar_t value) {
 #ifdef SIGNALBOX_PDCURSESMOD
 	WORD type;
@@ -161,15 +228,12 @@ static void SbUiCursesPut (const int y, const int x, const int width,
 	if (width <= 0) return;
 	const char *source = SbUiCursesText (text);
 	wchar_t wide[512];
-	mbstate_t state;
-	memset (&state, 0, sizeof (state));
-	const size_t converted = mbsrtowcs (wide, &source,
-			(sizeof (wide) / sizeof (*wide)) - 1, &state);
+	const size_t converted = SbUiCursesUtf8ToWide (wide,
+			sizeof (wide) / sizeof (*wide), source);
 	if (converted == (size_t) -1) {
-		mvaddnstr (y, x, text != NULL ? text : "--", width);
+		mvaddnstr (y, x, "--", width);
 		return;
 	}
-	wide[converted] = L'\0';
 	int cells = 0;
 	size_t keep = 0;
 	while (keep < converted) {
@@ -194,15 +258,12 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 	if (width <= 0) return;
 	const char *source = SbUiCursesText (text);
 	wchar_t wide[512];
-	mbstate_t state;
-	memset (&state, 0, sizeof (state));
-	const size_t converted = mbsrtowcs (wide, &source,
-			(sizeof (wide) / sizeof (*wide)) - 1, &state);
+	const size_t converted = SbUiCursesUtf8ToWide (wide,
+			sizeof (wide) / sizeof (*wide), source);
 	if (converted == (size_t) -1) {
-		mvwaddnstr (window, y, x, text != NULL ? text : "--", width);
+		mvwaddnstr (window, y, x, "--", width);
 		return;
 	}
-	wide[converted] = L'\0';
 	int cells = 0;
 	size_t keep = 0;
 	while (keep < converted) {
@@ -710,11 +771,8 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 static int SbUiCursesTextWidth (const char *text) {
 	if (text == NULL || *text == '\0') return 2;
 	wchar_t wide[SB_UI_HISTORY_TEXT_MAX];
-	mbstate_t state;
-	memset (&state, 0, sizeof (state));
-	const char *source = text;
-	const size_t converted = mbsrtowcs (wide, &source,
-			(sizeof (wide) / sizeof (*wide)) - 1, &state);
+	const size_t converted = SbUiCursesUtf8ToWide (wide,
+			sizeof (wide) / sizeof (*wide), text);
 	if (converted == (size_t) -1) return (int) strlen (text);
 	int width = 0;
 	for (size_t i = 0; i < converted; i++) {
@@ -921,7 +979,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (rows < 15 || cols < 50) {
 		data->focus = SB_TUI_FOCUS_STATIONS;
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
-		box (stdscr, 0, 0);
+		SbUiCursesBox (stdscr);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_TITLE, A_BOLD);
 		SbUiCursesPut (2, 3, cols - 6, "SIGNALBOX");
@@ -936,7 +994,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (cols < 80 || rows < 24) data->focus = SB_TUI_FOCUS_STATIONS;
 
 	SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
-	box (stdscr, 0, 0);
+	SbUiCursesBox (stdscr);
 	SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
 	SbUiCursesAttrOn (data, SB_TUI_COLOR_TITLE, A_BOLD);
 	SbUiCursesPut (1, 2, cols / 2, "SIGNALBOX");
@@ -945,12 +1003,12 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	SbUiCursesPut (1, cols - 15, 13, "PANDORA RADIO");
 	SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, 0);
 	SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
-	mvhline (2, 1, ACS_HLINE, cols - 2);
+	SbUiCursesHLine (stdscr, 2, 1, cols - 2);
 
 	const int footerY = rows - 2;
 	const int statusY = rows - 4;
-	mvhline (statusY - 1, 1, ACS_HLINE, cols - 2);
-	mvhline (footerY - 1, 1, ACS_HLINE, cols - 2);
+	SbUiCursesHLine (stdscr, statusY - 1, 1, cols - 2);
+	SbUiCursesHLine (stdscr, footerY - 1, 1, cols - 2);
 	SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
 	SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 	SbUiCursesPut (statusY, 2, 8, "STATUS");
@@ -984,7 +1042,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 
 	if (cols >= 80 && rows >= 24) {
 		const int split = cols / 3;
-		mvvline (3, split, ACS_VLINE, statusY - 4);
+		SbUiCursesVLine (stdscr, 3, split, statusY - 4);
 		const int nowPlayingHeight = 8;
 		const size_t upcomingCount = SbUiCursesUpcomingCount (model);
 		const int rightWidth = cols - (split + 2) - 2;
@@ -999,7 +1057,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				(int) (upcomingCount < (size_t) maxUpcoming ? upcomingCount :
 				(size_t) maxUpcoming) : 0;
 		const int historyY = upcomingY + (upcomingRows > 0 ? upcomingRows + 2 : 0);
-		mvhline (historyY - 1, split + 1, ACS_HLINE, cols - split - 2);
+		SbUiCursesHLine (stdscr, historyY - 1, split + 1, cols - split - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStationHeader (data, 4, 2, split - 3);
@@ -1036,7 +1094,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				statusY - historyY - 2, rightWidth);
 	} else if (cols >= 80 && rows >= 20) {
 		const int split = cols / 3;
-		mvvline (3, split, ACS_VLINE, statusY - 4);
+		SbUiCursesVLine (stdscr, 3, split, statusY - 4);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStationHeader (data, 4, 2, split - 3);
@@ -1055,7 +1113,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const int stationRows = (statusY - 9) / 2;
 		SbUiCursesStations (data, model, 5, 2, stationRows, cols - 4);
 		const int dividerY = 5 + stationRows;
-		mvhline (dividerY, 1, ACS_HLINE, cols - 2);
+		SbUiCursesHLine (stdscr, dividerY, 1, cols - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesPut (dividerY + 1, 2, cols - 4, "NOW PLAYING");
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
@@ -1079,7 +1137,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			if (data->helpOffset > maxOffset) data->helpOffset = maxOffset;
 			wbkgdset (help, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_BORDER, 0);
-			box (help, 0, 0);
+			SbUiCursesBox (help);
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_BORDER, 0);
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_TITLE, A_BOLD);
 			mvwaddstr (help, 1, 2, "SIGNALBOX HELP");
@@ -1090,13 +1148,13 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				const int y = 3 + (int) shown;
 				if (row->kind == SB_HELP_HEADING) {
 					SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
-					mvwaddnstr (help, y, 2, row->text, width - 4);
+					SbUiCursesWPut (help, y, 2, width - 4, row->text);
 					SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 				} else if (row->kind == SB_HELP_COMMAND) {
 					SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_KEY, A_BOLD);
 					mvwaddnstr (help, y, 2, row->key, 11);
 					SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_KEY, A_BOLD);
-					mvwaddnstr (help, y, 14, row->text, width - 16);
+					SbUiCursesWPut (help, y, 14, width - 16, row->text);
 				}
 			}
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_MUTED, 0);
@@ -1130,13 +1188,13 @@ static WINDOW *SbUiCursesModal (const SbUiCursesData *data,
 				width, height);
 		wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0);
-		box (window, 0, 0);
+		SbUiCursesBox (window);
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_BORDER, 0);
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
-		mvwaddnstr (window, 1, 2, title, width - 4);
+		SbUiCursesWPut (window, 1, 2, width - 4, title);
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
-		mvwaddnstr (window, 3, 2, prompt, width - 4);
+		SbUiCursesWPut (window, 3, 2, width - 4, prompt);
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
 		keypad (window, TRUE);
 		wnoutrefresh (stdscr);
@@ -1148,11 +1206,8 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		const char *title, const char *prompt, char *buffer, const size_t size) {
 	if (!SbUiRendererIsCurses (renderer) || size < 2) return false;
 	wchar_t input[256];
-	mbstate_t state;
-	memset (&state, 0, sizeof (state));
-	const char *source = buffer;
-	size_t length = mbsrtowcs (input, &source,
-			sizeof (input) / sizeof (*input) - 1, &state);
+	size_t length = SbUiCursesUtf8ToWide (input,
+			sizeof (input) / sizeof (*input), buffer);
 	if (length == (size_t) -1) length = 0;
 	size_t cursor = length;
 	input[length] = L'\0';
@@ -1190,9 +1245,7 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 			return false;
 		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
-			memset (&state, 0, sizeof (state));
-			const wchar_t *wide = input;
-			const size_t converted = wcsrtombs (buffer, &wide, size - 1, &state);
+			const size_t converted = SbUiCursesWideToUtf8 (buffer, size, input);
 			if (converted == (size_t) -1) buffer[0] = '\0';
 			else buffer[converted] = '\0';
 			(void) curs_set (0);
@@ -1241,7 +1294,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (error != NULL) {
 			mvwhline (window, 3, 2, ' ', width - 4);
 			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ERROR, A_BOLD);
-			mvwaddnstr (window, 3, 2, error, width - 4);
+			SbUiCursesWPut (window, 3, 2, width - 4, error);
 			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ERROR, A_BOLD);
 		}
 		const char *labels[] = {"Pandora email:", "Password:",
@@ -1255,7 +1308,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		}
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST,
 				field == 0 ? A_BOLD : 0);
-		mvwaddnstr (window, 5, 22, username, width - 25);
+		SbUiCursesWPut (window, 5, 22, width - 25, username);
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST,
 				field == 0 ? A_BOLD : 0);
 		char masked[100];
@@ -1355,7 +1408,7 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 			const char *item = items[offset + row] != NULL ?
 					items[offset + row] : "(unavailable)";
-			mvwaddnstr (window, 5 + (int) row, 2, item, ww - 4);
+			SbUiCursesWPut (window, 5 + (int) row, 2, ww - 4, item);
 			if (offset + row == selected) SbUiCursesWAttrOff (window, data,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
@@ -1487,7 +1540,8 @@ void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
 		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
 		if (offset >= lineCount) offset = lineCount > 0 ? lineCount - 1 : 0;
 		for (size_t i = 0; i < visible && offset + i < lineCount; i++)
-			mvwaddnstr (window, 5 + (int) i, 2, lines[offset + i], lineWidth);
+			SbUiCursesWPut (window, 5 + (int) i, 2, lineWidth,
+					lines[offset + i]);
 		wrefresh (window);
 		const int key = wgetch (window);
 		delwin (window);
@@ -1556,8 +1610,8 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 			mvwprintw (window, 5 + (int) row, 2, "[%c] ",
 					checked[index] ? 'x' : ' ');
-			mvwaddnstr (window, 5 + (int) row, 6,
-					items[index] != NULL ? items[index] : "(unavailable)", ww - 8);
+			SbUiCursesWPut (window, 5 + (int) row, 6, ww - 8,
+					items[index] != NULL ? items[index] : "(unavailable)");
 			if (index == selected) SbUiCursesWAttrOff (window, data,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}

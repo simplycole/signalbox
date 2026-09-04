@@ -774,7 +774,7 @@ int main (int argc, char **argv) {
 	app.input.maxfd = 1;
 	if (app.settings.fifo != NULL) {
 		BarUiMsg (&app.settings, MSG_INFO,
-				"Control FIFO is unavailable on Windows W1.\n");
+				"Control FIFO is unavailable on Windows.\n");
 	}
 #else
 	FD_ZERO(&app.input.set);
