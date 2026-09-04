@@ -89,6 +89,8 @@ typedef struct {
 	size_t recentSelected;
 	size_t recentOffset;
 	size_t observedHistoryCount;
+	int screenRows;
+	int screenCols;
 } SbUiCursesData;
 
 static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
@@ -302,21 +304,44 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 #endif
 }
 
-static bool SbUiCursesResize (void) {
+static int SbUiCursesReadKey (WINDOW *window) {
+#ifdef SIGNALBOX_PDCURSESMOD
+	/* The Windows build is both wide-character and forced UTF-8.  Keep input in
+	 * that API too: narrow wgetch() may expose the UTF-8 byte stream, while
+	 * wget_wch() returns ordinary keys as character codes and function keys as
+	 * KEY_* values. */
+	wint_t key;
+	return wget_wch (window, &key) == ERR ? ERR : (int) key;
+#else
+	return wgetch (window);
+#endif
+}
+
+static bool SbUiCursesResize (SbUiCursesData *data) {
 #ifdef SIGNALBOX_PDCURSESMOD
 	/* PDCurses requires the application to adopt a user resize before stdscr
-	 * and curscr dimensions change.  Zeroes mean "use the current terminal".
-	 * A resize can leave more than one KEY_RESIZE in the input queue; after the
-	 * first call SP->resized is false, so do not force another physical clear. */
-	if (!is_termresized ()) return false;
-	if (resize_term (0, 0) == ERR) {
+	 * and curscr dimensions change.  It does not resize application windows. */
+	if (is_termresized () && resize_term (0, 0) == ERR) {
 		tuiDebugPrint ("resize_term failed\n");
 		return false;
 	}
 #endif
-	werase (stdscr);
+	int rows, cols;
+	getmaxyx (stdscr, rows, cols);
+	if (rows == data->screenRows && cols == data->screenCols) return false;
+	const bool shrinking = rows < data->screenRows || cols < data->screenCols;
+	data->screenRows = rows;
+	data->screenCols = cols;
+	/* wclear marks the next refresh as a complete physical repaint.  This is
+	 * required on a shrink, where cells from the old larger virtual screen can
+	 * otherwise survive inside the new terminal bounds. */
+	wclear (stdscr);
 	clearok (stdscr, TRUE);
-	touchwin (stdscr);
+	clearok (curscr, TRUE);
+	data->scrollOffset = data->selectedIndex;
+	data->recentOffset = data->recentSelected;
+	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
+			shrinking ? "yes" : "no");
 	return true;
 }
 
@@ -1009,7 +1034,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	SbUiCursesData * const data = renderer->data;
 	int rows, cols;
 #ifdef SIGNALBOX_PDCURSESMOD
-	if (is_termresized ()) SbUiCursesResize ();
+	if (is_termresized ()) SbUiCursesResize (data);
 #endif
 	getmaxyx (stdscr, rows, cols);
 	erase ();
@@ -1284,7 +1309,7 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		if (key == KEY_RESIZE) {
 			delwin (window);
 			window = NULL;
-			if (SbUiCursesResize ()) SbUiCursesFrame (renderer, model);
+			if (SbUiCursesResize (data)) SbUiCursesFrame (renderer, model);
 			continue;
 		}
 		if (key == 27) {
@@ -1393,7 +1418,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (key == KEY_RESIZE) {
 			delwin (window);
 			window = NULL;
-			if (SbUiCursesResize ()) SbUiCursesFrame (renderer, model);
+			if (SbUiCursesResize (data)) SbUiCursesFrame (renderer, model);
 			continue;
 		}
 		if (key == 27) {
@@ -1444,7 +1469,7 @@ bool SbUiRendererConfirm (SbUiRenderer *renderer, const SbUiModel *model,
 		mvwaddnstr (window, 6, 2,
 				"y/n or arrows; Enter confirms selection; Esc cancels", getmaxx (window) - 4);
 		wrefresh (window);
-		const int key = wgetch (window);
+		const int key = SbUiCursesReadKey (window);
 		delwin (window);
 		if (key == 27 || key == 'n' || key == 'N') return false;
 		if (key == 'y' || key == 'Y') return true;
@@ -1481,7 +1506,7 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		wrefresh (window);
-		const int key = wgetch (window);
+		const int key = SbUiCursesReadKey (window);
 		delwin (window);
 		if (key == 27) return -1;
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
@@ -1551,7 +1576,7 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 			visible++;
 		}
 		wrefresh (window);
-		const int key = wgetch (window);
+		const int key = SbUiCursesReadKey (window);
 		delwin (window);
 		if (key == 27) return -1;
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
@@ -1611,7 +1636,7 @@ void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
 			SbUiCursesWPut (window, 5 + (int) i, 2, lineWidth,
 					lines[offset + i]);
 		wrefresh (window);
-		const int key = wgetch (window);
+		const int key = SbUiCursesReadKey (window);
 		delwin (window);
 		if (key == 27 || key == '\n' || key == '\r' || key == KEY_ENTER) {
 			SbUiCursesFrame (renderer, model);
@@ -1684,7 +1709,7 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		wrefresh (window);
-		const int key = wgetch (window);
+		const int key = SbUiCursesReadKey (window);
 		delwin (window);
 		if (key == 27) return false;
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
@@ -1724,10 +1749,10 @@ static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
 				strlen (filter) + 1 < sizeof (filter) ? "_" : "");
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
-		const int key = getch ();
+		const int key = SbUiCursesReadKey (stdscr);
 		if (key == ERR) continue;
 		if (key == KEY_RESIZE) {
-			SbUiCursesResize ();
+			SbUiCursesResize (data);
 			continue;
 		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) break;
@@ -1781,10 +1806,10 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 		snprintf (prompt, sizeof (prompt), "Jump to station #: %s_", digits);
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
-		const int key = getch ();
+		const int key = SbUiCursesReadKey (stdscr);
 		if (key == ERR) continue;
 		if (key == KEY_RESIZE) {
-			SbUiCursesResize ();
+			SbUiCursesResize (data);
 			continue;
 		}
 		if (key == 27) {
@@ -1796,7 +1821,7 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 			size_t sequenceLength = 0;
 			wtimeout (stdscr, 35);
 			while (sequenceLength < sizeof (sequence) / sizeof (sequence[0])) {
-				const int next = getch ();
+				const int next = SbUiCursesReadKey (stdscr);
 				if (next == ERR) break;
 				sequence[sequenceLength++] = next;
 				char digit;
@@ -1873,14 +1898,14 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
-	const int key = getch ();
+	const int key = SbUiCursesReadKey (stdscr);
 	if (key == ERR) {
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key == KEY_RESIZE) {
 		tuiDebugPrint ("resize\n");
-		SbUiCursesResize ();
+		SbUiCursesResize (data);
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
@@ -2244,6 +2269,7 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	noecho ();
 	keypad (stdscr, TRUE);
 	wtimeout (stdscr, settings->visualizerSpectrum ? 80 : 1000);
+	getmaxyx (stdscr, data->screenRows, data->screenCols);
 	(void) curs_set (0);
 	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
 		data->colors = SbUiCursesInitPalette (data, theme);

@@ -494,7 +494,9 @@ and output-free headless startup without a TTY.
 - **Native startup:** the login form edits email and masked password fields and
   a secure-remember checkbox inside curses. Tab/Shift-Tab or arrows move fields,
   Space toggles remembering, Enter submits, and Esc cancels with terminal state
-  restored. A rejected stored secret offers one explicit retry, editing,
+  restored. While it is open, the login modal owns input, so global bindings
+  such as Help are intentionally not dispatched. A rejected stored secret offers
+  one explicit retry, editing,
   forgetting that exact service/account entry, or cancellation.
 - **Credential availability:** macOS uses Keychain. Other platforms currently
   explain that secure storage is unavailable and continue session-only; there
