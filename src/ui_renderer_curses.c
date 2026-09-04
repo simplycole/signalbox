@@ -373,6 +373,9 @@ static void SbUiCursesOpenKeyLog (void) {
 
 static void SbUiCursesCloseKeyLog (void) {
 	if (SbUiCursesKeyLog != NULL) {
+#ifdef _WIN32
+		SbTerminalInputDiagnostic (NULL);
+#endif
 		fclose (SbUiCursesKeyLog);
 		SbUiCursesKeyLog = NULL;
 	}
@@ -434,12 +437,7 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 		const int timeoutMs) {
 #ifdef _WIN32
 	(void) window;
-	FILE *debugOutput = NULL;
-#ifdef SIGNALBOX_PDCURSESMOD
-	if (context == SB_TUI_INPUT_MAIN || context == SB_TUI_INPUT_HELP)
-		debugOutput = SbUiCursesKeyLog;
-#endif
-	const SbTerminalInputEvent event = SbTerminalReadInput (timeoutMs, debugOutput);
+	const SbTerminalInputEvent event = SbTerminalReadInput (timeoutMs);
 	const SbTuiInput input = {event.status, event.key, event.key, event};
 #else
 	(void) timeoutMs;

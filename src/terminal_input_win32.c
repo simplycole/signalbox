@@ -11,6 +11,7 @@ typedef struct {
 } SbTerminalInputState;
 
 static SbTerminalInputState inputState;
+static FILE *inputDebugOutput;
 
 static SbTerminalInputEvent SbTerminalNoInput (void) {
 	return (SbTerminalInputEvent) {.status = ERR, .key = ERR};
@@ -83,8 +84,8 @@ static void SbTerminalInputTrace (FILE * const output, const char * const action
 	fflush (output);
 }
 
-SbTerminalInputEvent SbTerminalReadInput (const int timeoutMs,
-		FILE * const debugOutput) {
+SbTerminalInputEvent SbTerminalReadInput (int timeoutMs) {
+	FILE * const debugOutput = inputDebugOutput;
 	if (inputState.remaining > 0) {
 		inputState.remaining--;
 		return inputState.event;
@@ -164,6 +165,8 @@ SbTerminalInputEvent SbTerminalReadInput (const int timeoutMs,
 }
 
 void SbTerminalInputDiagnostic (FILE * const output) {
+	inputDebugOutput = output;
+	if (output == NULL) return;
 	HANDLE const input = GetStdHandle (STD_INPUT_HANDLE);
 	DWORD mode = 0, pending = 0;
 	INPUT_RECORD record;

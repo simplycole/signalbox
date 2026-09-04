@@ -27,6 +27,7 @@ bool SbTerminalInputInit (void);
 /* timeoutMs is -1 for blocking, zero for polling, or a bounded wait. */
 SbTerminalInputEvent SbTerminalReadInput (int timeoutMs);
 
-/* Writes handle/mode capabilities without consuming an input record. */
+/* Registers the diagnostic stream and writes handle/mode capabilities without
+ * consuming an input record. Pass NULL to unregister the stream. */
 void SbTerminalInputDiagnostic (FILE *output);
 #endif
