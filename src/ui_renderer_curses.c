@@ -613,21 +613,30 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 	const size_t bandCount = wide ? SB_SPECTRUM_BANDS : SB_SPECTRUM_COMPACT_BANDS;
 	const int bandPitch = wide ? 6 : 5;
 	const int barWidth = 3;
-	const int displayWidth = bandPitch * (int) bandCount -
-			(bandPitch - barWidth);
-	const int origin = x + (width > displayWidth ?
-			(width - displayWidth < 12 ? (width - displayWidth) / 2 : 6) : 0);
 	const char *const *labels = wide ? wideLabels : compactLabels;
 	int labelX[SB_SPECTRUM_BANDS];
 	int labelWidth[SB_SPECTRUM_BANDS];
+	int labelOffset[SB_SPECTRUM_BANDS];
+	int visualLeft = 0;
+	int visualRight = 0;
 	for (size_t band = 0; band < bandCount; band++) {
-		const int barX = origin + (int) band * bandPitch;
+		const int barX = (int) band * bandPitch;
 		labelWidth[band] = SbUiCursesTextWidth (labels[band]);
 		const int barCenter = 2 * barX + barWidth;
 		const int idealLeft = barCenter - labelWidth[band];
-		labelX[band] = idealLeft / 2;
+		labelOffset[band] = idealLeft / 2;
 		/* Resolve half-cell ties to the right instead of leaving a left bias. */
-		if (idealLeft > 0 && idealLeft % 2 != 0) labelX[band]++;
+		if (idealLeft > 0 && idealLeft % 2 != 0) labelOffset[band]++;
+		if (barX < visualLeft) visualLeft = barX;
+		if (labelOffset[band] < visualLeft) visualLeft = labelOffset[band];
+		if (barX + barWidth > visualRight) visualRight = barX + barWidth;
+		if (labelOffset[band] + labelWidth[band] > visualRight)
+			visualRight = labelOffset[band] + labelWidth[band];
+	}
+	const int spectrumTotalWidth = visualRight - visualLeft;
+	const int origin = x + (width - spectrumTotalWidth) / 2 - visualLeft;
+	for (size_t band = 0; band < bandCount; band++) {
+		labelX[band] = origin + labelOffset[band];
 		if (labelX[band] < x) labelX[band] = x;
 		if (labelX[band] + labelWidth[band] > x + width)
 			labelX[band] = x + width - labelWidth[band];
