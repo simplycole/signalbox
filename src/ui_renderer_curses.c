@@ -302,15 +302,22 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 #endif
 }
 
-static void SbUiCursesResize (void) {
+static bool SbUiCursesResize (void) {
 #ifdef SIGNALBOX_PDCURSESMOD
 	/* PDCurses requires the application to adopt a user resize before stdscr
-	 * and curscr dimensions change.  Zeroes mean "use the current terminal". */
-	if (resize_term (0, 0) == ERR)
+	 * and curscr dimensions change.  Zeroes mean "use the current terminal".
+	 * A resize can leave more than one KEY_RESIZE in the input queue; after the
+	 * first call SP->resized is false, so do not force another physical clear. */
+	if (!is_termresized ()) return false;
+	if (resize_term (0, 0) == ERR) {
 		tuiDebugPrint ("resize_term failed\n");
+		return false;
+	}
 #endif
+	werase (stdscr);
 	clearok (stdscr, TRUE);
 	touchwin (stdscr);
+	return true;
 }
 
 static void SbUiCursesTime (char *dest, const size_t size,
@@ -1246,10 +1253,11 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 	size_t cursor = length;
 	input[length] = L'\0';
 	(void) curs_set (1);
+	SbUiCursesFrame (renderer, model);
+	WINDOW *window = NULL;
 	for (;;) {
-		SbUiCursesFrame (renderer, model);
 		SbUiCursesData * const data = renderer->data;
-		WINDOW *window = SbUiCursesModal (data, title, prompt, 8);
+		if (window == NULL) window = SbUiCursesModal (data, title, prompt, 8);
 		if (window == NULL) continue;
 		int height, width;
 		getmaxyx (window, height, width);
@@ -1268,12 +1276,19 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
 		const int cursorCells = SbUiCursesWideWidth (&input[start], cursor - start);
 		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
-		wrefresh (window);
+		wnoutrefresh (window);
+		doupdate ();
 		wint_t key;
 		const int result = wget_wch (window, &key);
-		delwin (window);
 		if (result == ERR) continue;
+		if (key == KEY_RESIZE) {
+			delwin (window);
+			window = NULL;
+			if (SbUiCursesResize ()) SbUiCursesFrame (renderer, model);
+			continue;
+		}
 		if (key == 27) {
+			delwin (window);
 			(void) curs_set (0);
 			SbUiCursesFrame (renderer, model);
 			return false;
@@ -1282,6 +1297,7 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 			const size_t converted = SbUiCursesWideToUtf8 (buffer, size, input);
 			if (converted == (size_t) -1) buffer[0] = '\0';
 			else buffer[converted] = '\0';
+			delwin (window);
 			(void) curs_set (0);
 			SbUiCursesFrame (renderer, model);
 			return buffer[0] != '\0';
@@ -1318,19 +1334,29 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 	password[0] = '\0';
 	int field = username[0] == '\0' ? 0 : 1;
 	(void) curs_set (1);
+	SbUiCursesFrame (renderer, model);
+	WINDOW *window = NULL;
 	for (;;) {
-		SbUiCursesFrame (renderer, model);
 		SbUiCursesData * const data = renderer->data;
-		WINDOW *window = SbUiCursesModal (data, "SIGNALBOX LOGIN",
+		if (window == NULL) window = SbUiCursesModal (data, "SIGNALBOX LOGIN",
 				error != NULL ? error : "Sign in to Pandora", 12);
 		if (window == NULL) continue;
 		const int width = getmaxx (window);
+		/* Redrawing this small window updates only changed cells.  In particular,
+		 * keep stdscr out of the per-keystroke refresh path on PDCurses VT. */
+		werase (window);
+		wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0);
+		SbUiCursesBox (window);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_BORDER, 0);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
+		SbUiCursesWPut (window, 1, 2, width - 4, "SIGNALBOX LOGIN");
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
 		if (error != NULL) {
-			mvwhline (window, 3, 2, ' ', width - 4);
 			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ERROR, A_BOLD);
 			SbUiCursesWPut (window, 3, 2, width - 4, error);
 			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ERROR, A_BOLD);
-		}
+		} else SbUiCursesWPut (window, 3, 2, width - 4, "Sign in to Pandora");
 		const char *labels[] = {"Pandora email:", "Password:",
 				"Remember securely:"};
 		for (int i = 0; i < 3; i++) {
@@ -1359,13 +1385,20 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (field == 0) wmove (window, 5, 22 + (int) userLen);
 		else if (field == 1) wmove (window, 6, 22 + (int) visiblePass);
 		else (void) curs_set (0);
-		wrefresh (window);
+		wnoutrefresh (window);
+		doupdate ();
 		wint_t key;
 		const int result = wget_wch (window, &key);
-		delwin (window);
 		if (result == ERR) continue;
+		if (key == KEY_RESIZE) {
+			delwin (window);
+			window = NULL;
+			if (SbUiCursesResize ()) SbUiCursesFrame (renderer, model);
+			continue;
+		}
 		if (key == 27) {
 			SbCredentialClear (password, passwordSize);
+			delwin (window);
 			(void) curs_set (0); SbUiCursesFrame (renderer, model); return false;
 		}
 		if (key == '\t' || key == KEY_DOWN) { field = (field + 1) % 3; continue; }
@@ -1374,6 +1407,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
 			if (field < 2) { field++; continue; }
 			if (userLen > 0 && passLen > 0) {
+				delwin (window);
 				(void) curs_set (0); SbUiCursesFrame (renderer, model); return true;
 			}
 			continue;
