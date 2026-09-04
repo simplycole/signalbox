@@ -343,9 +343,19 @@ static void BarMainHandleUserInput (BarApp_t *app) {
 		}
 	}
 	char buf[2];
+	/* On Windows the curses TUI owns the console through
+	 * SbTerminalReadInput().  BarReadline() uses fgets(stdin) there, which
+	 * would be a second console-input consumer and can take KEY_EVENT records
+	 * before the native adapter sees them.  Unix still needs this nonblocking
+	 * pass while the TUI is active so commands from the control FIFO work. */
+#ifdef _WIN32
+	if (!app->useTui && BarReadline (buf, sizeof (buf), NULL, &app->input,
+			BAR_RL_FULLRETURN | BAR_RL_NOECHO | BAR_RL_NOINT, 1) > 0) {
+#else
 	if (BarReadline (buf, sizeof (buf), NULL, &app->input,
 			BAR_RL_FULLRETURN | BAR_RL_NOECHO | BAR_RL_NOINT,
 			app->useTui ? 0 : 1) > 0) {
+#endif
 		const SbUiCommand command = BarUiCommandFromKey (&app->settings, buf[0]);
 		if (command != SB_UI_CMD_NONE) {
 			BarUiDispatchCommand (app, command, app->curStation, app->playlist,

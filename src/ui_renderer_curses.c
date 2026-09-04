@@ -437,6 +437,13 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 		const int timeoutMs) {
 #ifdef _WIN32
 	(void) window;
+	static unsigned long long inputSequence;
+	if (SbUiCursesKeyLog != NULL) {
+		fprintf (SbUiCursesKeyLog,
+				"[signalbox:input-call] seq=%llu context=%s timeout_ms=%d\n",
+				++inputSequence, SbUiCursesInputContextName (context), timeoutMs);
+		fflush (SbUiCursesKeyLog);
+	}
 	const SbTerminalInputEvent event = SbTerminalReadInput (timeoutMs);
 	const SbTuiInput input = {event.status, event.key, event.key, event};
 #else
@@ -1972,6 +1979,14 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 			continue;
 		}
 		if (key == 27) {
+#ifdef _WIN32
+			/* Native console input reports keypad keys as VK_* events.  Escape is
+			 * therefore always a standalone cancel key; never start the legacy
+			 * terminal escape-sequence continuation reader on Windows. */
+			tuiDebugPrint ("jump_input code=27 class=cancel length=%zu value=%s\n",
+					strlen (digits), digits);
+			break;
+#else
 			/* Some macOS terminals emit application-keypad digits as ESC O p..y,
 			 * even when the terminfo entry does not teach ncurses those strings.
 			 * Consume the whole sequence here so none of it can become a normal
@@ -2009,6 +2024,7 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 						sequenceLength, strlen (digits), digits);
 			}
 			continue;
+#endif
 		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
 			size_t target = 0;
