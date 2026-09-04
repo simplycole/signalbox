@@ -304,17 +304,108 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 #endif
 }
 
-static int SbUiCursesReadKey (WINDOW *window) {
+typedef enum {
+	SB_TUI_INPUT_LOGIN = 0,
+	SB_TUI_INPUT_MAIN,
+	SB_TUI_INPUT_MODAL,
+	SB_TUI_INPUT_NUMERIC_JUMP,
+	SB_TUI_INPUT_HELP,
+} SbTuiInputContext;
+
+typedef struct {
+	int status;
+	int rawKey;
+	int key;
+} SbTuiInput;
+
 #ifdef SIGNALBOX_PDCURSESMOD
-	/* The Windows build is both wide-character and forced UTF-8.  Keep input in
-	 * that API too: narrow wgetch() may expose the UTF-8 byte stream, while
-	 * wget_wch() returns ordinary keys as character codes and function keys as
-	 * KEY_* values. */
-	wint_t key;
-	return wget_wch (window, &key) == ERR ? ERR : (int) key;
-#else
-	return wgetch (window);
+static const char *SbUiCursesKeyName (const int key) {
+	switch (key) {
+		case KEY_UP: return "KEY_UP";
+		case KEY_DOWN: return "KEY_DOWN";
+		case KEY_LEFT: return "KEY_LEFT";
+		case KEY_RIGHT: return "KEY_RIGHT";
+		case KEY_BTAB: return "KEY_BTAB";
+		case KEY_PPAGE: return "KEY_PPAGE";
+		case KEY_NPAGE: return "KEY_NPAGE";
+		case KEY_HOME: return "KEY_HOME";
+		case KEY_END: return "KEY_END";
+		case KEY_ENTER: return "KEY_ENTER";
+		case KEY_RESIZE: return "KEY_RESIZE";
+		case KEY_BACKSPACE: return "KEY_BACKSPACE";
+		case KEY_DC: return "KEY_DC";
+		default: return "KEY_UNKNOWN";
+	}
+}
+
+static const char *SbUiCursesInputContextName (const SbTuiInputContext context) {
+	switch (context) {
+		case SB_TUI_INPUT_LOGIN: return "login";
+		case SB_TUI_INPUT_MAIN: return "main";
+		case SB_TUI_INPUT_MODAL: return "modal";
+		case SB_TUI_INPUT_NUMERIC_JUMP: return "numeric_jump";
+		case SB_TUI_INPUT_HELP: return "help";
+	}
+	return "unknown";
+}
+
+static bool SbUiCursesDebugKeys (void) {
+	const char * const value = getenv ("SIGNALBOX_DEBUG_KEYS");
+	return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static void SbUiCursesDebugKey (const SbTuiInput input,
+		const SbTuiInputContext context, const bool passwordActive) {
+	if (!SbUiCursesDebugKeys ()) return;
+	const char *status = input.status == OK ? "OK" :
+			(input.status == KEY_CODE_YES ? "KEY_CODE_YES" : "ERR");
+	fputs ("[signalbox:key] function=wget_wch ", stderr);
+	if (passwordActive && input.status == OK) {
+		fprintf (stderr, "status=%s ordinary_character_received context=%s\n",
+				status, SbUiCursesInputContextName (context));
+	} else if (input.status == ERR) {
+		fprintf (stderr, "status=%s context=%s normalized=ERR\n", status,
+				SbUiCursesInputContextName (context));
+	} else if (input.status == KEY_CODE_YES) {
+		fprintf (stderr,
+				"status=%s raw=%d hex=0x%X special=%s context=%s normalized=%d\n",
+				status, input.rawKey, (unsigned int) input.rawKey,
+				SbUiCursesKeyName (input.rawKey),
+				SbUiCursesInputContextName (context), input.key);
+	} else if (input.rawKey >= 0x20 && input.rawKey <= 0x7e) {
+		fprintf (stderr,
+				"status=%s raw=%d hex=0x%X codepoint=U+%04X printable='%c' context=%s normalized=%d\n",
+				status, input.rawKey, (unsigned int) input.rawKey,
+				(unsigned int) input.rawKey, input.rawKey,
+				SbUiCursesInputContextName (context), input.key);
+	} else {
+		fprintf (stderr,
+				"status=%s raw=%d hex=0x%X codepoint=U+%04X context=%s normalized=%d\n",
+				status, input.rawKey, (unsigned int) input.rawKey,
+				(unsigned int) input.rawKey,
+				SbUiCursesInputContextName (context), input.key);
+	}
+	fflush (stderr);
+}
 #endif
+
+static SbTuiInput SbUiCursesReadKey (WINDOW *window,
+		const SbTuiInputContext context, const bool passwordActive) {
+	/* Keep the status and output value separate.  wget_wch() returns a status;
+	 * the logical key is written through its output argument. */
+	wint_t key = 0;
+	const int status = wget_wch (window, &key);
+	const int rawKey = status == ERR ? ERR : (int) key;
+	/* The shared renderer treats all three common Enter forms identically. */
+	const int normalized = rawKey == '\r' || rawKey == KEY_ENTER ? '\n' : rawKey;
+	const SbTuiInput input = {status, rawKey, normalized};
+#ifdef SIGNALBOX_PDCURSESMOD
+	SbUiCursesDebugKey (input, context, passwordActive);
+#else
+	(void) context;
+	(void) passwordActive;
+#endif
+	return input;
 }
 
 static bool SbUiCursesResize (SbUiCursesData *data) {
@@ -332,14 +423,19 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	const bool shrinking = rows < data->screenRows || cols < data->screenCols;
 	data->screenRows = rows;
 	data->screenCols = cols;
-	/* wclear marks the next refresh as a complete physical repaint.  This is
-	 * required on a shrink, where cells from the old larger virtual screen can
-	 * otherwise survive inside the new terminal bounds. */
-	wclear (stdscr);
-	clearok (stdscr, TRUE);
-	clearok (curscr, TRUE);
+	if (shrinking) {
+		/* The virtual screen can retain cells from the old, larger geometry.
+		 * Force the next update to discard both virtual and physical state. */
+		erase ();
+		clearok (stdscr, TRUE);
+		clearok (curscr, TRUE);
+		touchwin (stdscr);
+	} else {
+		erase ();
+	}
 	data->scrollOffset = data->selectedIndex;
 	data->recentOffset = data->recentSelected;
+	data->helpOffset = 0;
 	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
 			shrinking ? "yes" : "no");
 	return true;
@@ -1044,16 +1140,16 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 
 	if (rows < 15 || cols < 50) {
 		data->focus = SB_TUI_FOCUS_STATIONS;
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_BORDER, 0);
-		SbUiCursesBox (stdscr);
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_BORDER, 0);
-		SbUiCursesAttrOn (data, SB_TUI_COLOR_TITLE, A_BOLD);
-		SbUiCursesPut (2, 3, cols - 6, "SIGNALBOX");
-		SbUiCursesAttrOff (data, SB_TUI_COLOR_TITLE, A_BOLD);
-		SbUiCursesPut (5, 3, cols - 6,
-				"Terminal too small for Signalbox TUI");
-		mvprintw (7, 3, "Need 50x15; current size is %dx%d", cols, rows);
-		SbUiCursesFooterDraw (data, rows - 2, 3, cols - 6, footer);
+		const int left = cols > 6 ? 3 : 0;
+		const int width = cols > left ? cols - left : 0;
+		if (rows > 0) {
+			SbUiCursesAttrOn (data, SB_TUI_COLOR_TITLE, A_BOLD);
+			SbUiCursesPut (0, left, width, "Terminal too small");
+			SbUiCursesAttrOff (data, SB_TUI_COLOR_TITLE, A_BOLD);
+		}
+		if (rows > 1)
+			SbUiCursesPut (1, left, width, "Resize to at least 50x15");
+		if (rows > 2) SbUiCursesPut (2, left, width, "q quit");
 		refresh ();
 		return;
 	}
@@ -1303,8 +1399,10 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
 		wnoutrefresh (window);
 		doupdate ();
-		wint_t key;
-		const int result = wget_wch (window, &key);
+		const SbTuiInput read = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_MODAL, false);
+		const int result = read.status;
+		const int key = read.key;
 		if (result == ERR) continue;
 		if (key == KEY_RESIZE) {
 			delwin (window);
@@ -1412,8 +1510,10 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		else (void) curs_set (0);
 		wnoutrefresh (window);
 		doupdate ();
-		wint_t key;
-		const int result = wget_wch (window, &key);
+		const SbTuiInput read = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_LOGIN, field == 1);
+		const int result = read.status;
+		const int key = read.key;
 		if (result == ERR) continue;
 		if (key == KEY_RESIZE) {
 			delwin (window);
@@ -1469,7 +1569,8 @@ bool SbUiRendererConfirm (SbUiRenderer *renderer, const SbUiModel *model,
 		mvwaddnstr (window, 6, 2,
 				"y/n or arrows; Enter confirms selection; Esc cancels", getmaxx (window) - 4);
 		wrefresh (window);
-		const int key = SbUiCursesReadKey (window);
+		const int key = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_MODAL, false).key;
 		delwin (window);
 		if (key == 27 || key == 'n' || key == 'N') return false;
 		if (key == 'y' || key == 'Y') return true;
@@ -1506,7 +1607,8 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		wrefresh (window);
-		const int key = SbUiCursesReadKey (window);
+		const int key = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_MODAL, false).key;
 		delwin (window);
 		if (key == 27) return -1;
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
@@ -1576,7 +1678,8 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 			visible++;
 		}
 		wrefresh (window);
-		const int key = SbUiCursesReadKey (window);
+		const int key = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_MODAL, false).key;
 		delwin (window);
 		if (key == 27) return -1;
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
@@ -1636,7 +1739,8 @@ void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
 			SbUiCursesWPut (window, 5 + (int) i, 2, lineWidth,
 					lines[offset + i]);
 		wrefresh (window);
-		const int key = SbUiCursesReadKey (window);
+		const int key = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_MODAL, false).key;
 		delwin (window);
 		if (key == 27 || key == '\n' || key == '\r' || key == KEY_ENTER) {
 			SbUiCursesFrame (renderer, model);
@@ -1709,7 +1813,8 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 					SB_TUI_COLOR_SELECTED, A_REVERSE);
 		}
 		wrefresh (window);
-		const int key = SbUiCursesReadKey (window);
+		const int key = SbUiCursesReadKey (window,
+				SB_TUI_INPUT_MODAL, false).key;
 		delwin (window);
 		if (key == 27) return false;
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
@@ -1749,7 +1854,8 @@ static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
 				strlen (filter) + 1 < sizeof (filter) ? "_" : "");
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
-		const int key = SbUiCursesReadKey (stdscr);
+		const int key = SbUiCursesReadKey (stdscr,
+				SB_TUI_INPUT_MODAL, false).key;
 		if (key == ERR) continue;
 		if (key == KEY_RESIZE) {
 			SbUiCursesResize (data);
@@ -1806,7 +1912,8 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 		snprintf (prompt, sizeof (prompt), "Jump to station #: %s_", digits);
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
-		const int key = SbUiCursesReadKey (stdscr);
+		const int key = SbUiCursesReadKey (stdscr,
+				SB_TUI_INPUT_NUMERIC_JUMP, false).key;
 		if (key == ERR) continue;
 		if (key == KEY_RESIZE) {
 			SbUiCursesResize (data);
@@ -1821,7 +1928,8 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 			size_t sequenceLength = 0;
 			wtimeout (stdscr, 35);
 			while (sequenceLength < sizeof (sequence) / sizeof (sequence[0])) {
-				const int next = SbUiCursesReadKey (stdscr);
+				const int next = SbUiCursesReadKey (stdscr,
+						SB_TUI_INPUT_NUMERIC_JUMP, false).key;
 				if (next == ERR) break;
 				sequence[sequenceLength++] = next;
 				char digit;
@@ -1898,7 +2006,8 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
-	const int key = SbUiCursesReadKey (stdscr);
+	const int key = SbUiCursesReadKey (stdscr, data->helpVisible ?
+			SB_TUI_INPUT_HELP : SB_TUI_INPUT_MAIN, false).key;
 	if (key == ERR) {
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
