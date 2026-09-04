@@ -39,6 +39,13 @@ PDCursesMod supplies keypad translation on Windows; the xterm application
 keypad escape fallback remains isolated to numeric-jump mode and harmless when
 PDCurses returns normalized digits.
 
+PDCursesMod 4.5.4's VT input parser waits for an initial byte but probes the
+remaining bytes of an escape sequence without an inter-byte wait.  The shared
+renderer therefore performs the existing bounded input wait itself on Windows
+and allows a 20 ms enqueue interval before calling `wget_wch`.  This keeps
+periodic redraws responsive while preventing Windows Terminal sequences from
+being split into discarded prefixes and printable tail characters.
+
 Windows Terminal runtime validation is still required for live resize,
 Shift+Tab/keypad mappings, all themes and `NO_COLOR`, Unicode glyph fallback,
 login-field editing, and hard terminal restoration. W2 does not add Windows

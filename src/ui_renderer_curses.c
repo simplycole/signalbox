@@ -410,10 +410,32 @@ static void SbUiCursesDebugKey (const SbTuiInput input,
 
 static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 		const SbTuiInputContext context, const bool passwordActive) {
+#ifdef _WIN32
+	/* PDCursesMod 4.5.4's VT port waits for the first byte in wget_wch(),
+	 * but reads the rest of an ESC sequence with immediate _kbhit() checks.
+	 * Do the bounded first-byte wait here, then give Windows Terminal one
+	 * short interval to enqueue the complete sequence before PDC parses it. */
+	const int delay = wgetdelay (window);
+	int waited = 0;
+	while (!PDC_check_key () && (delay <= 0 || waited < delay)) {
+		if (is_nodelay (window)) break;
+		const int interval = delay > 0 && delay - waited < 10 ?
+				delay - waited : 10;
+		napms (interval);
+		waited += interval;
+	}
+	const bool keyReady = PDC_check_key ();
+	if (keyReady) napms (20);
+#endif
 	/* Keep the status and output value separate.  wget_wch() returns a status;
 	 * the logical key is written through its output argument. */
 	wint_t key = 0;
+#ifdef _WIN32
+	/* Do not repeat a timed wait after the bounded poll above expires. */
+	const int status = keyReady ? wget_wch (window, &key) : ERR;
+#else
 	const int status = wget_wch (window, &key);
+#endif
 	const int rawKey = status == ERR ? ERR : (int) key;
 	/* The shared renderer treats all three common Enter forms identically. */
 	const int normalized = rawKey == '\r' || rawKey == KEY_ENTER ? '\n' : rawKey;
