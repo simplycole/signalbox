@@ -197,6 +197,36 @@ response bodies. Review the diagnostic log before sharing it anyway.
   right-channel-only input, mixed tones, 48 kHz remapping, silence decay, and
   twelve-to-eight aggregation pass using approximate dominant buckets.
 
+## G2. macOS development signing / Keychain
+
+Frequent unsigned development rebuilds receive a new ad-hoc code-directory
+hash. Keychain therefore cannot recognize the rebuilt executable as the same
+trusted application, so an earlier **Always Allow** decision can prompt again.
+Ad-hoc signing (`codesign --sign -`) remains content-bound and does not provide
+a stable identity across rebuilds.
+
+Developers who have a trusted Apple code-signing identity can opt in without
+changing the default build:
+
+```
+gmake clean
+gmake MACOS_CODESIGN_IDENTITY="Apple Development: Name (TEAMID)"
+```
+
+The build signs `signalbox` after linking with the stable identifier
+`org.signalbox.signalbox`. To override that identifier, set
+`MACOS_CODESIGN_IDENTIFIER` explicitly and then keep it unchanged. Confirm the
+result with `codesign -dv --verbose=4 ./signalbox` and
+`codesign -dr - ./signalbox`; subsequent builds must use the same certificate
+and identifier.
+
+An existing Keychain item may retain the old executable's ACL. First try one
+**Always Allow** after enabling stable signing. If prompts still recur, run
+`./signalbox --forget-credentials` once and save the credential again while
+running the signed build. This migration is intentionally manual: the build
+never deletes credentials or broadens Keychain access. Never use an ACL that
+allows every application.
+
 ## H. History/upcoming
 
 - **Action:** Accumulate more history than fits in RECENT, including tracks with

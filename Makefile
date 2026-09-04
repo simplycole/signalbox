@@ -15,6 +15,8 @@ INCDIR:=${PREFIX}/include
 MANDIR:=${PREFIX}/share/man
 DYNLINK:=0
 CFLAGS?=-O2 -DNDEBUG
+MACOS_CODESIGN_IDENTITY?=
+MACOS_CODESIGN_IDENTIFIER?=org.signalbox.signalbox
 
 ifeq (${CC},cc)
 	ifeq (${WINDOWS},1)
@@ -115,15 +117,27 @@ ifeq (${V},1)
 	SILENTECHO:=@true
 endif
 
+ifeq (${HOST_OS},Darwin)
+ifneq ($(strip ${MACOS_CODESIGN_IDENTITY}),)
+define MACOS_CODESIGN
+	${SILENTECHO} "  SIGN  $@"
+	${SILENTCMD}codesign --force --sign "${MACOS_CODESIGN_IDENTITY}" \
+			--identifier "${MACOS_CODESIGN_IDENTIFIER}" $@
+endef
+endif
+endif
+
 # build signalbox
 ifeq (${DYNLINK},1)
 ${PROGRAM}: ${PIANOBAR_OBJ} libpiano.so.0
 	${SILENTECHO} "  LINK  $@"
 	${SILENTCMD}${CC} -o $@ ${PIANOBAR_OBJ} -L. -lpiano ${ALL_LDFLAGS}
+	$(MACOS_CODESIGN)
 else
 ${PROGRAM}: ${PIANOBAR_OBJ} ${LIBPIANO_OBJ}
 	${SILENTECHO} "  LINK  $@"
 	${SILENTCMD}${CC} -o $@ ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} ${ALL_LDFLAGS}
+	$(MACOS_CODESIGN)
 endif
 
 # build shared and static libpiano
