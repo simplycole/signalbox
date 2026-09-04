@@ -634,7 +634,9 @@ static void SbUiCursesSpectrum (const SbUiCursesData *data,
 			visualRight = labelOffset[band] + labelWidth[band];
 	}
 	const int spectrumTotalWidth = visualRight - visualLeft;
-	const int origin = x + (width - spectrumTotalWidth) / 2 - visualLeft;
+	const int opticalAdjustment = wide ? 2 : 0;
+	const int origin = x + (width - spectrumTotalWidth) / 2 - visualLeft +
+			opticalAdjustment;
 	for (size_t band = 0; band < bandCount; band++) {
 		labelX[band] = origin + labelOffset[band];
 		if (labelX[band] < x) labelX[band] = x;
