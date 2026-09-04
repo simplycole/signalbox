@@ -18,6 +18,9 @@
 #ifdef SIGNALBOX_PDCURSESMOD
 #include <windows.h>
 #include <pdcurses.h>
+#if !defined(PDC_WIDE) || !defined(PDC_FORCE_UTF8)
+#error "Signalbox requires PDCursesMod built with WIDE=Y and UTF8=Y"
+#endif
 #else
 #include <curses.h>
 #endif
@@ -162,9 +165,9 @@ static size_t SbUiCursesWideToUtf8 (char *dest, const size_t destSize,
 
 static void SbUiCursesBox (WINDOW *window) {
 #ifdef SIGNALBOX_PDCURSESMOD
-	(void) wborder_set (window, WACS_VLINE, WACS_VLINE, WACS_HLINE,
-			WACS_HLINE, WACS_ULCORNER, WACS_URCORNER, WACS_LLCORNER,
-			WACS_LRCORNER);
+	/* Keep W2 structure ASCII.  Mixing WACS drawing and text APIs on the VT
+	 * backend produced UTF-8 bytes as individual screen cells. */
+	(void) wborder (window, '|', '|', '-', '-', '+', '+', '+', '+');
 #else
 	(void) box (window, 0, 0);
 #endif
@@ -173,7 +176,7 @@ static void SbUiCursesBox (WINDOW *window) {
 static void SbUiCursesHLine (WINDOW *window, const int y, const int x,
 		const int length) {
 #ifdef SIGNALBOX_PDCURSESMOD
-	(void) mvwhline_set (window, y, x, WACS_HLINE, length);
+	(void) mvwhline (window, y, x, '-', length);
 #else
 	(void) mvwhline (window, y, x, ACS_HLINE, length);
 #endif
@@ -182,7 +185,7 @@ static void SbUiCursesHLine (WINDOW *window, const int y, const int x,
 static void SbUiCursesVLine (WINDOW *window, const int y, const int x,
 		const int length) {
 #ifdef SIGNALBOX_PDCURSESMOD
-	(void) mvwvline_set (window, y, x, WACS_VLINE, length);
+	(void) mvwvline (window, y, x, '|', length);
 #else
 	(void) mvwvline (window, y, x, ACS_VLINE, length);
 #endif
@@ -250,7 +253,15 @@ static void SbUiCursesPut (const int y, const int x, const int width,
 		wide[keep++] = L'\u2026';
 	}
 	wide[keep] = L'\0';
+#ifdef SIGNALBOX_PDCURSESMOD
+	char utf8[sizeof (wide) * 4];
+	if (SbUiCursesWideToUtf8 (utf8, sizeof (utf8), wide) == (size_t) -1)
+		mvaddnstr (y, x, "--", width);
+	else
+		mvaddstr (y, x, utf8);
+#else
 	mvaddnwstr (y, x, wide, (int) keep);
+#endif
 }
 
 static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
@@ -280,7 +291,26 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 		wide[keep++] = L'\u2026';
 	}
 	wide[keep] = L'\0';
+#ifdef SIGNALBOX_PDCURSESMOD
+	char utf8[sizeof (wide) * 4];
+	if (SbUiCursesWideToUtf8 (utf8, sizeof (utf8), wide) == (size_t) -1)
+		mvwaddnstr (window, y, x, "--", width);
+	else
+		mvwaddstr (window, y, x, utf8);
+#else
 	mvwaddnwstr (window, y, x, wide, (int) keep);
+#endif
+}
+
+static void SbUiCursesResize (void) {
+#ifdef SIGNALBOX_PDCURSESMOD
+	/* PDCurses requires the application to adopt a user resize before stdscr
+	 * and curscr dimensions change.  Zeroes mean "use the current terminal". */
+	if (resize_term (0, 0) == ERR)
+		tuiDebugPrint ("resize_term failed\n");
+#endif
+	clearok (stdscr, TRUE);
+	touchwin (stdscr);
 }
 
 static void SbUiCursesTime (char *dest, const size_t size,
@@ -623,6 +653,7 @@ static const char *SbUiCursesActivity (const SbUiModel *model) {
 		case SB_UI_ACTIVITY_RECONNECTING: return "Reconnecting";
 		case SB_UI_ACTIVITY_ERROR: return "Error";
 		case SB_UI_ACTIVITY_WAITING_PLAYLIST: return "Waiting for playlist";
+		case SB_UI_ACTIVITY_AUDIO_UNAVAILABLE: return "Audio unavailable";
 		default: return SbUiCursesPlayback (model);
 	}
 }
@@ -970,6 +1001,9 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	int rows, cols;
+#ifdef SIGNALBOX_PDCURSESMOD
+	if (is_termresized ()) SbUiCursesResize ();
+#endif
 	getmaxyx (stdscr, rows, cols);
 	erase ();
 	attrset (SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
@@ -1659,7 +1693,7 @@ static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
 		const int key = getch ();
 		if (key == ERR) continue;
 		if (key == KEY_RESIZE) {
-			clearok (stdscr, TRUE);
+			SbUiCursesResize ();
 			continue;
 		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) break;
@@ -1716,7 +1750,7 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 		const int key = getch ();
 		if (key == ERR) continue;
 		if (key == KEY_RESIZE) {
-			clearok (stdscr, TRUE);
+			SbUiCursesResize ();
 			continue;
 		}
 		if (key == 27) {
@@ -1812,7 +1846,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	}
 	if (key == KEY_RESIZE) {
 		tuiDebugPrint ("resize\n");
-		clearok (stdscr, TRUE);
+		SbUiCursesResize ();
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}

@@ -513,6 +513,18 @@ static void BarMainLoop (BarApp_t *app) {
 				SB_UI_RENDER_STATION);
 	}
 
+#ifdef _WIN32
+	/* W2 ends at authenticated station browsing.  Starting the decoder/libao
+	 * thread would leave an ambiguous PLAYER_WAITING state; Windows audio is
+	 * deliberately a W3 concern. */
+	SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_AUDIO_UNAVAILABLE);
+	BarUiMsg (&app->settings, MSG_INFO,
+			"Windows audio playback is not available in W2.\n");
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+	while (!app->doQuit) BarMainHandleUserInput (app);
+	return;
+#endif
+
 	player_t * const player = &app->player;
 
 	while (!app->doQuit) {
