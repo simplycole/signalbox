@@ -17,6 +17,23 @@ static SbTerminalInputEvent SbTerminalNoInput (void) {
 	return (SbTerminalInputEvent) {.status = ERR, .key = ERR};
 }
 
+unsigned int SbTerminalDrainResizeEvents (void) {
+	HANDLE const input = GetStdHandle (STD_INPUT_HANDLE);
+	if (input == INVALID_HANDLE_VALUE || input == NULL) return 0;
+	unsigned int count = 0;
+	for (;;) {
+		INPUT_RECORD record;
+		DWORD peeked = 0, consumed = 0;
+		if (PeekConsoleInputW (input, &record, 1, &peeked) == 0 ||
+				peeked != 1 || record.EventType != WINDOW_BUFFER_SIZE_EVENT)
+			break;
+		if (ReadConsoleInputW (input, &record, 1, &consumed) == 0 ||
+				consumed != 1) break;
+		count++;
+	}
+	return count;
+}
+
 static int SbTerminalSpecialKey (const KEY_EVENT_RECORD * const key) {
 	switch (key->wVirtualKeyCode) {
 		case VK_UP: return KEY_UP;
@@ -129,17 +146,7 @@ SbTerminalInputEvent SbTerminalReadInput (int timeoutMs) {
 			 * other event types in order, but collapse an adjacent resize run into
 			 * one logical KEY_RESIZE.  The renderer then queries the active viewport,
 			 * which gives it the newest dimensions represented by the drained run. */
-			DWORD coalesced = 1;
-			for (;;) {
-				INPUT_RECORD next;
-				DWORD peeked = 0;
-				if (PeekConsoleInputW (input, &next, 1, &peeked) == 0 ||
-						peeked != 1 || next.EventType != WINDOW_BUFFER_SIZE_EVENT)
-					break;
-				if (ReadConsoleInputW (input, &record, 1, &count) == 0 ||
-						count != 1) break;
-				coalesced++;
-			}
+			const DWORD coalesced = 1 + SbTerminalDrainResizeEvents ();
 			SbTerminalInputTrace (debugOutput, "resize_coalesced", timeoutMs,
 					coalesced, remaining);
 			return (SbTerminalInputEvent) {

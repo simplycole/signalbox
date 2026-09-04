@@ -528,6 +528,20 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	 * is_termresized() while rendering.  Zero dimensions tell PDCurses to adopt
 	 * the console geometry without Signalbox forcing a new buffer/window size. */
 	int visibleRows = 0, visibleCols = 0;
+	int resizeResult;
+	unsigned int queuedResizes = 0;
+	do {
+		resizeResult = resize_term (0, 0);
+#ifdef _WIN32
+		/* A resize can arrive after the input adapter's first coalescing pass.
+		 * Adopt it before any pane is drawn, then rebuild only the final geometry. */
+		const unsigned int drained = SbTerminalDrainResizeEvents ();
+		queuedResizes += drained;
+		if (drained == 0) break;
+#else
+		break;
+#endif
+	} while (resizeResult != ERR);
 #ifdef _WIN32
 	CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
 	/* PDCurses WinCon owns an alternate screen buffer, so STD_OUTPUT_HANDLE can
@@ -541,7 +555,6 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	}
 	if (activeOutput != INVALID_HANDLE_VALUE) CloseHandle (activeOutput);
 #endif
-	const int resizeResult = resize_term (0, 0);
 #else
 	const int resizeResult = OK;
 #endif
@@ -557,15 +570,12 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	data->sizeState = nextState;
 	if (previousState == SB_TUI_SIZE_TOO_SMALL &&
 			nextState == SB_TUI_SIZE_NORMAL) data->recoveryPending = true;
-	if (shrinking || previousState != nextState) {
-		/* The virtual screen can retain cells from the old, larger geometry.
-		 * Force the next update to discard both virtual and physical state. */
-		erase ();
-		clearok (stdscr, TRUE);
-		touchwin (stdscr);
-	} else {
-		erase ();
-	}
+	/* Every adopted geometry invalidates the physical cell map.  This matters
+	 * while growing as well as shrinking: otherwise old borders can survive as
+	 * diagonal/stair-step remnants until a later complete refresh. */
+	erase ();
+	clearok (stdscr, TRUE);
+	touchwin (stdscr);
 	if (nextState == SB_TUI_SIZE_NORMAL) {
 		data->scrollOffset = data->selectedIndex;
 		data->recentOffset = data->recentSelected;
@@ -582,9 +592,10 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	}
 	SbUiCursesResizeDiagnostic (
 			"curses_cols=%d curses_rows=%d win32_visible_cols=%d "
-			"win32_visible_rows=%d resize_term=%s app_windows_recreated=no",
+			"win32_visible_rows=%d resize_term=%s queued=%u "
+			"app_windows_recreated=no",
 			cols, rows, visibleCols, visibleRows,
-			resizeResult == ERR ? "failed" : "ok");
+			resizeResult == ERR ? "failed" : "ok", queuedResizes);
 #endif
 	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
 			shrinking ? "yes" : "no");
