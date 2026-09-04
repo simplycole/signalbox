@@ -48,7 +48,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/ui_dispatch.c
 ifeq (${WINDOWS},1)
 	PIANOBAR_SRC+=${PIANOBAR_DIR}/terminal_win32.c \
-		${PIANOBAR_DIR}/ui_renderer_curses_win32.c \
+		${PIANOBAR_DIR}/ui_renderer_curses.c \
 		${PIANOBAR_DIR}/ui_readline_win32.c
 else
 	PIANOBAR_SRC+=${PIANOBAR_DIR}/terminal.c \
@@ -86,6 +86,17 @@ LIBAO_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ao)
 ifneq (${WINDOWS},1)
 	NCURSESW_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ncursesw)
 	NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
+else
+# MSYS2 packages PDCursesMod's wide/UTF-8 VT port separately from its
+# GUI and WinCon ports.  The VT library is intentional here.
+ifeq ($(wildcard ${MINGW_PREFIX}/include/pdcurses.h),)
+$(error Windows TUI requires PDCursesMod: pacman -S mingw-w64-ucrt-x86_64-pdcurses)
+endif
+ifeq ($(wildcard ${MINGW_PREFIX}/lib/libpdcurses_vt.a),)
+$(error Windows TUI requires PDCursesMod's VT library: pacman -S mingw-w64-ucrt-x86_64-pdcurses)
+endif
+PDCURSESMOD_CFLAGS?=-DSIGNALBOX_PDCURSESMOD
+PDCURSESMOD_LDFLAGS?=-lpdcurses_vt
 endif
 
 ifeq (${HOST_OS},Darwin)
@@ -99,11 +110,11 @@ endif
 ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
 			${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} \
 			${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} \
-			${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} ${CREDENTIAL_CFLAGS}
+			${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} ${PDCURSESMOD_CFLAGS} ${CREDENTIAL_CFLAGS}
 ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \
-			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS} ${CREDENTIAL_LDFLAGS}
+			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS} ${PDCURSESMOD_LDFLAGS} ${CREDENTIAL_LDFLAGS}
 ifeq (${WINDOWS},1)
 	ALL_CFLAGS+=-D_WIN32_WINNT=0x0600
 	ALL_LDFLAGS+=-lshell32 -lole32 -luuid

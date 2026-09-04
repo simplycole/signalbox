@@ -23,6 +23,12 @@ THE SOFTWARE.
 
 #pragma once
 
+#include <stdbool.h>
+
 void BarTermInit ();
 void BarTermRestore ();
 
+/* Native Windows uses console handles rather than TERM for TUI suitability. */
+#ifdef _WIN32
+bool BarTermIsInteractive (void);
+#endif

@@ -187,10 +187,10 @@ Near-term work is deliberately platform-first:
 5. Richer visualizer modes and optional terminal artwork
 6. Homebrew/Linux packaging and reproducible releases
 
-Native Windows is a roadmap target, not a currently supported build. The plan
-is a native ``.exe`` with a Windows terminal/audio adaptation and
-``CredRead``/``CredWrite``/``CredDelete`` behind the existing credential
-interface. See the detailed `roadmap`_, `TUI design`_, `architecture`_,
+Native Windows x64 builds are in active development. The development branch
+contains a shared-renderer Windows Terminal TUI using PDCursesMod; Windows 11
+runtime validation, audio playback, credential storage, packaging, and release
+support are still in progress. See the detailed `roadmap`_, `TUI design`_, `architecture`_,
 `upstream record`_, and `QA checklist`_.
 
 .. _roadmap: docs/ROADMAP.md

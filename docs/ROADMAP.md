@@ -128,7 +128,9 @@ plans, not promises of a date or release.
 - [x] W1: produce a native MSYS2 UCRT64 `signalbox.exe` and pass native spectrum,
   direct/redirected `--help`, conflicting-mode, and explicit W1 `--tui` stub
   smoke tests without requiring TUI/audio parity.
-- [ ] W2: PDCursesMod VT renderer + Windows Terminal TUI bring-up.
+- [ ] W2: PDCursesMod VT renderer + Windows Terminal TUI bring-up. The shared
+  renderer, VT/UTF-8 lifecycle, dependency wiring, and documentation are
+  implemented; Windows 11 runtime validation remains before completion.
 - [ ] W3: support stable native audio playback while preserving PCM-driven
   spectrum analysis.
 - [ ] W4: add a Windows Credential Manager backend behind the existing

@@ -643,13 +643,22 @@ int main (int argc, char **argv) {
 			return 2;
 		}
 	}
+#ifdef _WIN32
+	const bool terminalSupportsTui = BarTermIsInteractive ();
+#else
 	const char * const term = getenv ("TERM");
 	const bool terminalSupportsTui = isatty (STDIN_FILENO) &&
 			isatty (STDOUT_FILENO) && term != NULL && *term != '\0' &&
 			strcmp (term, "dumb") != 0;
+#endif
 	if (mode == MODE_TUI && !terminalSupportsTui) {
+#ifdef _WIN32
+		fputs ("signalbox: --tui requires an interactive terminal\n",
+				stderr);
+#else
 		fputs ("signalbox: --tui requires an interactive terminal and a usable TERM\n",
 				stderr);
+#endif
 		return 2;
 	}
 	app.useTui = mode == MODE_TUI ||
@@ -709,12 +718,7 @@ int main (int argc, char **argv) {
 	if (app.useTui && !SbUiRendererInitCurses (&app.uiRenderer, &app.settings,
 			tuiTheme)) {
 		if (mode == MODE_TUI) {
-#ifdef _WIN32
-			fputs ("signalbox: TUI is not available in this Windows W1 build\n",
-					stderr);
-#else
-			fputs ("signalbox: unable to initialize ncursesw\n", stderr);
-#endif
+			fputs ("signalbox: unable to initialize curses TUI\n", stderr);
 			SbUiRendererSetActive (NULL);
 			SbUiModelDestroy (&app.uiModel);
 			BarSettingsDestroy (&app.settings);

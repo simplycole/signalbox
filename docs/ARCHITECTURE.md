@@ -233,6 +233,15 @@ readline, and no-TUI renderer files so POSIX terminal/curses code is not pulled
 into the native W1 build. These stubs are milestone boundaries, not supported
 Windows terminal or playback implementations.
 
+W2 removes the no-TUI renderer stub and compiles the same
+`ui_renderer_curses.c` used by ncursesw against MSYS2's wide, forced-UTF-8
+PDCursesMod VT library. The renderer-local compatibility surface is limited to
+the curses header and Unicode cell-width function. `terminal_win32.c` owns
+console-handle capability detection and save/enable/restore of VT modes and
+UTF-8 code pages; no Win32 console calls leak into layout or UI behavior.
+PDCurses supplies normalized keys and `KEY_RESIZE`, while the guarded xterm
+application-keypad fallback remains available only in numeric jump mode.
+
 ## Target state
 
 Signalbox should preserve a small, testable protocol core while separating

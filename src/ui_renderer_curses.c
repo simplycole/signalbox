@@ -15,7 +15,11 @@
 #include <wchar.h>
 #include <wctype.h>
 
+#ifdef SIGNALBOX_PDCURSESMOD
+#include <pdcurses.h>
+#else
 #include <curses.h>
+#endif
 
 #include "debug.h"
 #include "station_browser.h"
@@ -116,6 +120,24 @@ static const SbUiRendererOps cursesOps;
 
 static int SbUiCursesTextWidth (const char *text);
 
+static int SbUiCursesCellWidth (const wchar_t value) {
+#ifdef SIGNALBOX_PDCURSESMOD
+	return PDC_wcwidth ((int) value);
+#else
+	return wcwidth (value);
+#endif
+}
+
+static int SbUiCursesWideWidth (const wchar_t *text, const size_t length) {
+	int width = 0;
+	for (size_t i = 0; i < length; i++) {
+		const int cells = SbUiCursesCellWidth (text[i]);
+		if (cells < 0) return -1;
+		width += cells;
+	}
+	return width;
+}
+
 static SbUiNoticeSeverity SbUiCursesNoticeSeverity (const BarUiMsg_t type) {
 	if (type == MSG_ERR) return SB_UI_NOTICE_ERROR;
 	if (type == MSG_QUESTION) return SB_UI_NOTICE_WARNING;
@@ -144,14 +166,14 @@ static void SbUiCursesPut (const int y, const int x, const int width,
 	int cells = 0;
 	size_t keep = 0;
 	while (keep < converted) {
-		const int charWidth = wcwidth (wide[keep]);
+		const int charWidth = SbUiCursesCellWidth (wide[keep]);
 		if (charWidth < 0 || cells + charWidth > width) break;
 		cells += charWidth;
 		keep++;
 	}
 	if (keep < converted && width >= 2) {
 		while (keep > 0 && cells > width - 1) {
-			const int charWidth = wcwidth (wide[--keep]);
+			const int charWidth = SbUiCursesCellWidth (wide[--keep]);
 			if (charWidth > 0) cells -= charWidth;
 		}
 		wide[keep++] = L'\u2026';
@@ -177,14 +199,14 @@ static void SbUiCursesWPut (WINDOW *window, const int y, const int x,
 	int cells = 0;
 	size_t keep = 0;
 	while (keep < converted) {
-		const int charWidth = wcwidth (wide[keep]);
+		const int charWidth = SbUiCursesCellWidth (wide[keep]);
 		if (charWidth < 0 || cells + charWidth > width) break;
 		cells += charWidth;
 		keep++;
 	}
 	if (keep < converted && width >= 2) {
 		while (keep > 0 && cells > width - 1) {
-			const int charWidth = wcwidth (wide[--keep]);
+			const int charWidth = SbUiCursesCellWidth (wide[--keep]);
 			if (charWidth > 0) cells -= charWidth;
 		}
 		wide[keep++] = L'\u2026';
@@ -689,7 +711,7 @@ static int SbUiCursesTextWidth (const char *text) {
 	if (converted == (size_t) -1) return (int) strlen (text);
 	int width = 0;
 	for (size_t i = 0; i < converted; i++) {
-		const int cells = wcwidth (wide[i]);
+		const int cells = SbUiCursesCellWidth (wide[i]);
 		if (cells > 0) width += cells;
 	}
 	return width;
@@ -1138,7 +1160,8 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		(void) height;
 		mvwhline (window, 5, 2, ' ', width - 4);
 		size_t start = 0;
-		while (start < cursor && wcswidth (&input[start], cursor - start) > width - 5) {
+		while (start < cursor && SbUiCursesWideWidth (&input[start],
+				cursor - start) > width - 5) {
 			start++;
 		}
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
@@ -1147,7 +1170,7 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_KEY, 0);
 		mvwaddnstr (window, 6, 2, "Enter: submit   Esc: cancel", width - 4);
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
-		const int cursorCells = wcswidth (&input[start], cursor - start);
+		const int cursorCells = SbUiCursesWideWidth (&input[start], cursor - start);
 		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
 		wrefresh (window);
 		wint_t key;
@@ -2085,8 +2108,9 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	strcpy (data->status, "Ready");
 	data->statusSeverity = SB_UI_NOTICE_INFO;
 	data->statusExpires = time (NULL) + 4;
-	data->unicodeSymbols = wcwidth (L'♥') == 1 && wcwidth (L'›') == 1;
-	data->unicodeBlocks = wcwidth (L'█') == 1;
+	data->unicodeSymbols = SbUiCursesCellWidth (L'♥') == 1 &&
+			SbUiCursesCellWidth (L'›') == 1;
+	data->unicodeBlocks = SbUiCursesCellWidth (L'█') == 1;
 	cbreak ();
 	noecho ();
 	keypad (stdscr, TRUE);

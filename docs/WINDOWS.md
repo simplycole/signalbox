@@ -1,8 +1,48 @@
 # Windows portability plan
 
 This document records the Phase W0 source audit, implementation plan, and the
-completed W1 compile foundation. Windows remains a developer target while the
+completed W1 compile foundation and the W2 implementation. Windows remains a developer target while the
 later runtime, packaging, and release milestones are completed.
+
+## W2 Windows Terminal TUI — implementation complete, VM validation pending
+
+W2 compiles the existing `src/ui_renderer_curses.c` against PDCursesMod's VT
+backend; there is no separate Windows renderer. The former W1 no-TUI renderer
+stub has been removed. `terminal_win32.c` is the narrow native boundary that
+detects real input/output console handles, saves their modes and code pages,
+enables VT input/output plus UTF-8 for the session, and restores every saved
+value during normal shutdown. Native Windows mode selection deliberately does
+not depend on `TERM`: an interactive console selects TUI automatically,
+explicit `--tui` attempts it, redirected handles reject it, and `--classic`
+continues to win when requested.
+
+MSYS2 packages PDCursesMod rather than classic PDCurses. As of this work the
+UCRT64 package is PDCursesMod 4.5.4 and builds its `vt`, `wincon`, and `wingui`
+ports with `WIDE=Y UTF8=Y`. Signalbox intentionally includes `<pdcurses.h>` and
+links the static VT port as `-lpdcurses_vt` (`libpdcurses_vt.a`). The Makefile
+fails early with the install command when either artifact is absent; normal
+builds never download it. Add `mingw-w64-ucrt-x86_64-pdcurses` to the W1
+`pacman` command below, then run `make clean`, `make spectrum-test`, and `make`.
+
+PDCursesMod's core and VT port are public domain; its repository documents the
+status of the few separately licensed ancillary files. Signalbox consumes the
+packaged library and header and does not vendor those ancillary build files.
+
+The renderer API audit found direct compatibility for `newterm`, `set_term`,
+`delscreen`, `endwin`, cbreak/noecho, cursor/keypad/timed input, `getch` and
+`wget_wch`, `KEY_*` including `KEY_RESIZE` and `KEY_BTAB`, windows, borders,
+ACS lines, batched refresh, attributes, colors, and wide-string output.
+`use_default_colors` remains ncurses-only, so PDCursesMod uses a black
+background. The compatibility shim uses PDCursesMod's Unicode-aware
+`PDC_wcwidth` instead of the platform C runtime's `wcwidth`/`wcswidth`.
+PDCursesMod supplies keypad translation on Windows; the xterm application
+keypad escape fallback remains isolated to numeric-jump mode and harmless when
+PDCurses returns normalized digits.
+
+Windows Terminal runtime validation is still required for live resize,
+Shift+Tab/keypad mappings, all themes and `NO_COLOR`, Unicode glyph fallback,
+login-field editing, and hard terminal restoration. W2 does not add Windows
+audio playback, Credential Manager, or Named Pipe control.
 
 ## W1 native compile foundation — complete
 
@@ -30,7 +70,8 @@ pacman -S --needed make \
   mingw-w64-ucrt-x86_64-curl \
   mingw-w64-ucrt-x86_64-json-c \
   mingw-w64-ucrt-x86_64-libgcrypt \
-  mingw-w64-ucrt-x86_64-libao
+  mingw-w64-ucrt-x86_64-libao \
+  mingw-w64-ucrt-x86_64-pdcurses
 make clean all
 make spectrum-test
 ./signalbox.exe --help
@@ -71,8 +112,8 @@ small interface before adopting a direct WASAPI backend (the preferred final
 backend). Ship a ZIP containing the executable, dependency DLLs, licenses, and
 notices.
 
-The next milestone is **W2: PDCursesMod VT renderer + Windows Terminal TUI
-bring-up**. Audio remains deferred to W3.
+The next milestone after W2 validation is **W3: Windows authenticated playback
++ audio backend bring-up**.
 
 ## Classification
 

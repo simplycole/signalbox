@@ -22,8 +22,34 @@ printed `signalbox: --tui and --classic cannot be used together` and exited 2.
 Explicit `--tui` printed
 `signalbox: TUI is not available in this Windows W1 build` and exited 1. Help
 output also succeeded when redirected. Playback, credentials, event/password
-commands, audio/FIFO paths, and local command transport remain outside W1. The
-next milestone is W2: PDCursesMod VT renderer + Windows Terminal TUI bring-up.
+commands, audio/FIFO paths, and local command transport remain outside W1.
+
+## Windows W2 TUI validation — pending
+
+The W2 shared-renderer implementation is present. From an MSYS2 UCRT64 shell
+hosted in Windows Terminal, run:
+
+```sh
+make clean
+make spectrum-test
+make
+./signalbox.exe --help
+./signalbox.exe --tui
+./signalbox.exe
+./signalbox.exe --classic
+./signalbox.exe --tui --classic
+./signalbox.exe --classic --tui
+```
+
+For both TUI launches, verify large/small/maximized/restored resize cycles,
+`q`, `?`, Tab, Shift+Tab, arrows, j/k, PgUp/PgDn, Home/End, Enter, `/`, `#`,
+`z`, `f`, `G`, `h`, `u`, `V`, `(`, `)`, and `^`. Exercise phosphor, amber,
+neutral, mono, and `NO_COLOR`; inspect hearts, ban markers, blocks, ACS borders,
+and ASCII fallbacks. After `q`, verify prompt, echo, cursor, colors, console
+modes, and input/output code pages are restored. Run redirected no-flag and
+explicit-TUI cases to confirm classic selection and the interactive-terminal
+diagnostic respectively. This pass must not claim or exercise Windows audio,
+Credential Manager, or Named Pipe control.
 
 This checklist prepares a manual session against a real Pandora account. It
 does not authorize automated account changes. Perform the read-only sections
