@@ -41,8 +41,14 @@ void BarTermInit (void) {
 		(void) SetConsoleMode (terminalState.output, mode);
 	}
 	if (terminalState.inputModeSaved) {
-		const DWORD mode = terminalState.inputMode |
-				ENABLE_VIRTUAL_TERMINAL_INPUT;
+		DWORD mode = terminalState.inputMode;
+#ifdef SIGNALBOX_PDCURSES_VT
+		mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+#else
+		/* WinCon reads native KEY_EVENT_RECORD input.  In particular, do not
+		 * make Windows Terminal translate those records into VT sequences. */
+		mode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
+#endif
 		(void) SetConsoleMode (terminalState.input, mode);
 	}
 	(void) SetConsoleCP (CP_UTF8);

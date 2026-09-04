@@ -96,7 +96,7 @@ uint64_t SbPlatformMonotonicMs (void) {
 #endif
 }
 
-#ifdef _WIN32
+#ifdef SIGNALBOX_PDCURSES_VT
 bool SbPlatformWaitForConsoleInput (const int timeoutMs) {
 	const HANDLE input = GetStdHandle (STD_INPUT_HANDLE);
 	if (input == NULL || input == INVALID_HANDLE_VALUE) return false;

@@ -4,27 +4,53 @@ This document records the Phase W0 source audit, implementation plan, and the
 completed W1 compile foundation and the W2 implementation. Windows remains a developer target while the
 later runtime, packaging, and release milestones are completed.
 
-## W2 Windows Terminal TUI — implementation complete, VM validation pending
+## W2 Windows Terminal TUI — WinCon prototype, VM validation pending
 
-W2 compiles the existing `src/ui_renderer_curses.c` against PDCursesMod's VT
-backend; there is no separate Windows renderer. The former W1 no-TUI renderer
-stub has been removed. `terminal_win32.c` is the narrow native boundary that
-detects real input/output console handles, saves their modes and code pages,
-enables VT input/output plus UTF-8 for the session, and restores every saved
-value during normal shutdown. Native Windows mode selection deliberately does
-not depend on `TERM`: an interactive console selects TUI automatically,
+W2 compiles the existing `src/ui_renderer_curses.c` against PDCursesMod; there
+is no separate Windows renderer. Native Windows mode selection deliberately
+does not depend on `TERM`: an interactive console selects TUI automatically,
 explicit `--tui` attempts it, redirected handles reject it, and `--classic`
-continues to win when requested.
+continues to win when requested. Windows Terminal remains the user-facing
+target even though the selected curses backend is now WinCon.
 
-MSYS2 packages PDCursesMod rather than classic PDCurses. As of this work the
-UCRT64 package is PDCursesMod 4.5.4 and builds its `vt`, `wincon`, and `wingui`
-ports with `WIDE=Y UTF8=Y`. Signalbox intentionally includes `<pdcurses.h>` and
-links the static VT port as `-lpdcurses_vt` (`libpdcurses_vt.a`). The Makefile
-fails early with the install command when either artifact is absent; normal
-builds never download it. Add `mingw-w64-ucrt-x86_64-pdcurses` to the W1
-`pacman` command below, then run `make clean`, `make spectrum-test`, and `make`.
+### Installed PDCursesMod backends
 
-PDCursesMod's core and VT port are public domain; its repository documents the
+The MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-pdcurses` 4.5.4-1 package builds every
+port with `WIDE=Y UTF8=Y` and installs these static archives:
+
+- `/ucrt64/lib/libpdcurses_wincon.a` — WinCon, link with
+  `-lpdcurses_wincon`;
+- `/ucrt64/lib/libpdcurses_vt.a` — VT, link with `-lpdcurses_vt`;
+- `/ucrt64/lib/libpdcurses_wingui.a` — WinGUI, link with
+  `-lpdcurses_wingui`;
+- `/ucrt64/lib/libpdcurses.a` — the package's default **WinGUI** static
+  archive, not WinCon; and
+- `/ucrt64/lib/libpdcurses.dll.a` — import library for the default
+  `libpdcurses.dll`, also WinGUI.
+
+It also installs correspondingly named `libpdcurses_wincon.dll`,
+`libpdcurses_vt.dll`, and `libpdcurses_wingui.dll` under `/ucrt64/bin`, plus
+the unqualified WinGUI DLL. Signalbox uses the explicit backend static archive
+so there is no ambiguity or runtime DLL swap.
+
+WinCon is the default comparison build:
+
+```sh
+make clean
+make WINDOWS_CURSES_BACKEND=wincon
+```
+
+The known-broken VT path remains available for an A/B comparison:
+
+```sh
+make clean
+make WINDOWS_CURSES_BACKEND=vt
+```
+
+The Makefile checks the selected archive and rejects any backend other than
+`wincon` or `vt`. macOS and Linux builds are unchanged.
+
+PDCursesMod's core and WinCon port are public domain; its repository documents the
 status of the few separately licensed ancillary files. Signalbox consumes the
 packaged library and header and does not vendor those ancillary build files.
 
@@ -39,18 +65,59 @@ PDCursesMod supplies keypad translation on Windows; the xterm application
 keypad escape fallback remains isolated to numeric-jump mode and harmless when
 PDCurses returns normalized digits.
 
-PDCursesMod 4.5.4's VT input parser waits for an initial byte but probes the
-remaining bytes of an escape sequence without an inter-byte wait.  The shared
-renderer therefore waits on the public Windows console handle without consuming
-input, allows a 20 ms enqueue interval, and then calls `wget_wch` nonblocking
-before restoring the window's configured timeout.  This keeps periodic redraws
-responsive while preventing Windows Terminal sequences from being split into
-discarded prefixes and printable tail characters.
+### VT verdict
 
-Windows Terminal runtime validation is still required for live resize,
-Shift+Tab/keypad mappings, all themes and `NO_COLOR`, Unicode glyph fallback,
-login-field editing, and hard terminal restoration. W2 does not add Windows
-audio playback, Credential Manager, or Named Pipe control.
+Real Windows Terminal diagnostics show that the VT backend fragments escape
+sequences. Arrow keys yield `ERR` followed by printable `A`, `B`, `C`, or `D`;
+Shift+Tab yields `ERR` followed by `Z`; PgUp/PgDn yield `5~`/`6~`; and
+Home/End yield `H`/`F`. This persists with `wget_wch`, `keypad(TRUE)`, public
+console polling, bounded waits, and a 20 ms enqueue delay. The workaround has
+therefore not made VT reliable and no further timing changes are planned. It is
+retained only inside the explicit `SIGNALBOX_PDCURSES_VT` comparison path.
+
+### WinCon feasibility verdict
+
+PDCursesMod 4.5.4 WinCon reads `INPUT_RECORD`s from `CONIN$` using the wide
+Windows console API. Its key tables directly map arrow keys, Shift+Tab,
+PgUp/PgDn, Home, and End to the expected curses `KEY_*` values. It returns
+`KEY_RESIZE` for `WINDOW_BUFFER_SIZE_EVENT`; Signalbox already adopts the new
+size with `resize_term(0, 0)` and retains its 50x15 fallback.
+
+WinCon runs inside Windows Terminal. It detects `WT_SESSION`, writes Unicode
+with `WriteConsoleW`, and uses Windows Terminal's VT output support for richer
+colors while keeping native console input. The packaged wide/UTF-8 build is
+compatible with Signalbox's `wget_wch` and wide-string renderer, so no renderer
+adapter is needed for metadata such as `Café`, `♥`, or block glyphs. Signalbox
+continues to use ASCII `+`, `-`, and `|` structural borders for W2. Bold is
+represented by bright foreground color; `A_DIM` is unavailable in this
+32-bit-wide build and is effectively normal text. WinCon normally creates and
+activates a separate console screen buffer, then restores the original buffer
+and cursor during `endwin`/screen teardown.
+
+`terminal_win32.c` still saves/restores the host modes and UTF-8 code pages.
+For WinCon it explicitly clears `ENABLE_VIRTUAL_TERMINAL_INPUT`, allowing
+PDCursesMod to own native input mode during the curses lifecycle. The VT build
+alone enables VT input. Output keeps `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, which
+the WinCon Windows Terminal rendering path uses.
+
+Native VM validation is still required for the prototype. Build and exercise
+it with:
+
+```sh
+git pull origin develop
+make clean
+make WINDOWS_CURSES_BACKEND=wincon
+SIGNALBOX_DEBUG_KEYS=1 ./signalbox.exe --tui
+cat signalbox-keys.log
+```
+
+Test arrows, Shift+Tab, PgUp/PgDn, Home/End, ordinary `j`, `k`, `?`, and Tab;
+then shrink, grow, maximize, restore, and cross the 50x15 minimum. Expected
+special-key log entries have `status=KEY_CODE_YES` and their corresponding
+`KEY_*` names, while ordinary characters remain `status=OK`. Also check all
+themes, `NO_COLOR`, Unicode metadata/block rendering, login editing, and host
+screen/cursor restoration. W2 does not add Windows audio playback, Credential
+Manager, or Named Pipe control.
 
 ## W1 native compile foundation — complete
 
@@ -113,8 +180,8 @@ boundaries narrow avoids a forest of `_WIN32` branches.
 Use **MSYS2 UCRT64 with MinGW-w64 GCC** for the first supported x64 build. It
 has current native-Windows packages for the project's major libraries and
 produces a PE executable that does not require an MSYS2 installation at run
-time when the required MinGW DLLs are bundled. Use **PDCursesMod's VT backend**
-for Windows Terminal, initially retain winpthreads, and use the packaged libao
+time when the required MinGW DLLs are bundled. Use **PDCursesMod's WinCon backend**
+inside Windows Terminal, initially retain winpthreads, and use the packaged libao
 only as a W3 bootstrap if a runtime spike proves reliable. Put audio behind a
 small interface before adopting a direct WASAPI backend (the preferred final
 backend). Ship a ZIP containing the executable, dependency DLLs, licenses, and
@@ -189,18 +256,16 @@ all curses types inside `ui_renderer_curses.c`.
 
 Use PDCursesMod rather than original PDCurses. MSYS2's current `pdcurses`
 package is PDCursesMod and supplies separate VT, WinCon, and GUI libraries.
-The VT backend most closely preserves ncurses behavior in Windows Terminal,
-including the alternate screen and VT colors. Build it in wide/UTF-8 mode and
-test every API above; `newterm`, default-color behavior, character width, and
-resize notification are the likely compatibility edges. If PDCursesMod lacks a
-small ncurses extension, isolate the shim next to the renderer rather than
-forking the renderer.
+The WinCon backend preserves native console key events inside Windows Terminal
+and uses wide output plus VT colors there. Test every API above; `newterm`,
+default-color behavior, character width, resize notification, and screen-buffer
+restoration remain compatibility edges. If PDCursesMod lacks a small ncurses
+extension, isolate the shim next to the renderer rather than forking it.
 
 Do not replace the renderer with direct Win32 drawing. The classic Win32
-console screen-buffer API is no longer the best primary abstraction, while a
-new bespoke VT renderer would duplicate curses layout, clipping, input, and
-window lifecycle. The PDCursesMod WinCon library is a reasonable later fallback
-for older console hosts.
+console screen-buffer API should not become an application-owned abstraction,
+while a new bespoke VT renderer would duplicate curses layout, clipping, input,
+and window lifecycle. PDCursesMod contains the WinCon-specific implementation.
 
 Initial support target:
 
@@ -378,7 +443,7 @@ copied from this planning table.
 | libcurl | `mingw-w64-ucrt-x86_64-curl-winssl` is preferred to reduce TLS runtime dependencies; base `curl` variants also exist | MIT; dynamic. Verify the selected `.pc` file resolves Schannel and does not mix ABI variants. |
 | json-c | `mingw-w64-ucrt-x86_64-json-c` | MIT; dynamic or static feasible. |
 | libgcrypt | `mingw-w64-ucrt-x86_64-libgcrypt`, plus libgpg-error | LGPL family; dynamic is the conservative default. |
-| curses | `mingw-w64-ucrt-x86_64-pdcurses` (PDCursesMod; VT/WinCon libraries) | Public-domain project; link VT backend initially, static if its package artifacts and notices permit. |
+| curses | `mingw-w64-ucrt-x86_64-pdcurses` (PDCursesMod; VT/WinCon libraries) | Public-domain project; link the explicit static WinCon archive for the W2 prototype. |
 | libao | `mingw-w64-ucrt-x86_64-libao` | Package metadata reports GPL; use dynamically only for a bootstrap and verify runtime backend and redistribution obligations. |
 | pthreads | MinGW toolchain/winpthreads runtime | Bundle its runtime DLL when dynamically linked; later hide it behind project types. |
 | pkg-config | `mingw-w64-ucrt-x86_64-pkgconf` | Build-time only. |
@@ -489,7 +554,7 @@ real decoded PCM, not a synthetic display path.
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---:|---:|---|
-| PDCursesMod differences in wide APIs, `newterm`, resize, or default colors | High | Medium | Compile an API probe first; test VT backend in Windows Terminal; keep renderer seam and ASCII/mono fallbacks. |
+| PDCursesMod differences in wide APIs, `newterm`, resize, or default colors | High | Medium | Test WinCon in Windows Terminal; keep the VT comparison switch plus renderer seam and ASCII/mono fallbacks. |
 | FFmpeg package has a large DLL closure or unexpected GPL-enabled configuration | High | High | Record exact build config, dynamically bundle only required closure, create notices, consider a purpose-built minimal FFmpeg later. |
 | libao default output fails or behaves poorly on modern Windows | High | Medium–high | Time-box W3 spike; keep analyzer above audio seam; switch to WASAPI/miniaudio without changing decode/UI. |
 | Console input cannot be multiplexed with named-pipe handles like Unix `select` | High | High | Separate TUI/classic input from IPC and use a waitable event/worker queue rather than emulating file descriptors. |

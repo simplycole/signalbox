@@ -87,16 +87,27 @@ ifneq (${WINDOWS},1)
 	NCURSESW_CFLAGS:=$(shell $(PKG_CONFIG) --cflags ncursesw)
 	NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
 else
-# MSYS2 packages PDCursesMod's wide/UTF-8 VT port separately from its
-# GUI and WinCon ports.  The VT library is intentional here.
+# MSYS2 packages PDCursesMod's wide/UTF-8 ports as separate static archives.
+# WinCon uses native console input and is the default; keep VT selectable for
+# direct backend comparisons while its fragmented escape input is investigated.
+WINDOWS_CURSES_BACKEND?=wincon
 ifeq ($(wildcard ${MINGW_PREFIX}/include/pdcurses.h),)
 $(error Windows TUI requires PDCursesMod: pacman -S mingw-w64-ucrt-x86_64-pdcurses)
 endif
-ifeq ($(wildcard ${MINGW_PREFIX}/lib/libpdcurses_vt.a),)
-$(error Windows TUI requires PDCursesMod's VT library: pacman -S mingw-w64-ucrt-x86_64-pdcurses)
+ifeq (${WINDOWS_CURSES_BACKEND},wincon)
+PDCURSESMOD_LIBRARY:=pdcurses_wincon
+PDCURSESMOD_BACKEND_CFLAGS:=-DSIGNALBOX_PDCURSES_WINCON
+else ifeq (${WINDOWS_CURSES_BACKEND},vt)
+PDCURSESMOD_LIBRARY:=pdcurses_vt
+PDCURSESMOD_BACKEND_CFLAGS:=-DSIGNALBOX_PDCURSES_VT
+else
+$(error WINDOWS_CURSES_BACKEND must be wincon or vt)
 endif
-PDCURSESMOD_CFLAGS?=-DSIGNALBOX_PDCURSESMOD
-PDCURSESMOD_LDFLAGS?=-lpdcurses_vt
+ifeq ($(wildcard ${MINGW_PREFIX}/lib/lib${PDCURSESMOD_LIBRARY}.a),)
+$(error Windows TUI requires ${MINGW_PREFIX}/lib/lib${PDCURSESMOD_LIBRARY}.a: pacman -S mingw-w64-ucrt-x86_64-pdcurses)
+endif
+PDCURSESMOD_CFLAGS?=
+PDCURSESMOD_LDFLAGS?=-l${PDCURSESMOD_LIBRARY}
 endif
 
 ifeq (${HOST_OS},Darwin)
@@ -111,6 +122,9 @@ ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
 			${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} \
 			${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} \
 			${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} ${PDCURSESMOD_CFLAGS} ${CREDENTIAL_CFLAGS}
+ifeq (${WINDOWS},1)
+	ALL_CFLAGS+=-DSIGNALBOX_PDCURSESMOD ${PDCURSESMOD_BACKEND_CFLAGS}
+endif
 ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
 			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \

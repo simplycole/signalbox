@@ -320,7 +320,7 @@ typedef struct {
 
 #ifdef SIGNALBOX_PDCURSESMOD
 /* Developer-only key diagnostics are truncated for each TUI session.  Writing
- * directly to this file keeps PDCursesMod's VT stdout/stderr streams intact. */
+ * directly to this file avoids disturbing PDCursesMod's console output. */
 #define SB_TUI_KEY_LOG_PATH "signalbox-keys.log"
 static FILE *SbUiCursesKeyLog;
 
@@ -410,7 +410,7 @@ static void SbUiCursesDebugKey (const SbTuiInput input,
 
 static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 		const SbTuiInputContext context, const bool passwordActive) {
-#ifdef _WIN32
+#ifdef SIGNALBOX_PDCURSES_VT
 	/* PDCursesMod 4.5.4's VT port waits for the first byte in wget_wch(),
 	 * but reads the rest of an ESC sequence with immediate _kbhit() checks.
 	 * Wait on the public console handle without consuming that byte, then give
@@ -424,7 +424,7 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 	/* Keep the status and output value separate.  wget_wch() returns a status;
 	 * the logical key is written through its output argument. */
 	wint_t key = 0;
-#ifdef _WIN32
+#ifdef SIGNALBOX_PDCURSES_VT
 	/* The console wait above owns this read's timeout.  Make the consuming read
 	 * immediate, then restore the caller's timed, blocking, or nodelay state. */
 	if (keyReady) wtimeout (window, 0);
