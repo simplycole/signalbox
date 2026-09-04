@@ -48,6 +48,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/ui_dispatch.c
 ifeq (${WINDOWS},1)
 	PIANOBAR_SRC+=${PIANOBAR_DIR}/terminal_win32.c \
+		${PIANOBAR_DIR}/terminal_input_win32.c \
 		${PIANOBAR_DIR}/ui_renderer_curses.c \
 		${PIANOBAR_DIR}/ui_readline_win32.c
 else

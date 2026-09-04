@@ -42,13 +42,10 @@ void BarTermInit (void) {
 	}
 	if (terminalState.inputModeSaved) {
 		DWORD mode = terminalState.inputMode;
-#ifdef SIGNALBOX_PDCURSES_VT
-		mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-#else
-		/* WinCon reads native KEY_EVENT_RECORD input.  In particular, do not
-		 * make Windows Terminal translate those records into VT sequences. */
+		/* Signalbox's native adapter consumes INPUT_RECORDs for either drawing
+		 * backend; never request ConPTY's VT input translation. */
 		mode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
-#endif
+		mode |= ENABLE_WINDOW_INPUT;
 		(void) SetConsoleMode (terminalState.input, mode);
 	}
 	(void) SetConsoleCP (CP_UTF8);

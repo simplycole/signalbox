@@ -55,39 +55,51 @@ status of the few separately licensed ancillary files. Signalbox consumes the
 packaged library and header and does not vendor those ancillary build files.
 
 The renderer API audit found direct compatibility for `newterm`, `set_term`,
-`delscreen`, `endwin`, cbreak/noecho, cursor/keypad/timed input, `getch` and
-`wget_wch`, `KEY_*` including `KEY_RESIZE` and `KEY_BTAB`, windows, borders,
+`delscreen`, `endwin`, cbreak/noecho, cursor/keypad/timed input, `KEY_*`
+constants including `KEY_RESIZE` and `KEY_BTAB`, windows, borders,
 ACS lines, batched refresh, attributes, colors, and wide-string output.
 `use_default_colors` remains ncurses-only, so PDCursesMod uses a black
 background. The compatibility shim uses PDCursesMod's Unicode-aware
 `PDC_wcwidth` instead of the platform C runtime's `wcwidth`/`wcswidth`.
-PDCursesMod supplies keypad translation on Windows; the xterm application
-keypad escape fallback remains isolated to numeric-jump mode and harmless when
-PDCurses returns normalized digits.
+Signalbox supplies keypad translation on Windows through the native adapter;
+PDCursesMod does not consume keyboard input.
 
-### VT verdict
+### Input ownership and Windows Terminal diagnostic
 
-Real Windows Terminal diagnostics show that the VT backend fragments escape
-sequences. Arrow keys yield `ERR` followed by printable `A`, `B`, `C`, or `D`;
-Shift+Tab yields `ERR` followed by `Z`; PgUp/PgDn yield `5~`/`6~`; and
-Home/End yield `H`/`F`. This persists with `wget_wch`, `keypad(TRUE)`, public
-console polling, bounded waits, and a 20 ms enqueue delay. The workaround has
-therefore not made VT reliable and no further timing changes are planned. It is
-retained only inside the explicit `SIGNALBOX_PDCURSES_VT` comparison path.
+Signalbox owns Windows keyboard input through `ReadConsoleInputW`; PDCursesMod
+is used for drawing only. The adapter clears `ENABLE_VIRTUAL_TERMINAL_INPUT`,
+`ENABLE_LINE_INPUT`, `ENABLE_ECHO_INPUT`, and quick-edit mode, and enables
+`ENABLE_WINDOW_INPUT`. It preserves the host's `ENABLE_PROCESSED_INPUT` choice.
+`terminal_win32.c` saves the original input/output modes and code pages before
+curses starts and restores them after curses shuts down. It alone enables
+`ENABLE_VIRTUAL_TERMINAL_PROCESSING` for output. The input adapter reapplies its
+native mode after PDCursesMod initialization so the two components do not
+compete over input mode.
 
-### WinCon feasibility verdict
+With `SIGNALBOX_DEBUG_KEYS=1`, the start of `signalbox-keys.log` reports
+`GetFileType`, `GetConsoleMode`, the relevant mode bits, and whether
+`PeekConsoleInputW` succeeds. Each subsequent input line reports
+`source=win32_event`, the raw virtual key and Unicode value, and the normalized
+logical key. Password characters are redacted.
 
-PDCursesMod 4.5.4 WinCon reads `INPUT_RECORD`s from `CONIN$` using the wide
-Windows console API. Its key tables directly map arrow keys, Shift+Tab,
-PgUp/PgDn, Home, and End to the expected curses `KEY_*` values. It returns
-`KEY_RESIZE` for `WINDOW_BUFFER_SIZE_EVENT`; Signalbox already adopts the new
-size with `resize_term(0, 0)` and retains its 50x15 fallback.
+The former VT timing workaround was removed. Real Windows tests showed that
+PDCursesMod's VT decoder fragmented escape sequences, while its WinCon decoder
+largely returned `ERR`; neither decoder is used by the project-owned adapter.
+
+### Native adapter and rendering backend
+
+The adapter consumes key-down `KEY_EVENT_RECORD`s, honors `wRepeatCount`, and
+maps arrows, Shift+Tab, PgUp/PgDn, Home/End, Tab, Enter, and Escape to the same
+logical values used by the shared UI. Other nonzero `UnicodeChar` values remain
+ordinary characters; uppercase A/B/C/D are never treated as arrows. UTF-16
+surrogate pairs are combined. `WINDOW_BUFFER_SIZE_EVENT` becomes `KEY_RESIZE`,
+so the existing `resize_term(0, 0)` and 50x15 fallback remain in use.
 
 WinCon runs inside Windows Terminal. It detects `WT_SESSION`, writes Unicode
 with `WriteConsoleW`, and uses Windows Terminal's VT output support for richer
-colors while keeping native console input. The packaged wide/UTF-8 build is
-compatible with Signalbox's `wget_wch` and wide-string renderer, so no renderer
-adapter is needed for metadata such as `Café`, `♥`, or block glyphs. Signalbox
+colors. The packaged wide/UTF-8 build is compatible with Signalbox's
+wide-string renderer, so no renderer adapter is needed for metadata such as
+`Café`, `♥`, or block glyphs. Signalbox
 continues to use ASCII `+`, `-`, and `|` structural borders for W2. Bold is
 represented by bright foreground color; `A_DIM` is unavailable in this
 32-bit-wide build and is effectively normal text. WinCon normally creates and
@@ -95,23 +107,27 @@ activates a separate console screen buffer, then restores the original buffer
 and cursor during `endwin`/screen teardown.
 
 `terminal_win32.c` still saves/restores the host modes and UTF-8 code pages.
-For WinCon it explicitly clears `ENABLE_VIRTUAL_TERMINAL_INPUT`, allowing
-PDCursesMod to own native input mode during the curses lifecycle. The VT build
-alone enables VT input. Output keeps `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, which
-the WinCon Windows Terminal rendering path uses.
+The WinCon build remains the default output recommendation: it uses
+`WriteConsoleW`, integrates with Windows Terminal's VT output support for richer
+colors, handles resizing, and avoids the VT port's observed input-side
+fragmentation. Input is now independent of this selection, so the VT output
+build remains available for visual comparison without enabling VT input.
 
-Native VM validation is still required for the prototype. Build and exercise
-it with:
+Build and exercise the native target from PowerShell in Windows Terminal with:
 
-```sh
+```powershell
 git pull origin develop
 make clean
 make WINDOWS_CURSES_BACKEND=wincon
-SIGNALBOX_DEBUG_KEYS=1 ./signalbox.exe --tui
-cat signalbox-keys.log
+$env:SIGNALBOX_DEBUG_KEYS=1
+.\signalbox.exe --tui
+Get-Content .\signalbox-keys.log
 ```
 
-Test arrows, Shift+Tab, PgUp/PgDn, Home/End, ordinary `j`, `k`, `?`, and Tab;
+Confirm the diagnostic says `file_type=2`, `get_console_mode=yes`,
+`peek_console_input=yes`, `handle_kind=console_buffer`, `vt_input=off`, and
+`window_input=on`. Test arrows, Shift+Tab, PgUp/PgDn, Home/End, ordinary `j`,
+`k`, `?`, Enter, Escape, and Tab;
 then shrink, grow, maximize, restore, and cross the 50x15 minimum. Expected
 special-key log entries have `status=KEY_CODE_YES` and their corresponding
 `KEY_*` names, while ordinary characters remain `status=OK`. Also check all
@@ -229,7 +245,7 @@ UCRT64/MinGW packages. Prefer the UCRT runtime over the older MSVCRT target.
 | `src/ui_act.c` | `unistd` include and direct pthread mutex/condition operations; otherwise action/protocol logic is portable | B/C | Medium | Thread wrapper or short-term winpthreads. Remove unused POSIX include if confirmed during implementation. |
 | `src/ui_dispatch.c`, headers | Named-command mapping and dispatch are standard C | A | Low | Retain unchanged. |
 | `src/ui_readline.c`, `.h` | Public `fd_set`, `select` over stdin/FIFO, POSIX `read`, ANSI editing sequences | C/D | High | Separate command event source from byte editing. On Windows, curses owns TUI input; classic input uses console/CRT APIs and control transport has its own waitable handle. |
-| `src/terminal.c`, `.h` | termios raw mode and `SIGCONT` restoration | D | High | Unix implementation remains. Windows implementation manages console modes; PDCurses owns modes while TUI is active. |
+| `src/terminal.c`, `.h` | termios raw mode and `SIGCONT` restoration | D | High | Unix implementation remains. Windows implementation saves/restores console modes; Signalbox owns input modes while the TUI is active. |
 | `src/credential.c`, `.h` | Existing narrow backend abstraction is clean; current fallback is unavailable outside Apple/libsecret | C | Medium | Add a Windows-only implementation using Credential Manager; no call-site changes. |
 | `src/spectrum.c`, `.h` | DSP and S16 ingest are platform-neutral; only `clock_gettime` and exposed pthread mutex are nonportable | B/C | Medium | Use monotonic-time and mutex wrappers. DSP should otherwise remain byte-for-byte unchanged. |
 | `src/station_browser.c`, `.h` | Model is portable; `strings.h`/`strcasecmp`, POSIX mkdir modes, slash trimming, and replace/unlink persistence are not | B/C | Medium | Reuse paths and durable-file helpers; case-fold remains ASCII-compatible initially. |
@@ -345,7 +361,7 @@ settings on `SIGCONT`. There is no `SIGTERM` or `SIGWINCH` handler. On Windows:
   loop; do not call UI/audio cleanup from the handler;
 - omit `SIGPIPE` handling because Winsock/curl reports errors normally;
 - omit `SIGCONT`; console-mode restoration belongs to terminal lifecycle;
-- take resize from PDCursesMod input (`KEY_RESIZE`).
+- translate native `WINDOW_BUFFER_SIZE_EVENT` records to `KEY_RESIZE`.
 
 Call this small boundary `platform_control_event`, distinct from remote-control
 IPC.

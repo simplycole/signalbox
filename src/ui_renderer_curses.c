@@ -30,6 +30,9 @@
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
 #include "platform.h"
+#ifdef _WIN32
+#include "terminal_input.h"
+#endif
 
 typedef enum {
 	SB_UI_NOTICE_INFO = 0,
@@ -316,6 +319,9 @@ typedef struct {
 	int status;
 	int rawKey;
 	int key;
+#ifdef _WIN32
+	SbTerminalInputEvent terminalEvent;
+#endif
 } SbTuiInput;
 
 #ifdef SIGNALBOX_PDCURSESMOD
@@ -378,7 +384,22 @@ static void SbUiCursesDebugKey (const SbTuiInput input,
 	if (output == NULL) return;
 	const char *status = input.status == OK ? "OK" :
 			(input.status == KEY_CODE_YES ? "KEY_CODE_YES" : "ERR");
-	fputs ("[signalbox:key] function=wget_wch ", output);
+#ifdef _WIN32
+	fputs ("[signalbox:key] source=win32_event ", output);
+	if (passwordActive && input.status == OK) {
+		fprintf (output, "password_character_received control=0x%08X repeat=%u ",
+				(unsigned int) input.terminalEvent.controlState,
+				(unsigned int) input.terminalEvent.repeatCount);
+	} else if (input.status != ERR) {
+		fprintf (output, "virtual_key=0x%04X unicode=U+%04X control=0x%08X repeat=%u ",
+				(unsigned int) input.terminalEvent.virtualKey,
+				(unsigned int) input.terminalEvent.unicode,
+				(unsigned int) input.terminalEvent.controlState,
+				(unsigned int) input.terminalEvent.repeatCount);
+	}
+#else
+	fputs ("[signalbox:key] source=curses function=wget_wch ", output);
+#endif
 	if (passwordActive && input.status == OK) {
 		fprintf (output, "status=%s ordinary_character_received context=%s\n",
 				status, SbUiCursesInputContextName (context));
@@ -410,33 +431,22 @@ static void SbUiCursesDebugKey (const SbTuiInput input,
 
 static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 		const SbTuiInputContext context, const bool passwordActive) {
-#ifdef SIGNALBOX_PDCURSES_VT
-	/* PDCursesMod 4.5.4's VT port waits for the first byte in wget_wch(),
-	 * but reads the rest of an ESC sequence with immediate _kbhit() checks.
-	 * Wait on the public console handle without consuming that byte, then give
-	 * Windows Terminal one short interval to enqueue the complete sequence. */
+#ifdef _WIN32
 	const int delay = wgetdelay (window);
 	const bool wasNodelay = is_nodelay (window);
-	const int waitTimeout = wasNodelay ? 0 : (delay > 0 ? delay : -1);
-	const bool keyReady = SbPlatformWaitForConsoleInput (waitTimeout);
-	if (keyReady) SbPlatformSleepMs (20);
-#endif
+	const int timeout = wasNodelay ? 0 : (delay > 0 ? delay : -1);
+	const SbTerminalInputEvent event = SbTerminalReadInput (timeout);
+	const SbTuiInput input = {event.status, event.key, event.key, event};
+#else
 	/* Keep the status and output value separate.  wget_wch() returns a status;
 	 * the logical key is written through its output argument. */
 	wint_t key = 0;
-#ifdef SIGNALBOX_PDCURSES_VT
-	/* The console wait above owns this read's timeout.  Make the consuming read
-	 * immediate, then restore the caller's timed, blocking, or nodelay state. */
-	if (keyReady) wtimeout (window, 0);
-	const int status = keyReady ? wget_wch (window, &key) : ERR;
-	if (keyReady) wtimeout (window, wasNodelay ? 0 : (delay > 0 ? delay : -1));
-#else
 	const int status = wget_wch (window, &key);
-#endif
 	const int rawKey = status == ERR ? ERR : (int) key;
 	/* The shared renderer treats all three common Enter forms identically. */
 	const int normalized = rawKey == '\r' || rawKey == KEY_ENTER ? '\n' : rawKey;
 	const SbTuiInput input = {status, rawKey, normalized};
+#endif
 #ifdef SIGNALBOX_PDCURSESMOD
 	SbUiCursesDebugKey (input, context, passwordActive);
 #else
@@ -448,9 +458,10 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 
 static bool SbUiCursesResize (SbUiCursesData *data) {
 #ifdef SIGNALBOX_PDCURSESMOD
-	/* PDCurses requires the application to adopt a user resize before stdscr
-	 * and curscr dimensions change.  It does not resize application windows. */
-	if (is_termresized () && resize_term (0, 0) == ERR) {
+	/* The native adapter consumes WINDOW_BUFFER_SIZE_EVENT before PDCurses can
+	 * observe it, so explicitly adopt the active console's current dimensions.
+	 * PDCurses does not resize application windows. */
+	if (resize_term (0, 0) == ERR) {
 		tuiDebugPrint ("resize_term failed\n");
 		return false;
 	}
@@ -2419,6 +2430,16 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	noecho ();
 	keypad (stdscr, TRUE);
 	wtimeout (stdscr, settings->visualizerSpectrum ? 80 : 1000);
+#ifdef _WIN32
+	if (!SbTerminalInputInit ()) {
+		endwin ();
+		delscreen (data->screen);
+		pthread_mutex_destroy (&data->statusLock);
+		SbStationBrowserDestroy (&data->browser);
+		free (data);
+		return false;
+	}
+#endif
 	getmaxyx (stdscr, data->screenRows, data->screenCols);
 	(void) curs_set (0);
 	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
@@ -2429,6 +2450,10 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	renderer->data = data;
 #ifdef SIGNALBOX_PDCURSESMOD
 	SbUiCursesOpenKeyLog ();
+#ifdef _WIN32
+	if (SbUiCursesKeyLog != NULL)
+		SbTerminalInputDiagnostic (SbUiCursesKeyLog);
+#endif
 #endif
 	tuiDebugPrint ("renderer_init theme=%d colors=%s\n", (int) theme,
 			data->colors ? "yes" : "no");
