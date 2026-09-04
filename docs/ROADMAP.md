@@ -125,12 +125,10 @@ plans, not promises of a date or release.
 - [x] Complete the W0 source/dependency audit and define the platform boundaries,
   toolchain, packaging policy, risks, and staged implementation plan in
   [`WINDOWS.md`](WINDOWS.md).
-- [ ] W1: produce a native MSYS2 UCRT64 `signalbox.exe` and pass a `--help`
-  smoke test without requiring TUI/audio parity.
-  The source/build foundation is implemented and passes macOS regression and
-  CLI smoke tests; native UCRT64 production and execution are still awaiting a
-  Windows environment.
-- [ ] W2: support the full PDCursesMod VT TUI in Windows Terminal.
+- [x] W1: produce a native MSYS2 UCRT64 `signalbox.exe` and pass native spectrum,
+  direct/redirected `--help`, conflicting-mode, and explicit W1 `--tui` stub
+  smoke tests without requiring TUI/audio parity.
+- [ ] W2: PDCursesMod VT renderer + Windows Terminal TUI bring-up.
 - [ ] W3: support stable native audio playback while preserving PCM-driven
   spectrum analysis.
 - [ ] W4: add a Windows Credential Manager backend behind the existing

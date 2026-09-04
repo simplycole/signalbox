@@ -1,10 +1,10 @@
 # Windows portability plan
 
 This document records the Phase W0 source audit, implementation plan, and the
-W1 compile foundation. Windows remains a developer target until the UCRT64
-build and smoke tests below have run on Windows.
+completed W1 compile foundation. Windows remains a developer target while the
+later runtime, packaging, and release milestones are completed.
 
-## W1 native compile foundation
+## W1 native compile foundation — complete
 
 W1 adds a small `src/platform.c` boundary for UTF-8 configuration paths,
 monotonic time, local time, and shutdown notification. Windows configuration
@@ -43,10 +43,13 @@ device playback has not been validated. Credential Manager, durable account
 writes, event/password subprocesses, audio/FIFO paths, and Named Pipe control
 are unavailable. Unix `contrib/` tools remain Unix-only.
 
-The code and commands above were prepared on macOS, where the spectrum test,
-full build, and CLI smoke tests pass. No Windows toolchain was available in
-that environment, so producing `signalbox.exe` and running the Windows smoke
-tests remain required before checking off W1.
+W1 was validated on Windows 11 using MSYS2 UCRT64 and MinGW-w64 GCC 16.2.0.
+The native build produced an x86-64 PE32+ `signalbox.exe`; the native spectrum
+test passed; direct and redirected `--help` calls exited 0; both orders of the
+conflicting `--tui`/`--classic` flags produced the expected diagnostic and
+exited 2; and explicit `--tui` produced the W1 unavailable diagnostic and
+exited 1. MinGW links `-luuid` alongside `-lshell32` and `-lole32` for the
+`FOLDERID_RoamingAppData` GUID used by Known Folder lookup.
 
 ## Executive summary
 
@@ -68,9 +71,8 @@ small interface before adopting a direct WASAPI backend (the preferred final
 backend). Ship a ZIP containing the executable, dependency DLLs, licenses, and
 notices.
 
-The safest next code pass is **W1: introduce only paths, time, and control-event
-platform seams, then obtain a UCRT64 build whose `--help` smoke test succeeds**.
-TUI and audio changes should remain out of W1.
+The next milestone is **W2: PDCursesMod VT renderer + Windows Terminal TUI
+bring-up**. Audio remains deferred to W3.
 
 ## Classification
 
@@ -422,8 +424,8 @@ not release support time.
 | Phase | Exit criterion | Effort |
 |---|---|---|
 | W0 | Audited source and dependencies; architecture and risks recorded | Small (this document) |
-| W1 — native compile | UCRT64 builds `signalbox.exe`; `--help` passes; config/path initialization has a unit/smoke test. TUI, audio, FIFO, event/password commands, and credentials may be compile-time unavailable. | Medium |
-| W2 — terminal | PDCursesMod VT TUI starts in Windows Terminal; login/stations, keys, resize, colors, restoration, narrow fallback, history/upcoming, and spectrum rendering work. | Large |
+| W1 — native compile (complete) | UCRT64 builds `signalbox.exe`; native spectrum and CLI smoke tests pass. TUI, audio, FIFO, event/password commands, and credentials remain unavailable at this milestone boundary. | Medium |
+| W2 — PDCursesMod VT renderer + Windows Terminal TUI bring-up | PDCursesMod VT TUI starts in Windows Terminal; login/stations, keys, resize, colors, restoration, narrow fallback, history/upcoming, and spectrum rendering work. | Large |
 | W3 — playback | Authenticated FFmpeg decode and stable audio; pause/next/station changes; real PCM drives the analyzer without stutter. Decide libao bootstrap versus WASAPI/miniaudio from spike data. | Large |
 | W4 — credentials | Credential Manager remember, auto-login, stale recovery, and forget flows pass. | Small–medium |
 | W5 — control | Per-user named pipe and a PowerShell sender preserve command semantics. | Medium |
@@ -461,7 +463,7 @@ or password commands are likewise not first-release requirements. Classic
 interactive operation remains a core goal; every Unix automation helper does
 not.
 
-## Validation completed in W0
+## Validation completed through W1
 
 - Inspected every `src/*.c`/`.h` module, `src/libpiano`, the Makefile, current
   Linux/macOS CI, documentation, tests, and all `contrib` entries.
@@ -470,8 +472,11 @@ not.
 - Enumerated the curses calls used by the renderer.
 - Verified current MSYS2 UCRT64 package records for FFmpeg, curl variants,
   json-c, libgcrypt, libao, PDCursesMod, and pkgconf.
-- Ran the existing native build/test validation after documentation changes;
-  no Windows toolchain was installed and no proof-of-compile was attempted.
+- On Windows 11 with MSYS2 UCRT64 and MinGW-w64 GCC 16.2.0, built the native
+  x86-64 PE32+ `signalbox.exe` and passed `spectrum-test`.
+- Verified direct and redirected `--help` calls exit 0, conflicting mode flags
+  in either order exit 2, and the explicit W1 `--tui` stub exits 1 with its
+  documented unavailable diagnostic.
 
 ## Open questions
 
