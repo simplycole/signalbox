@@ -71,6 +71,11 @@ typedef enum {
 	SB_TUI_FOCUS_RECENT,
 } SbTuiFocus;
 
+typedef enum {
+	SB_TUI_SIZE_NORMAL = 0,
+	SB_TUI_SIZE_TOO_SMALL,
+} SbTuiSizeState;
+
 typedef struct {
 	SCREEN *screen;
 	pthread_mutex_t statusLock;
@@ -94,6 +99,8 @@ typedef struct {
 	size_t observedHistoryCount;
 	int screenRows;
 	int screenCols;
+	SbTuiSizeState sizeState;
+	bool recoveryPending;
 } SbUiCursesData;
 
 static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
@@ -466,38 +473,101 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 	return input;
 }
 
+#ifdef SIGNALBOX_PDCURSESMOD
+static const char *SbUiCursesSizeStateName (const SbTuiSizeState state) {
+	return state == SB_TUI_SIZE_TOO_SMALL ? "TOO_SMALL" : "NORMAL";
+}
+
+static void SbUiCursesResizeDiagnostic (const char *format, ...) {
+	va_list fmtargs;
+	va_start (fmtargs, format);
+	if (SbUiCursesKeyLog != NULL) {
+		va_list copy;
+		va_copy (copy, fmtargs);
+		fputs ("[signalbox:resize] ", SbUiCursesKeyLog);
+		vfprintf (SbUiCursesKeyLog, format, copy);
+		fputc ('\n', SbUiCursesKeyLog);
+		fflush (SbUiCursesKeyLog);
+		va_end (copy);
+	}
+	if (tuiDebugEnable ()) {
+		fputs ("[signalbox:resize] ", stderr);
+		vfprintf (stderr, format, fmtargs);
+		fputc ('\n', stderr);
+		fflush (stderr);
+	}
+	va_end (fmtargs);
+}
+#endif
+
 static bool SbUiCursesResize (SbUiCursesData *data) {
 #ifdef SIGNALBOX_PDCURSESMOD
 	/* The native adapter consumes WINDOW_BUFFER_SIZE_EVENT before PDCurses can
-	 * observe it, so explicitly adopt the active console's current dimensions.
-	 * PDCurses does not resize application windows. */
-	if (resize_term (0, 0) == ERR) {
-		tuiDebugPrint ("resize_term failed\n");
-		return false;
+	 * observe it.  It is the sole Windows resize trigger; do not also poll
+	 * is_termresized() while rendering.  Zero dimensions tell PDCurses to adopt
+	 * the console geometry without Signalbox forcing a new buffer/window size. */
+	int visibleRows = 0, visibleCols = 0;
+#ifdef _WIN32
+	CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+	/* PDCurses WinCon owns an alternate screen buffer, so STD_OUTPUT_HANDLE can
+	 * still name the original buffer. CONOUT$ resolves to the active viewport. */
+	HANDLE const activeOutput = CreateFileW (L"CONOUT$", GENERIC_READ,
+			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (activeOutput != INVALID_HANDLE_VALUE &&
+			GetConsoleScreenBufferInfo (activeOutput, &consoleInfo)) {
+		visibleRows = consoleInfo.srWindow.Bottom - consoleInfo.srWindow.Top + 1;
+		visibleCols = consoleInfo.srWindow.Right - consoleInfo.srWindow.Left + 1;
 	}
+	if (activeOutput != INVALID_HANDLE_VALUE) CloseHandle (activeOutput);
+#endif
+	const int resizeResult = resize_term (0, 0);
+#else
+	const int resizeResult = OK;
 #endif
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	if (rows == data->screenRows && cols == data->screenCols) return false;
+	const SbTuiSizeState previousState = data->sizeState;
+	const SbTuiSizeState nextState = rows < 15 || cols < 50 ?
+			SB_TUI_SIZE_TOO_SMALL : SB_TUI_SIZE_NORMAL;
 	const bool shrinking = rows < data->screenRows || cols < data->screenCols;
 	data->screenRows = rows;
 	data->screenCols = cols;
-	if (shrinking) {
+	data->sizeState = nextState;
+	if (previousState == SB_TUI_SIZE_TOO_SMALL &&
+			nextState == SB_TUI_SIZE_NORMAL) data->recoveryPending = true;
+	if (shrinking || previousState != nextState) {
 		/* The virtual screen can retain cells from the old, larger geometry.
 		 * Force the next update to discard both virtual and physical state. */
 		erase ();
 		clearok (stdscr, TRUE);
-		clearok (curscr, TRUE);
 		touchwin (stdscr);
 	} else {
 		erase ();
 	}
-	data->scrollOffset = data->selectedIndex;
-	data->recentOffset = data->recentSelected;
-	data->helpOffset = 0;
+	if (nextState == SB_TUI_SIZE_NORMAL) {
+		data->scrollOffset = data->selectedIndex;
+		data->recentOffset = data->recentSelected;
+		data->helpOffset = 0;
+	}
+#ifdef SIGNALBOX_PDCURSESMOD
+	if (previousState != nextState) {
+		SbUiCursesResizeDiagnostic ("from=%s to=%s cols=%d rows=%d",
+				SbUiCursesSizeStateName (previousState),
+				SbUiCursesSizeStateName (nextState), cols, rows);
+	} else if (nextState == SB_TUI_SIZE_TOO_SMALL) {
+		SbUiCursesResizeDiagnostic ("state=TOO_SMALL cols=%d rows=%d",
+				cols, rows);
+	}
+	SbUiCursesResizeDiagnostic (
+			"curses_cols=%d curses_rows=%d win32_visible_cols=%d "
+			"win32_visible_rows=%d resize_term=%s app_windows_recreated=no",
+			cols, rows, visibleCols, visibleRows,
+			resizeResult == ERR ? "failed" : "ok");
+#endif
 	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
 			shrinking ? "yes" : "no");
-	return true;
+	return resizeResult != ERR;
 }
 
 static void SbUiCursesTime (char *dest, const size_t size,
@@ -1188,9 +1258,6 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	int rows, cols;
-#ifdef SIGNALBOX_PDCURSESMOD
-	if (is_termresized ()) SbUiCursesResize (data);
-#endif
 	getmaxyx (stdscr, rows, cols);
 	erase ();
 	attrset (SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
@@ -1198,7 +1265,6 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	SbUiCursesFooter (renderer, footer, sizeof (footer), cols);
 
 	if (rows < 15 || cols < 50) {
-		data->focus = SB_TUI_FOCUS_STATIONS;
 		const int left = cols > 6 ? 3 : 0;
 		const int width = cols > left ? cols - left : 0;
 		if (rows > 0) {
@@ -1209,7 +1275,8 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		if (rows > 1)
 			SbUiCursesPut (1, left, width, "Resize to at least 50x15");
 		if (rows > 2) SbUiCursesPut (2, left, width, "q quit");
-		refresh ();
+		wnoutrefresh (stdscr);
+		doupdate ();
 		return;
 	}
 	if (cols < 80 || rows < 24) data->focus = SB_TUI_FOCUS_STATIONS;
@@ -1388,10 +1455,27 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			wnoutrefresh (help);
 			doupdate ();
 			delwin (help);
+			if (data->recoveryPending) {
+#ifdef SIGNALBOX_PDCURSESMOD
+				SbUiCursesResizeDiagnostic (
+						"rebuild_complete cols=%d rows=%d app_windows_recreated=yes",
+						cols, rows);
+#endif
+				data->recoveryPending = false;
+			}
 			return;
 		}
 	}
-	refresh ();
+	if (data->recoveryPending) {
+		wnoutrefresh (stdscr);
+		doupdate ();
+#ifdef SIGNALBOX_PDCURSESMOD
+		SbUiCursesResizeDiagnostic (
+				"rebuild_complete cols=%d rows=%d app_windows_recreated=no",
+				cols, rows);
+#endif
+		data->recoveryPending = false;
+	} else refresh ();
 }
 
 static WINDOW *SbUiCursesModal (const SbUiCursesData *data,
@@ -2082,8 +2166,16 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key == KEY_RESIZE) {
-		tuiDebugPrint ("resize\n");
 		SbUiCursesResize (data);
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (data->sizeState == SB_TUI_SIZE_TOO_SMALL) {
+		if (key >= 0 && key <= UCHAR_MAX &&
+				BarUiCommandFromKey (renderer->settings, (char) key) ==
+				SB_UI_CMD_QUIT) {
+			return (SbUiCommandEvent) {SB_UI_CMD_QUIT, NULL};
+		}
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
@@ -2461,6 +2553,8 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	}
 #endif
 	getmaxyx (stdscr, data->screenRows, data->screenCols);
+	data->sizeState = data->screenRows < 15 || data->screenCols < 50 ?
+			SB_TUI_SIZE_TOO_SMALL : SB_TUI_SIZE_NORMAL;
 	(void) curs_set (0);
 	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
 		data->colors = SbUiCursesInitPalette (data, theme);
