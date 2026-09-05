@@ -687,6 +687,14 @@ int main (int argc, char **argv) {
 			(mode == MODE_AUTO && terminalSupportsTui);
 	app.tuiTheme = tuiTheme;
 
+#if defined(SIGNALBOX_PDCURSES_WINCON)
+	if (app.useTui)
+		fputs ("[signalbox:windows] renderer=wincon input=win32_event\n", stderr);
+#elif defined(SIGNALBOX_PDCURSES_VT)
+	if (app.useTui)
+		fputs ("[signalbox:windows] renderer=vt input=win32_event\n", stderr);
+#endif
+
 	/* save terminal attributes, before disabling echoing */
 	BarTermInit ();
 

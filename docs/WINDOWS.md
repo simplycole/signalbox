@@ -4,7 +4,7 @@ This document records the Phase W0 source audit, implementation plan, and the
 completed W1 compile foundation and the W2 implementation. Windows remains a developer target while the
 later runtime, packaging, and release milestones are completed.
 
-## W2 Windows Terminal TUI — WinCon prototype, VM validation pending
+## W2 Windows Terminal TUI — WinCon/VT comparison, VM validation pending
 
 W2 compiles the existing `src/ui_renderer_curses.c` against PDCursesMod; there
 is no separate Windows renderer. Native Windows mode selection deliberately
@@ -40,7 +40,8 @@ make clean
 make WINDOWS_CURSES_BACKEND=wincon
 ```
 
-The known-broken VT path remains available for an A/B comparison:
+The VT output path uses the same renderer and native Win32 input adapter for a
+direct A/B comparison:
 
 ```sh
 make clean
@@ -71,10 +72,12 @@ is used for drawing only. The adapter clears `ENABLE_VIRTUAL_TERMINAL_INPUT`,
 `ENABLE_LINE_INPUT`, `ENABLE_ECHO_INPUT`, and quick-edit mode, and enables
 `ENABLE_WINDOW_INPUT`. It preserves the host's `ENABLE_PROCESSED_INPUT` choice.
 `terminal_win32.c` saves the original input/output modes and code pages before
-curses starts and restores them after curses shuts down. It alone enables
-`ENABLE_VIRTUAL_TERMINAL_PROCESSING` for output. The input adapter reapplies its
-native mode after PDCursesMod initialization so the two components do not
-compete over input mode.
+curses starts and restores them after curses shuts down. For the VT renderer it
+enables `ENABLE_VIRTUAL_TERMINAL_PROCESSING` on output only; WinCon retains its
+native output mode. The input adapter reapplies its native mode after
+PDCursesMod initialization so the two components do not compete over input
+mode. Startup identifies the selected pairing as either
+`renderer=wincon input=win32_event` or `renderer=vt input=win32_event`.
 
 With `SIGNALBOX_DEBUG_KEYS=1`, the start of `signalbox-keys.log` reports
 `GetFileType`, `GetConsoleMode`, the relevant mode bits, and whether

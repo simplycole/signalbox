@@ -36,8 +36,12 @@ void BarTermInit (void) {
 	terminalState.codePagesSaved = terminalState.inputCodePage != 0 &&
 			terminalState.outputCodePage != 0;
 	if (terminalState.outputModeSaved) {
-		const DWORD mode = terminalState.outputMode | ENABLE_PROCESSED_OUTPUT |
-				ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+		DWORD mode = terminalState.outputMode | ENABLE_PROCESSED_OUTPUT;
+#ifdef SIGNALBOX_PDCURSES_VT
+		/* The VT backend emits terminal sequences, but input remains a native
+		 * INPUT_RECORD stream owned by terminal_input_win32.c. */
+		mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+#endif
 		(void) SetConsoleMode (terminalState.output, mode);
 	}
 	if (terminalState.inputModeSaved) {

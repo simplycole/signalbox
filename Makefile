@@ -89,8 +89,8 @@ ifneq (${WINDOWS},1)
 	NCURSESW_LDFLAGS:=$(shell $(PKG_CONFIG) --libs ncursesw)
 else
 # MSYS2 packages PDCursesMod's wide/UTF-8 ports as separate static archives.
-# WinCon uses native console input and is the default; keep VT selectable for
-# direct backend comparisons while its fragmented escape input is investigated.
+# Both renderers use Signalbox's native console input; WinCon is the default
+# while VT remains selectable for direct output-backend comparisons.
 WINDOWS_CURSES_BACKEND?=wincon
 ifeq ($(wildcard ${MINGW_PREFIX}/include/pdcurses.h),)
 $(error Windows TUI requires PDCursesMod: pacman -S mingw-w64-ucrt-x86_64-pdcurses)
