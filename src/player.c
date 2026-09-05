@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include <stdint.h>
 #include <limits.h>
 #include <assert.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <sys/stat.h>
 
@@ -63,6 +64,47 @@ THE SOFTWARE.
 /* default sample format */
 const enum AVSampleFormat avformat = AV_SAMPLE_FMT_S16;
 
+#ifdef _WIN32
+static const char *aoErrorName (const int error) {
+	switch (error) {
+		case AO_ENODRIVER: return "AO_ENODRIVER";
+		case AO_ENOTFILE: return "AO_ENOTFILE";
+		case AO_ENOTLIVE: return "AO_ENOTLIVE";
+		case AO_EBADOPTION: return "AO_EBADOPTION";
+		case AO_EOPENDEVICE: return "AO_EOPENDEVICE";
+		case AO_EOPENFILE: return "AO_EOPENFILE";
+		case AO_EFILEEXISTS: return "AO_EFILEEXISTS";
+		case AO_EBADFORMAT: return "AO_EBADFORMAT";
+		case AO_EFAIL: return "AO_EFAIL";
+		default: return "unknown";
+	}
+}
+
+static void printAoDrivers (void) {
+	int driverCount = 0;
+	ao_info ** const drivers = ao_driver_info_list (&driverCount);
+	fprintf (stderr, "[signalbox:audio] backend=libao\n");
+	for (int i = 0; i < driverCount; i++) {
+		const ao_info * const info = drivers == NULL ? NULL : drivers[i];
+		if (info != NULL) {
+			fprintf (stderr,
+					"[signalbox:audio] driver id=%d short_name=%s type=%s\n",
+					i, info->short_name == NULL ? "(unknown)" : info->short_name,
+					info->type == AO_TYPE_LIVE ? "live" :
+					info->type == AO_TYPE_FILE ? "file" : "unknown");
+		}
+	}
+	const int defaultDriver = ao_default_driver_id ();
+	fprintf (stderr, "[signalbox:audio] default_driver_id=%d\n", defaultDriver);
+	if (defaultDriver >= 0) {
+		const ao_info * const info = ao_driver_info (defaultDriver);
+		fprintf (stderr, "[signalbox:audio] default_driver=%s\n",
+				info == NULL || info->short_name == NULL ?
+				"(unknown)" : info->short_name);
+	}
+}
+#endif
+
 static void printError (const BarSettings_t * const settings,
 		const char * const msg, int ret) {
 	char avmsg[128];
@@ -74,6 +116,9 @@ static void printError (const BarSettings_t * const settings,
  */
 void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 	ao_initialize ();
+#ifdef _WIN32
+	printAoDrivers ();
+#endif
 	av_log_set_level (AV_LOG_FATAL);
 #ifdef HAVE_AV_REGISTER_ALL
 	av_register_all ();
@@ -372,10 +417,28 @@ static bool openDevice (player_t * const player) {
 	} else {
 		// use driver from libao configuration
 		driver = ao_default_driver_id ();
+#ifdef _WIN32
+		fprintf (stderr,
+				"[signalbox:audio] open rate=%d channels=%d bits=%d byte_format=native\n",
+				aoFmt.rate, aoFmt.channels, aoFmt.bits);
+		if (driver < 0) {
+			fprintf (stderr, "[signalbox:audio] open=failed error=%d name=%s\n",
+					AO_ENODRIVER, aoErrorName (AO_ENODRIVER));
+			return false;
+		}
+		errno = 0;
+#endif
 		if ((player->aoDev = ao_open_live (driver, &aoFmt, NULL)) == NULL) {
+#ifdef _WIN32
+			fprintf (stderr, "[signalbox:audio] open=failed error=%d name=%s\n",
+					errno, aoErrorName (errno));
+#endif
 			BarUiMsg (player->settings, MSG_ERR, "Cannot open audio device.\n");
 			return false;
 		}
+#ifdef _WIN32
+		fprintf (stderr, "[signalbox:audio] open=ok\n");
+#endif
 	}
 
 	return true;
@@ -587,6 +650,9 @@ void *BarAoPlayThread (void *data) {
 	assert (filteredFrame != NULL);
 
 	int ret;
+#ifdef _WIN32
+	unsigned int diagnosticWrites = 0;
+#endif
 	const double timeBase = av_q2d (av_buffersink_get_time_base (player->fbufsink)),
 			timeBaseSt = av_q2d (player->st->time_base);
 	while (!shouldQuit(player)) {
@@ -620,8 +686,20 @@ void *BarAoPlayThread (void *data) {
 					(unsigned int) numChannels,
 					(unsigned int) filteredFrame->sample_rate);
 		}
-		ao_play (player->aoDev, (char *) filteredFrame->data[0],
-				filteredFrame->nb_samples * numChannels * bps);
+		const uint_32 pcmBytes = filteredFrame->nb_samples * numChannels * bps;
+		const int played = ao_play (player->aoDev,
+				(char *) filteredFrame->data[0], pcmBytes);
+#ifdef _WIN32
+		if (diagnosticWrites < 3) {
+			fprintf (stderr, "[signalbox:audio] pcm_bytes=%" PRIu32 "\n",
+					pcmBytes);
+			fprintf (stderr, "[signalbox:audio] play=%s\n",
+					played ? "ok" : "failed");
+			diagnosticWrites++;
+		}
+#else
+		(void) played;
+#endif
 
 		const double timestamp = (double) filteredFrame->pts * timeBase;
 		const unsigned int songPlayed = timestamp;
