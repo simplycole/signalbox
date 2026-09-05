@@ -101,7 +101,17 @@ typedef struct {
 	int screenCols;
 	SbTuiSizeState sizeState;
 	bool recoveryPending;
+#ifdef _WIN32
+	bool resizePending;
+	ULONGLONG resizeLastEventMs;
+	int resizePendingRows;
+	int resizePendingCols;
+#endif
 } SbUiCursesData;
+
+#ifdef _WIN32
+#define SB_WINDOWS_RESIZE_SETTLE_MS 100
+#endif
 
 static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
 	return BarUiCommandFromKey (renderer->settings, 'V') == SB_UI_CMD_NONE;
@@ -536,37 +546,6 @@ static void SbUiCursesResizeAxisDiagnostic (const int oldCols,
 	}
 }
 
-#if defined(SIGNALBOX_PDCURSES_WINCON) && defined(_WIN32)
-static bool SbUiCursesClearActiveViewport (void) {
-	/* CONOUT$ names PDCurses WinCon's active alternate buffer; the inherited
-	 * stdout handle may still name the original console buffer. */
-	HANDLE const output = CreateFileW (L"CONOUT$", GENERIC_READ | GENERIC_WRITE,
-			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-	if (output == INVALID_HANDLE_VALUE) return false;
-	CONSOLE_SCREEN_BUFFER_INFO info;
-	bool cleared = false;
-	if (GetConsoleScreenBufferInfo (output, &info)) {
-		const DWORD width = (DWORD) (info.srWindow.Right -
-				info.srWindow.Left + 1);
-		const int firstRow = info.srWindow.Top;
-		const int lastRow = info.srWindow.Bottom;
-		cleared = true;
-		for (int row = firstRow; row <= lastRow; row++) {
-			const COORD start = {info.srWindow.Left, (SHORT) row};
-			DWORD charsWritten = 0, attrsWritten = 0;
-			if (!FillConsoleOutputCharacterW (output, L' ', width, start,
-					&charsWritten) || charsWritten != width ||
-					!FillConsoleOutputAttribute (output, info.wAttributes, width,
-							start, &attrsWritten) || attrsWritten != width) {
-				cleared = false;
-				break;
-			}
-		}
-	}
-	CloseHandle (output);
-	return cleared;
-}
-#endif
 #endif
 
 static bool SbUiCursesResize (SbUiCursesData *data) {
@@ -618,15 +597,9 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	data->screenRows = rows;
 	data->screenCols = cols;
 	data->sizeState = nextState;
-	if (previousState == SB_TUI_SIZE_TOO_SMALL &&
-			nextState == SB_TUI_SIZE_NORMAL) data->recoveryPending = true;
-	/* Every adopted geometry invalidates the physical cell map.  This matters
-	 * while growing as well as shrinking: otherwise old borders can survive as
-	 * diagonal/stair-step remnants until a later complete refresh. */
-#if defined(SIGNALBOX_PDCURSES_WINCON) && defined(_WIN32)
-	const bool activeViewportCleared = oldCols != cols ?
-			SbUiCursesClearActiveViewport () : false;
-#endif
+	/* Route the first frame at every new geometry through wnoutrefresh/doupdate. */
+	data->recoveryPending = true;
+	/* Every adopted geometry invalidates the physical cell map. */
 	erase ();
 	clearok (stdscr, TRUE);
 	touchwin (stdscr);
@@ -651,15 +624,92 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 			"app_windows_recreated=no",
 			cols, rows, visibleCols, visibleRows,
 			resizeResult == ERR ? "failed" : "ok", queuedResizes);
-#if defined(SIGNALBOX_PDCURSES_WINCON) && defined(_WIN32)
-	if (oldCols != cols)
-		SbUiCursesResizeDiagnostic ("width_clear=%s",
-				activeViewportCleared ? "ok" : "failed");
-#endif
 #endif
 	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
 			shrinking ? "yes" : "no");
 	return resizeResult != ERR;
+}
+
+#ifdef _WIN32
+static bool SbUiCursesConsoleSize (int *rows, int *cols) {
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	HANDLE const output = CreateFileW (L"CONOUT$", GENERIC_READ,
+			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	const bool available = output != INVALID_HANDLE_VALUE &&
+			GetConsoleScreenBufferInfo (output, &info);
+	if (output != INVALID_HANDLE_VALUE) CloseHandle (output);
+	if (!available) return false;
+	*rows = info.srWindow.Bottom - info.srWindow.Top + 1;
+	*cols = info.srWindow.Right - info.srWindow.Left + 1;
+	return true;
+}
+
+static void SbUiCursesResizeSettleDiagnostic (const char *format, ...) {
+	va_list fmtargs;
+	va_start (fmtargs, format);
+	FILE *outputs[] = {SbUiCursesKeyLog, tuiDebugEnable () ? stderr : NULL};
+	for (size_t i = 0; i < sizeof (outputs) / sizeof (*outputs); i++) {
+		FILE * const output = outputs[i];
+		if (output == NULL || (i > 0 && output == outputs[0])) continue;
+		va_list copy;
+		va_copy (copy, fmtargs);
+		fputs ("[signalbox:resize-settle] ", output);
+		vfprintf (output, format, copy);
+		fputc ('\n', output);
+		fflush (output);
+		va_end (copy);
+	}
+	va_end (fmtargs);
+}
+
+/* Returns true when the resize was adopted immediately.  Width changes are
+ * only recorded here; the previous complete frame remains visible. */
+static bool SbUiCursesResizeEvent (SbUiCursesData *data) {
+	int rows = data->screenRows, cols = data->screenCols;
+	(void) SbUiCursesConsoleSize (&rows, &cols);
+	if (data->resizePending || cols != data->screenCols) {
+		const bool beginning = !data->resizePending;
+		data->resizePending = true;
+		data->resizePendingRows = rows;
+		data->resizePendingCols = cols;
+		data->resizeLastEventMs = GetTickCount64 ();
+		if (beginning) SbUiCursesResizeSettleDiagnostic ("begin");
+		SbUiCursesResizeSettleDiagnostic ("update cols=%d rows=%d", cols, rows);
+		return false;
+	}
+	return SbUiCursesResize (data);
+}
+
+static int SbUiCursesResizeWaitMs (const SbUiCursesData *data,
+		const int normalTimeoutMs) {
+	if (!data->resizePending) return normalTimeoutMs;
+	const ULONGLONG elapsed = GetTickCount64 () - data->resizeLastEventMs;
+	const int remaining = elapsed >= SB_WINDOWS_RESIZE_SETTLE_MS ? 0 :
+			(int) (SB_WINDOWS_RESIZE_SETTLE_MS - elapsed);
+	return normalTimeoutMs < 0 || remaining < normalTimeoutMs ?
+			remaining : normalTimeoutMs;
+}
+
+static bool SbUiCursesResizeSettled (SbUiCursesData *data) {
+	if (!data->resizePending) return true;
+	const ULONGLONG elapsed = GetTickCount64 () - data->resizeLastEventMs;
+	if (elapsed < SB_WINDOWS_RESIZE_SETTLE_MS) return false;
+	const int requestedRows = data->resizePendingRows;
+	const int requestedCols = data->resizePendingCols;
+	data->resizePending = false;
+	(void) SbUiCursesResize (data);
+	SbUiCursesResizeSettleDiagnostic ("redraw cols=%d rows=%d elapsed=%llu",
+			requestedCols, requestedRows, (unsigned long long) elapsed);
+	return true;
+}
+#endif
+
+static bool SbUiCursesHandleResize (SbUiCursesData *data) {
+#ifdef _WIN32
+	return SbUiCursesResizeEvent (data);
+#else
+	return SbUiCursesResize (data);
+#endif
 }
 
 static void SbUiCursesTime (char *dest, const size_t size,
@@ -1349,6 +1399,10 @@ static void SbUiCursesUpcoming (const SbUiCursesData *data,
 static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
+#ifdef _WIN32
+	/* Keep the last complete frame intact throughout a horizontal resize burst. */
+	if (!SbUiCursesResizeSettled (data)) return;
+#endif
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
@@ -1632,17 +1686,38 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
 		const int cursorCells = SbUiCursesWideWidth (&input[start], cursor - start);
 		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
-		wnoutrefresh (window);
-		doupdate ();
+		#ifdef _WIN32
+		if (!data->resizePending) {
+		#endif
+			wnoutrefresh (window);
+			doupdate ();
+		#ifdef _WIN32
+		}
+		#endif
+		int timeoutMs = -1;
+#ifdef _WIN32
+		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
+#endif
 		const SbTuiInput read = SbUiCursesReadKey (window,
-				SB_TUI_INPUT_MODAL, false, -1);
+				SB_TUI_INPUT_MODAL, false, timeoutMs);
 		const int result = read.status;
 		const int key = read.key;
-		if (result == ERR) continue;
+		if (result == ERR) {
+#ifdef _WIN32
+			if (data->resizePending && SbUiCursesResizeSettled (data)) {
+				delwin (window);
+				window = NULL;
+				SbUiCursesFrame (renderer, model);
+			}
+#endif
+			continue;
+		}
 		if (key == KEY_RESIZE) {
-			delwin (window);
-			window = NULL;
-			if (SbUiCursesResize (data)) SbUiCursesFrame (renderer, model);
+			if (SbUiCursesHandleResize (data)) {
+				delwin (window);
+				window = NULL;
+				SbUiCursesFrame (renderer, model);
+			}
 			continue;
 		}
 		if (key == 27) {
@@ -1701,11 +1776,20 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			/* No modal exists while suspended.  Continue consuming native resize
 			 * events through stdscr so recovery cannot spin on newwin(NULL). */
 			(void) curs_set (0);
+			int timeoutMs = -1;
+#ifdef _WIN32
+			timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
+#endif
 			const SbTuiInput read = SbUiCursesReadKey (stdscr,
-					SB_TUI_INPUT_LOGIN, false, -1);
-			if (read.status == ERR) continue;
+					SB_TUI_INPUT_LOGIN, false, timeoutMs);
+			if (read.status == ERR) {
+				SbUiCursesFrame (renderer, model);
+				if (data->sizeState == SB_TUI_SIZE_NORMAL)
+					recreatePending = true;
+				continue;
+			}
 			if (read.key == KEY_RESIZE) {
-				SbUiCursesResize (data);
+				SbUiCursesHandleResize (data);
 				SbUiCursesFrame (renderer, model);
 				if (data->sizeState == SB_TUI_SIZE_NORMAL)
 					recreatePending = true;
@@ -1779,31 +1863,53 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			(void) curs_set (1);
 			wmove (window, 6, 22 + (int) visiblePass);
 		} else (void) curs_set (0);
-		wnoutrefresh (window);
-		doupdate ();
+		#ifdef _WIN32
+		if (!data->resizePending) {
+		#endif
+			wnoutrefresh (window);
+			doupdate ();
+		#ifdef _WIN32
+		}
+		#endif
 		if (recreatePending) {
 #ifdef SIGNALBOX_PDCURSESMOD
 			SbUiCursesLoginResizeDiagnostic ("rebuild_complete");
 #endif
 			recreatePending = false;
 		}
+		int timeoutMs = -1;
+#ifdef _WIN32
+		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
+#endif
 		const SbTuiInput read = SbUiCursesReadKey (window,
-				SB_TUI_INPUT_LOGIN, field == 1, -1);
+				SB_TUI_INPUT_LOGIN, field == 1, timeoutMs);
 		const int result = read.status;
 		const int key = read.key;
-		if (result == ERR) continue;
+		if (result == ERR) {
+#ifdef _WIN32
+			if (data->resizePending && SbUiCursesResizeSettled (data)) {
+				delwin (window);
+				window = NULL;
+				recreatePending = data->sizeState == SB_TUI_SIZE_NORMAL;
+				SbUiCursesFrame (renderer, model);
+			}
+#endif
+			continue;
+		}
 		if (key == KEY_RESIZE) {
-			delwin (window);
-			window = NULL;
-			SbUiCursesResize (data);
-			if (data->sizeState == SB_TUI_SIZE_TOO_SMALL) {
+			const bool resized = SbUiCursesHandleResize (data);
+			if (resized) {
+				delwin (window);
+				window = NULL;
+			}
+			if (resized && data->sizeState == SB_TUI_SIZE_TOO_SMALL) {
 				(void) curs_set (0);
 #ifdef SIGNALBOX_PDCURSESMOD
 				SbUiCursesLoginResizeDiagnostic ("suspend cols=%d rows=%d",
 						data->screenCols, data->screenRows);
 #endif
 			}
-			SbUiCursesFrame (renderer, model);
+			if (resized) SbUiCursesFrame (renderer, model);
 			continue;
 		}
 		if (key == 27) {
@@ -2139,11 +2245,18 @@ static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
 				strlen (filter) + 1 < sizeof (filter) ? "_" : "");
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
+		int timeoutMs = -1;
+#ifdef _WIN32
+		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
+#endif
 		const int key = SbUiCursesReadKey (stdscr,
-				SB_TUI_INPUT_MODAL, false, -1).key;
-		if (key == ERR) continue;
+				SB_TUI_INPUT_MODAL, false, timeoutMs).key;
+		if (key == ERR) {
+			SbUiCursesFrame (renderer, model);
+			continue;
+		}
 		if (key == KEY_RESIZE) {
-			SbUiCursesResize (data);
+			SbUiCursesHandleResize (data);
 			continue;
 		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) break;
@@ -2197,11 +2310,18 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 		snprintf (prompt, sizeof (prompt), "Jump to station #: %s_", digits);
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
+		int timeoutMs = -1;
+#ifdef _WIN32
+		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
+#endif
 		const int key = SbUiCursesReadKey (stdscr,
-				SB_TUI_INPUT_NUMERIC_JUMP, false, -1).key;
-		if (key == ERR) continue;
+				SB_TUI_INPUT_NUMERIC_JUMP, false, timeoutMs).key;
+		if (key == ERR) {
+			SbUiCursesFrame (renderer, model);
+			continue;
+		}
 		if (key == KEY_RESIZE) {
-			SbUiCursesResize (data);
+			SbUiCursesHandleResize (data);
 			continue;
 		}
 		if (key == 27) {
@@ -2300,15 +2420,19 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
+	int timeoutMs = model->visualizerEnabled ? 80 : 1000;
+#ifdef _WIN32
+	timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
+#endif
 	const int key = SbUiCursesReadKey (stdscr, data->helpVisible ?
 			SB_TUI_INPUT_HELP : SB_TUI_INPUT_MAIN, false,
-			model->visualizerEnabled ? 80 : 1000).key;
+			timeoutMs).key;
 	if (key == ERR) {
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key == KEY_RESIZE) {
-		SbUiCursesResize (data);
+		SbUiCursesHandleResize (data);
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
