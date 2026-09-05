@@ -111,24 +111,34 @@ static attr_t SbUiCursesRole (const SbUiCursesData *data,
 	return data->colors ? data->roleAttrs[role] : 0;
 }
 
+static attr_t SbUiCursesExtra (const attr_t extra) {
+#ifdef SIGNALBOX_PDCURSES_WINCON
+	/* WinCon maps intensity attributes through the console color bits.  Keep
+	 * selection reversal, but let semantic color roles carry emphasis. */
+	return extra & ~(A_BOLD | A_DIM | A_STANDOUT);
+#else
+	return extra;
+#endif
+}
+
 static void SbUiCursesAttrOn (const SbUiCursesData *data,
 		const SbTuiColorRole role, const attr_t extra) {
-	attron (SbUiCursesRole (data, role) | extra);
+	attron (SbUiCursesRole (data, role) | SbUiCursesExtra (extra));
 }
 
 static void SbUiCursesAttrOff (const SbUiCursesData *data,
 		const SbTuiColorRole role, const attr_t extra) {
-	attroff (SbUiCursesRole (data, role) | extra);
+	attroff (SbUiCursesRole (data, role) | SbUiCursesExtra (extra));
 }
 
 static void SbUiCursesWAttrOn (WINDOW *window, const SbUiCursesData *data,
 		const SbTuiColorRole role, const attr_t extra) {
-	wattron (window, SbUiCursesRole (data, role) | extra);
+	wattron (window, SbUiCursesRole (data, role) | SbUiCursesExtra (extra));
 }
 
 static void SbUiCursesWAttrOff (WINDOW *window, const SbUiCursesData *data,
 		const SbTuiColorRole role, const attr_t extra) {
-	wattroff (window, SbUiCursesRole (data, role) | extra);
+	wattroff (window, SbUiCursesRole (data, role) | SbUiCursesExtra (extra));
 }
 
 static const SbUiRendererOps cursesOps;

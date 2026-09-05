@@ -79,6 +79,10 @@ typedef struct {
 	ao_device *aoDev;
 	SbSpectrum spectrum;
 	bool spectrumReady;
+#ifdef _WIN32
+	/* Process-lifetime guard: diagnostic capture is deliberately one track. */
+	bool pcmCaptureAttempted;
+#endif
 
 	/* settings (must be set before starting the thread) */
 	double gain;

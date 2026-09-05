@@ -60,11 +60,72 @@ THE SOFTWARE.
 #include "debug.h"
 #include "ui.h"
 #include "ui_types.h"
+#include "platform.h"
 
 /* default sample format */
 const enum AVSampleFormat avformat = AV_SAMPLE_FMT_S16;
 
 #ifdef _WIN32
+typedef struct {
+	FILE *file;
+	uint32_t bytes;
+} SbPcmCapture;
+
+static bool windowsDiagnosticEnabled (void) {
+	const char * const capture = getenv ("SIGNALBOX_CAPTURE_PCM");
+	const char * const timing = getenv ("SIGNALBOX_AUDIO_TIMING");
+	return (capture != NULL && strcmp (capture, "1") == 0) ||
+			(timing != NULL && strcmp (timing, "1") == 0);
+}
+
+static void writeLe16 (FILE *file, const uint16_t value) {
+	const unsigned char bytes[] = {(unsigned char) value,
+			(unsigned char) (value >> 8)};
+	(void) fwrite (bytes, 1, sizeof (bytes), file);
+}
+
+static void writeLe32 (FILE *file, const uint32_t value) {
+	const unsigned char bytes[] = {(unsigned char) value,
+			(unsigned char) (value >> 8), (unsigned char) (value >> 16),
+			(unsigned char) (value >> 24)};
+	(void) fwrite (bytes, 1, sizeof (bytes), file);
+}
+
+static bool pcmCaptureOpen (SbPcmCapture *capture, const int rate,
+		const int channels) {
+	capture->file = fopen ("signalbox-pcm-capture.wav", "wb");
+	capture->bytes = 0;
+	if (capture->file == NULL) return false;
+	(void) fwrite ("RIFF", 1, 4, capture->file); writeLe32 (capture->file, 36);
+	(void) fwrite ("WAVEfmt ", 1, 8, capture->file); writeLe32 (capture->file, 16);
+	writeLe16 (capture->file, 1); writeLe16 (capture->file, (uint16_t) channels);
+	writeLe32 (capture->file, (uint32_t) rate);
+	writeLe32 (capture->file, (uint32_t) rate * (uint32_t) channels * 2u);
+	writeLe16 (capture->file, (uint16_t) (channels * 2)); writeLe16 (capture->file, 16);
+	(void) fwrite ("data", 1, 4, capture->file); writeLe32 (capture->file, 0);
+	if (ferror (capture->file)) {
+		(void) fclose (capture->file);
+		capture->file = NULL;
+		return false;
+	}
+	return true;
+}
+
+static void pcmCaptureClose (SbPcmCapture *capture) {
+	if (capture->file == NULL) return;
+	if (fseek (capture->file, 4, SEEK_SET) == 0) writeLe32 (capture->file,
+			36u + capture->bytes);
+	if (fseek (capture->file, 40, SEEK_SET) == 0) writeLe32 (capture->file,
+			capture->bytes);
+	if (fclose (capture->file) != 0) {
+		fprintf (stderr, "[signalbox:audio-capture] close=failed\n");
+	} else {
+		fprintf (stderr, "[signalbox:audio-capture] finalized bytes=%" PRIu32 "\n",
+				capture->bytes);
+	}
+	capture->file = NULL;
+}
+
 static const char *aoErrorName (const int error) {
 	switch (error) {
 		case AO_ENODRIVER: return "AO_ENODRIVER";
@@ -135,6 +196,9 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 	pthread_mutex_init (&p->aoplayLock, NULL);
 	pthread_cond_init (&p->aoplayCond, NULL);
 	p->spectrumReady = SbSpectrumInit (&p->spectrum);
+#ifdef _WIN32
+	p->pcmCaptureAttempted = false;
+#endif
 	BarPlayerReset (p);
 	p->settings = settings;
 }
@@ -652,6 +716,15 @@ void *BarAoPlayThread (void *data) {
 	int ret;
 #ifdef _WIN32
 	unsigned int diagnosticWrites = 0;
+	unsigned int timingAnomalies = 0;
+	const bool timingDiagnostic = windowsDiagnosticEnabled ();
+	uint64_t previousPlayStart = 0;
+	double previousDurationMs = 0.0;
+	SbPcmCapture capture = {0};
+	const char * const captureEnv = getenv ("SIGNALBOX_CAPTURE_PCM");
+	const bool captureRequested = captureEnv != NULL &&
+			strcmp (captureEnv, "1") == 0 && !player->pcmCaptureAttempted;
+	if (captureRequested) player->pcmCaptureAttempted = true;
 #endif
 	const double timeBase = av_q2d (av_buffersink_get_time_base (player->fbufsink)),
 			timeBaseSt = av_q2d (player->st->time_base);
@@ -668,7 +741,17 @@ void *BarAoPlayThread (void *data) {
 			debugPrint (DEBUG_AUDIO, "ao player is waiting for more frames after code %i (%s)\n",
 					ret, av_err2str (ret));
 			pthread_cond_broadcast (&player->aoplayCond);
+			#ifdef _WIN32
+			const uint64_t waitStart = timingDiagnostic ? SbPlatformMonotonicMs () : 0;
+			#endif
 			pthread_cond_wait (&player->aoplayCond, &player->aoplayLock);
+			#ifdef _WIN32
+			const uint64_t waitMs = timingDiagnostic ?
+					SbPlatformMonotonicMs () - waitStart : 0;
+			if (timingDiagnostic && waitMs > 100 && timingAnomalies++ < 20)
+				fprintf (stderr, "[signalbox:audio-timing] sink_wait_ms=%" PRIu64
+						" code=%d\n", waitMs, ret);
+			#endif
 			pthread_mutex_unlock (&player->aoplayLock);
 			continue;
 		}
@@ -687,10 +770,42 @@ void *BarAoPlayThread (void *data) {
 					(unsigned int) filteredFrame->sample_rate);
 		}
 		const uint_32 pcmBytes = filteredFrame->nb_samples * numChannels * bps;
+		#ifdef _WIN32
+		if (captureRequested && capture.file == NULL && pcmCaptureOpen (&capture,
+				filteredFrame->sample_rate, numChannels))
+			fprintf (stderr, "[signalbox:audio-capture] file=signalbox-pcm-capture.wav"
+					" rate=%d channels=%d bits=16\n",
+					filteredFrame->sample_rate, numChannels);
+		if (capture.file != NULL && capture.bytes <= UINT32_MAX - pcmBytes) {
+			const size_t written = fwrite (filteredFrame->data[0], 1, pcmBytes,
+					capture.file);
+			capture.bytes += (uint32_t) written;
+			if (written != pcmBytes) pcmCaptureClose (&capture);
+		}
+		const double durationMs = filteredFrame->sample_rate > 0 ?
+				1000.0 * filteredFrame->nb_samples / filteredFrame->sample_rate : 0.0;
+		const uint64_t playStart = timingDiagnostic ? SbPlatformMonotonicMs () : 0;
+		const uint64_t callGap = previousPlayStart == 0 ? 0 :
+				playStart - previousPlayStart;
+		const double expectedMs = previousDurationMs > 0.0 ? previousDurationMs : durationMs;
+		const bool anomalous = previousPlayStart != 0 &&
+				(double) callGap > expectedMs * 2.0 + 20.0;
+		const bool timingReport = timingDiagnostic && (diagnosticWrites < 5 ||
+				(anomalous && timingAnomalies++ < 20));
+		previousPlayStart = playStart;
+		previousDurationMs = durationMs;
+		#endif
 		const int played = ao_play (player->aoDev,
 				(char *) filteredFrame->data[0], pcmBytes);
 #ifdef _WIN32
-		if (diagnosticWrites < 3) {
+		if (timingReport) {
+			const uint64_t playMs = SbPlatformMonotonicMs () - playStart;
+			fprintf (stderr, "[signalbox:audio-timing] bytes=%" PRIu32
+					" duration_ms=%.1f call_gap_ms=%" PRIu64
+					" ao_play_ms=%" PRIu64 "%s\n", pcmBytes, durationMs, callGap,
+					playMs, anomalous ? " anomaly=gap" : "");
+		}
+		if (timingDiagnostic && diagnosticWrites < 5) {
 			fprintf (stderr, "[signalbox:audio] pcm_bytes=%" PRIu32 "\n",
 					pcmBytes);
 			fprintf (stderr, "[signalbox:audio] play=%s\n",
@@ -708,11 +823,19 @@ void *BarAoPlayThread (void *data) {
 		player->songPlayed = songPlayed;
 		/* pausing */
 		if (player->doPause) {
+			#ifdef _WIN32
+			if (timingDiagnostic)
+				fprintf (stderr, "[signalbox:audio-timing] pause_wait=begin\n");
+			#endif
 			do {
 				debugPrint (DEBUG_AUDIO, "ao player is paused\n");
 				pthread_cond_wait (&player->cond, &player->lock);
 			} while (player->doPause);
 			debugPrint (DEBUG_AUDIO, "ao player continues\n");
+			#ifdef _WIN32
+			if (timingDiagnostic)
+				fprintf (stderr, "[signalbox:audio-timing] pause_wait=end\n");
+			#endif
 		}
 		pthread_mutex_unlock (&player->lock);
 
@@ -728,6 +851,9 @@ void *BarAoPlayThread (void *data) {
 		av_frame_unref (filteredFrame);
 	}
 	av_frame_free (&filteredFrame);
+	#ifdef _WIN32
+	pcmCaptureClose (&capture);
+	#endif
 	debugPrint (DEBUG_AUDIO, "ao player is done\n");
 
 	return (void *) 0;
