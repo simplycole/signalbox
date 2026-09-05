@@ -4,7 +4,7 @@ This document records the Phase W0 source audit, implementation plan, and the
 completed W1 compile foundation and the W2 implementation. Windows remains a developer target while the
 later runtime, packaging, and release milestones are completed.
 
-## W2 Windows Terminal TUI — WinCon/VT comparison, VM validation pending
+## W2 Windows Terminal TUI — WinCon default, VT diagnostic alternate
 
 W2 compiles the existing `src/ui_renderer_curses.c` against PDCursesMod; there
 is no separate Windows renderer. Native Windows mode selection deliberately
@@ -33,15 +33,15 @@ It also installs correspondingly named `libpdcurses_wincon.dll`,
 the unqualified WinGUI DLL. Signalbox uses the explicit backend static archive
 so there is no ambiguity or runtime DLL swap.
 
-WinCon is the default comparison build:
+WinCon is the default build:
 
 ```sh
 make clean
 make WINDOWS_CURSES_BACKEND=wincon
 ```
 
-The VT output path uses the same renderer and native Win32 input adapter for a
-direct A/B comparison:
+The VT output path uses the same renderer and native Win32 input adapter. It is
+retained as an explicit diagnostic alternate for backend comparisons:
 
 ```sh
 make clean
@@ -83,9 +83,7 @@ With `SIGNALBOX_DEBUG_KEYS=1`, the start of `signalbox-keys.log` reports
 `GetFileType`, `GetConsoleMode`, the relevant mode bits, and whether
 `PeekConsoleInputW` succeeds. Each subsequent input line reports
 `source=win32_event`, the raw virtual key and Unicode value, and the normalized
-logical key. Main-loop diagnostics also report the requested timeout, wait
-result, queue depth, record count and type, key-up/key-down state, ignored
-records, and remaining deadline budget. Password characters are redacted.
+logical key. Password characters are redacted.
 
 Login and modal reads explicitly request an infinite native wait. The main TUI
 passes its renderer cadence directly to the adapter (80 ms with the spectrum,
@@ -122,11 +120,19 @@ activates a separate console screen buffer, then restores the original buffer
 and cursor during `endwin`/screen teardown.
 
 `terminal_win32.c` still saves/restores the host modes and UTF-8 code pages.
-The WinCon build remains the default output recommendation: it uses
-`WriteConsoleW`, integrates with Windows Terminal's VT output support for richer
-colors, handles resizing, and avoids the VT port's observed input-side
-fragmentation. Input is now independent of this selection, so the VT output
-build remains available for visual comparison without enabling VT input.
+The WinCon build is the default output backend: it uses `WriteConsoleW` for
+reliable Unicode, integrates with Windows Terminal's VT output support for
+richer colors, and provides predictable cursor and screen-buffer lifecycle
+behavior. Input is independent of this selection. The VT output build remains
+available only as a useful diagnostic comparison without enabling VT input.
+
+### Known limitation
+
+Live horizontal resizing in Windows Terminal may show temporary visual tearing
+or artifacts while the window is actively being dragged. The TUI redraws
+correctly once resizing stops. Vertical resizing and normal operation are
+unaffected. This Windows Terminal behavior has been observed with both the
+PDCursesMod WinCon and VT renderers.
 
 Build and exercise the native target from PowerShell in Windows Terminal with:
 

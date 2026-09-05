@@ -16,7 +16,6 @@
 #include <wctype.h>
 
 #ifdef SIGNALBOX_PDCURSESMOD
-#include <windows.h>
 #include <pdcurses.h>
 #if !defined(PDC_WIDE) || !defined(PDC_FORCE_UTF8)
 #error "Signalbox requires PDCursesMod built with WIDE=Y and UTF8=Y"
@@ -101,17 +100,7 @@ typedef struct {
 	int screenCols;
 	SbTuiSizeState sizeState;
 	bool recoveryPending;
-#ifdef _WIN32
-	bool resizePending;
-	ULONGLONG resizeLastEventMs;
-	int resizePendingRows;
-	int resizePendingCols;
-#endif
 } SbUiCursesData;
-
-#ifdef _WIN32
-#define SB_WINDOWS_RESIZE_SETTLE_MS 100
-#endif
 
 static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
 	return BarUiCommandFromKey (renderer->settings, 'V') == SB_UI_CMD_NONE;
@@ -390,9 +379,6 @@ static void SbUiCursesOpenKeyLog (void) {
 
 static void SbUiCursesCloseKeyLog (void) {
 	if (SbUiCursesKeyLog != NULL) {
-#ifdef _WIN32
-		SbTerminalInputDiagnostic (NULL);
-#endif
 		fclose (SbUiCursesKeyLog);
 		SbUiCursesKeyLog = NULL;
 	}
@@ -454,13 +440,6 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 		const int timeoutMs) {
 #ifdef _WIN32
 	(void) window;
-	static unsigned long long inputSequence;
-	if (SbUiCursesKeyLog != NULL) {
-		fprintf (SbUiCursesKeyLog,
-				"[signalbox:input-call] seq=%llu context=%s timeout_ms=%d\n",
-				++inputSequence, SbUiCursesInputContextName (context), timeoutMs);
-		fflush (SbUiCursesKeyLog);
-	}
 	const SbTerminalInputEvent event = SbTerminalReadInput (timeoutMs);
 	const SbTuiInput input = {event.status, event.key, event.key, event};
 #else
@@ -483,117 +462,32 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 	return input;
 }
 
-#ifdef SIGNALBOX_PDCURSESMOD
-static const char *SbUiCursesSizeStateName (const SbTuiSizeState state) {
-	return state == SB_TUI_SIZE_TOO_SMALL ? "TOO_SMALL" : "NORMAL";
-}
-
-static void SbUiCursesResizeDiagnostic (const char *format, ...) {
-	va_list fmtargs;
-	va_start (fmtargs, format);
-	if (SbUiCursesKeyLog != NULL) {
-		va_list copy;
-		va_copy (copy, fmtargs);
-		fputs ("[signalbox:resize] ", SbUiCursesKeyLog);
-		vfprintf (SbUiCursesKeyLog, format, copy);
-		fputc ('\n', SbUiCursesKeyLog);
-		fflush (SbUiCursesKeyLog);
-		va_end (copy);
-	}
-	if (tuiDebugEnable ()) {
-		fputs ("[signalbox:resize] ", stderr);
-		vfprintf (stderr, format, fmtargs);
-		fputc ('\n', stderr);
-		fflush (stderr);
-	}
-	va_end (fmtargs);
-}
-
-static void SbUiCursesLoginResizeDiagnostic (const char *format, ...) {
-	va_list fmtargs;
-	va_start (fmtargs, format);
-	if (SbUiCursesKeyLog != NULL) {
-		va_list copy;
-		va_copy (copy, fmtargs);
-		fputs ("[signalbox:login-resize] ", SbUiCursesKeyLog);
-		vfprintf (SbUiCursesKeyLog, format, copy);
-		fputc ('\n', SbUiCursesKeyLog);
-		fflush (SbUiCursesKeyLog);
-		va_end (copy);
-	}
-	if (tuiDebugEnable ()) {
-		fputs ("[signalbox:login-resize] ", stderr);
-		vfprintf (stderr, format, fmtargs);
-		fputc ('\n', stderr);
-		fflush (stderr);
-	}
-	va_end (fmtargs);
-}
-
-static void SbUiCursesResizeAxisDiagnostic (const int oldCols,
-		const int oldRows, const int newCols, const int newRows) {
-	FILE *outputs[] = {SbUiCursesKeyLog, tuiDebugEnable () ? stderr : NULL};
-	for (size_t i = 0; i < sizeof (outputs) / sizeof (*outputs); i++) {
-		FILE * const output = outputs[i];
-		if (output == NULL || (i > 0 && output == outputs[0])) continue;
-		fprintf (output,
-				"[signalbox:resize-axis] old=%dx%d new=%dx%d "
-				"width_changed=%s height_changed=%s\n",
-				oldCols, oldRows, newCols, newRows,
-				oldCols != newCols ? "yes" : "no",
-				oldRows != newRows ? "yes" : "no");
-		fflush (output);
-	}
-}
-
-#endif
-
 static bool SbUiCursesResize (SbUiCursesData *data) {
 #ifdef SIGNALBOX_PDCURSESMOD
 	/* The native adapter consumes WINDOW_BUFFER_SIZE_EVENT before PDCurses can
 	 * observe it.  It is the sole Windows resize trigger; do not also poll
 	 * is_termresized() while rendering.  Zero dimensions tell PDCurses to adopt
 	 * the console geometry without Signalbox forcing a new buffer/window size. */
-	int visibleRows = 0, visibleCols = 0;
 	int resizeResult;
-	unsigned int queuedResizes = 0;
 	do {
 		resizeResult = resize_term (0, 0);
 #ifdef _WIN32
 		/* A resize can arrive after the input adapter's first coalescing pass.
 		 * Adopt it before any pane is drawn, then rebuild only the final geometry. */
 		const unsigned int drained = SbTerminalDrainResizeEvents ();
-		queuedResizes += drained;
 		if (drained == 0) break;
 #else
 		break;
 #endif
 	} while (resizeResult != ERR);
-#ifdef _WIN32
-	CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
-	/* PDCurses WinCon owns an alternate screen buffer, so STD_OUTPUT_HANDLE can
-	 * still name the original buffer. CONOUT$ resolves to the active viewport. */
-	HANDLE const activeOutput = CreateFileW (L"CONOUT$", GENERIC_READ,
-			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-	if (activeOutput != INVALID_HANDLE_VALUE &&
-			GetConsoleScreenBufferInfo (activeOutput, &consoleInfo)) {
-		visibleRows = consoleInfo.srWindow.Bottom - consoleInfo.srWindow.Top + 1;
-		visibleCols = consoleInfo.srWindow.Right - consoleInfo.srWindow.Left + 1;
-	}
-	if (activeOutput != INVALID_HANDLE_VALUE) CloseHandle (activeOutput);
-#endif
 #else
 	const int resizeResult = OK;
 #endif
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	if (rows == data->screenRows && cols == data->screenCols) return false;
-	const int oldRows = data->screenRows;
-	const int oldCols = data->screenCols;
-	const SbTuiSizeState previousState = data->sizeState;
 	const SbTuiSizeState nextState = rows < 15 || cols < 50 ?
 			SB_TUI_SIZE_TOO_SMALL : SB_TUI_SIZE_NORMAL;
-	const bool shrinking = rows < data->screenRows || cols < data->screenCols;
 	data->screenRows = rows;
 	data->screenCols = cols;
 	data->sizeState = nextState;
@@ -608,108 +502,13 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 		data->recentOffset = data->recentSelected;
 		data->helpOffset = 0;
 	}
-#ifdef SIGNALBOX_PDCURSESMOD
-	SbUiCursesResizeAxisDiagnostic (oldCols, oldRows, cols, rows);
-	if (previousState != nextState) {
-		SbUiCursesResizeDiagnostic ("from=%s to=%s cols=%d rows=%d",
-				SbUiCursesSizeStateName (previousState),
-				SbUiCursesSizeStateName (nextState), cols, rows);
-	} else if (nextState == SB_TUI_SIZE_TOO_SMALL) {
-		SbUiCursesResizeDiagnostic ("state=TOO_SMALL cols=%d rows=%d",
-				cols, rows);
-	}
-	SbUiCursesResizeDiagnostic (
-			"curses_cols=%d curses_rows=%d win32_visible_cols=%d "
-			"win32_visible_rows=%d resize_term=%s queued=%u "
-			"app_windows_recreated=no",
-			cols, rows, visibleCols, visibleRows,
-			resizeResult == ERR ? "failed" : "ok", queuedResizes);
-#endif
-	tuiDebugPrint ("resize size=%dx%d shrinking=%s\n", cols, rows,
-			shrinking ? "yes" : "no");
+	tuiDebugPrint ("resize size=%dx%d result=%s\n", cols, rows,
+			resizeResult == ERR ? "failed" : "ok");
 	return resizeResult != ERR;
 }
 
-#ifdef _WIN32
-static bool SbUiCursesConsoleSize (int *rows, int *cols) {
-	CONSOLE_SCREEN_BUFFER_INFO info;
-	HANDLE const output = CreateFileW (L"CONOUT$", GENERIC_READ,
-			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-	const bool available = output != INVALID_HANDLE_VALUE &&
-			GetConsoleScreenBufferInfo (output, &info);
-	if (output != INVALID_HANDLE_VALUE) CloseHandle (output);
-	if (!available) return false;
-	*rows = info.srWindow.Bottom - info.srWindow.Top + 1;
-	*cols = info.srWindow.Right - info.srWindow.Left + 1;
-	return true;
-}
-
-static void SbUiCursesResizeSettleDiagnostic (const char *format, ...) {
-	va_list fmtargs;
-	va_start (fmtargs, format);
-	FILE *outputs[] = {SbUiCursesKeyLog, tuiDebugEnable () ? stderr : NULL};
-	for (size_t i = 0; i < sizeof (outputs) / sizeof (*outputs); i++) {
-		FILE * const output = outputs[i];
-		if (output == NULL || (i > 0 && output == outputs[0])) continue;
-		va_list copy;
-		va_copy (copy, fmtargs);
-		fputs ("[signalbox:resize-settle] ", output);
-		vfprintf (output, format, copy);
-		fputc ('\n', output);
-		fflush (output);
-		va_end (copy);
-	}
-	va_end (fmtargs);
-}
-
-/* Returns true when the resize was adopted immediately.  Width changes are
- * only recorded here; the previous complete frame remains visible. */
-static bool SbUiCursesResizeEvent (SbUiCursesData *data) {
-	int rows = data->screenRows, cols = data->screenCols;
-	(void) SbUiCursesConsoleSize (&rows, &cols);
-	if (data->resizePending || cols != data->screenCols) {
-		const bool beginning = !data->resizePending;
-		data->resizePending = true;
-		data->resizePendingRows = rows;
-		data->resizePendingCols = cols;
-		data->resizeLastEventMs = GetTickCount64 ();
-		if (beginning) SbUiCursesResizeSettleDiagnostic ("begin");
-		SbUiCursesResizeSettleDiagnostic ("update cols=%d rows=%d", cols, rows);
-		return false;
-	}
-	return SbUiCursesResize (data);
-}
-
-static int SbUiCursesResizeWaitMs (const SbUiCursesData *data,
-		const int normalTimeoutMs) {
-	if (!data->resizePending) return normalTimeoutMs;
-	const ULONGLONG elapsed = GetTickCount64 () - data->resizeLastEventMs;
-	const int remaining = elapsed >= SB_WINDOWS_RESIZE_SETTLE_MS ? 0 :
-			(int) (SB_WINDOWS_RESIZE_SETTLE_MS - elapsed);
-	return normalTimeoutMs < 0 || remaining < normalTimeoutMs ?
-			remaining : normalTimeoutMs;
-}
-
-static bool SbUiCursesResizeSettled (SbUiCursesData *data) {
-	if (!data->resizePending) return true;
-	const ULONGLONG elapsed = GetTickCount64 () - data->resizeLastEventMs;
-	if (elapsed < SB_WINDOWS_RESIZE_SETTLE_MS) return false;
-	const int requestedRows = data->resizePendingRows;
-	const int requestedCols = data->resizePendingCols;
-	data->resizePending = false;
-	(void) SbUiCursesResize (data);
-	SbUiCursesResizeSettleDiagnostic ("redraw cols=%d rows=%d elapsed=%llu",
-			requestedCols, requestedRows, (unsigned long long) elapsed);
-	return true;
-}
-#endif
-
 static bool SbUiCursesHandleResize (SbUiCursesData *data) {
-#ifdef _WIN32
-	return SbUiCursesResizeEvent (data);
-#else
 	return SbUiCursesResize (data);
-#endif
 }
 
 static void SbUiCursesTime (char *dest, const size_t size,
@@ -1399,10 +1198,6 @@ static void SbUiCursesUpcoming (const SbUiCursesData *data,
 static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
-#ifdef _WIN32
-	/* Keep the last complete frame intact throughout a horizontal resize burst. */
-	if (!SbUiCursesResizeSettled (data)) return;
-#endif
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
@@ -1602,11 +1397,6 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			doupdate ();
 			delwin (help);
 			if (data->recoveryPending) {
-#ifdef SIGNALBOX_PDCURSESMOD
-				SbUiCursesResizeDiagnostic (
-						"rebuild_complete cols=%d rows=%d app_windows_recreated=yes",
-						cols, rows);
-#endif
 				data->recoveryPending = false;
 			}
 			return;
@@ -1615,11 +1405,6 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (data->recoveryPending) {
 		wnoutrefresh (stdscr);
 		doupdate ();
-#ifdef SIGNALBOX_PDCURSESMOD
-		SbUiCursesResizeDiagnostic (
-				"rebuild_complete cols=%d rows=%d app_windows_recreated=no",
-				cols, rows);
-#endif
 		data->recoveryPending = false;
 	} else refresh ();
 }
@@ -1686,32 +1471,14 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_KEY, 0);
 		const int cursorCells = SbUiCursesWideWidth (&input[start], cursor - start);
 		wmove (window, 5, 2 + (cursorCells >= 0 ? cursorCells : 0));
-		#ifdef _WIN32
-		if (!data->resizePending) {
-		#endif
-			wnoutrefresh (window);
-			doupdate ();
-		#ifdef _WIN32
-		}
-		#endif
-		int timeoutMs = -1;
-#ifdef _WIN32
-		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
-#endif
+		wnoutrefresh (window);
+		doupdate ();
+		const int timeoutMs = -1;
 		const SbTuiInput read = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, timeoutMs);
 		const int result = read.status;
 		const int key = read.key;
-		if (result == ERR) {
-#ifdef _WIN32
-			if (data->resizePending && SbUiCursesResizeSettled (data)) {
-				delwin (window);
-				window = NULL;
-				SbUiCursesFrame (renderer, model);
-			}
-#endif
-			continue;
-		}
+		if (result == ERR) continue;
 		if (key == KEY_RESIZE) {
 			if (SbUiCursesHandleResize (data)) {
 				delwin (window);
@@ -1776,10 +1543,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			/* No modal exists while suspended.  Continue consuming native resize
 			 * events through stdscr so recovery cannot spin on newwin(NULL). */
 			(void) curs_set (0);
-			int timeoutMs = -1;
-#ifdef _WIN32
-			timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
-#endif
+			const int timeoutMs = -1;
 			const SbTuiInput read = SbUiCursesReadKey (stdscr,
 					SB_TUI_INPUT_LOGIN, false, timeoutMs);
 			if (read.status == ERR) {
@@ -1806,14 +1570,6 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (window == NULL) window = SbUiCursesModal (data, "SIGNALBOX LOGIN",
 				error != NULL ? error : "Sign in to Pandora", 12);
 		if (window == NULL) continue;
-		if (recreatePending) {
-#ifdef SIGNALBOX_PDCURSESMOD
-			SbUiCursesLoginResizeDiagnostic ("recreate cols=%d rows=%d",
-					data->screenCols, data->screenRows);
-			SbUiCursesLoginResizeDiagnostic ("field=%s", field == 0 ?
-					"username" : (field == 1 ? "password" : "remember"));
-#endif
-		}
 		const int width = getmaxx (window);
 		/* Redrawing this small window updates only changed cells.  In particular,
 		 * keep stdscr out of the per-keystroke refresh path on PDCurses VT. */
@@ -1863,39 +1619,17 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			(void) curs_set (1);
 			wmove (window, 6, 22 + (int) visiblePass);
 		} else (void) curs_set (0);
-		#ifdef _WIN32
-		if (!data->resizePending) {
-		#endif
-			wnoutrefresh (window);
-			doupdate ();
-		#ifdef _WIN32
-		}
-		#endif
+		wnoutrefresh (window);
+		doupdate ();
 		if (recreatePending) {
-#ifdef SIGNALBOX_PDCURSESMOD
-			SbUiCursesLoginResizeDiagnostic ("rebuild_complete");
-#endif
 			recreatePending = false;
 		}
-		int timeoutMs = -1;
-#ifdef _WIN32
-		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
-#endif
+		const int timeoutMs = -1;
 		const SbTuiInput read = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_LOGIN, field == 1, timeoutMs);
 		const int result = read.status;
 		const int key = read.key;
-		if (result == ERR) {
-#ifdef _WIN32
-			if (data->resizePending && SbUiCursesResizeSettled (data)) {
-				delwin (window);
-				window = NULL;
-				recreatePending = data->sizeState == SB_TUI_SIZE_NORMAL;
-				SbUiCursesFrame (renderer, model);
-			}
-#endif
-			continue;
-		}
+		if (result == ERR) continue;
 		if (key == KEY_RESIZE) {
 			const bool resized = SbUiCursesHandleResize (data);
 			if (resized) {
@@ -1904,10 +1638,6 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			}
 			if (resized && data->sizeState == SB_TUI_SIZE_TOO_SMALL) {
 				(void) curs_set (0);
-#ifdef SIGNALBOX_PDCURSESMOD
-				SbUiCursesLoginResizeDiagnostic ("suspend cols=%d rows=%d",
-						data->screenCols, data->screenRows);
-#endif
 			}
 			if (resized) SbUiCursesFrame (renderer, model);
 			continue;
@@ -2245,10 +1975,7 @@ static void SbUiCursesFilter (SbUiRenderer *renderer, const SbUiModel *model) {
 				strlen (filter) + 1 < sizeof (filter) ? "_" : "");
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
-		int timeoutMs = -1;
-#ifdef _WIN32
-		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
-#endif
+		const int timeoutMs = -1;
 		const int key = SbUiCursesReadKey (stdscr,
 				SB_TUI_INPUT_MODAL, false, timeoutMs).key;
 		if (key == ERR) {
@@ -2310,10 +2037,7 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 		snprintf (prompt, sizeof (prompt), "Jump to station #: %s_", digits);
 		SbUiCursesLocalNotice (data, prompt);
 		SbUiCursesFrame (renderer, model);
-		int timeoutMs = -1;
-#ifdef _WIN32
-		timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
-#endif
+		const int timeoutMs = -1;
 		const int key = SbUiCursesReadKey (stdscr,
 				SB_TUI_INPUT_NUMERIC_JUMP, false, timeoutMs).key;
 		if (key == ERR) {
@@ -2420,10 +2144,7 @@ static PianoStation_t *SbUiCursesJump (SbUiRenderer *renderer,
 static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
-	int timeoutMs = model->visualizerEnabled ? 80 : 1000;
-#ifdef _WIN32
-	timeoutMs = SbUiCursesResizeWaitMs (data, timeoutMs);
-#endif
+	const int timeoutMs = model->visualizerEnabled ? 80 : 1000;
 	const int key = SbUiCursesReadKey (stdscr, data->helpVisible ?
 			SB_TUI_INPUT_HELP : SB_TUI_INPUT_MAIN, false,
 			timeoutMs).key;

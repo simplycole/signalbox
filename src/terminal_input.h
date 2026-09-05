@@ -31,7 +31,6 @@ SbTerminalInputEvent SbTerminalReadInput (int timeoutMs);
  * Keyboard and unrelated records remain untouched and in order. */
 unsigned int SbTerminalDrainResizeEvents (void);
 
-/* Registers the diagnostic stream and writes handle/mode capabilities without
- * consuming an input record. Pass NULL to unregister the stream. */
+/* Writes handle/mode capabilities without consuming an input record. */
 void SbTerminalInputDiagnostic (FILE *output);
 #endif
