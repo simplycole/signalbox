@@ -69,7 +69,15 @@ const enum AVSampleFormat avformat = AV_SAMPLE_FMT_S16;
 typedef struct {
 	FILE *file;
 	uint32_t bytes;
+	uint64_t hash;
 } SbPcmCapture;
+
+enum { PCM_DISCONTINUITY_THRESHOLD = 16384 };
+
+static bool pcmDiagnosticsEnabled (void) {
+	const char * const value = getenv ("SIGNALBOX_PCM_DIAGNOSTICS");
+	return value != NULL && strcmp (value, "1") == 0;
+}
 
 static bool windowsDiagnosticEnabled (void) {
 	const char * const capture = getenv ("SIGNALBOX_CAPTURE_PCM");
@@ -95,6 +103,7 @@ static bool pcmCaptureOpen (SbPcmCapture *capture, const int rate,
 		const int channels) {
 	capture->file = fopen ("signalbox-pcm-capture.wav", "wb");
 	capture->bytes = 0;
+	capture->hash = UINT64_C (1469598103934665603);
 	if (capture->file == NULL) return false;
 	(void) fwrite ("RIFF", 1, 4, capture->file); writeLe32 (capture->file, 36);
 	(void) fwrite ("WAVEfmt ", 1, 8, capture->file); writeLe32 (capture->file, 16);
@@ -111,6 +120,15 @@ static bool pcmCaptureOpen (SbPcmCapture *capture, const int rate,
 	return true;
 }
 
+static uint64_t pcmHashUpdate (uint64_t hash, const unsigned char *data,
+		size_t bytes) {
+	for (size_t i = 0; i < bytes; i++) {
+		hash ^= data[i];
+		hash *= UINT64_C (1099511628211);
+	}
+	return hash;
+}
+
 static void pcmCaptureClose (SbPcmCapture *capture) {
 	if (capture->file == NULL) return;
 	if (fseek (capture->file, 4, SEEK_SET) == 0) writeLe32 (capture->file,
@@ -120,8 +138,8 @@ static void pcmCaptureClose (SbPcmCapture *capture) {
 	if (fclose (capture->file) != 0) {
 		fprintf (stderr, "[signalbox:audio-capture] close=failed\n");
 	} else {
-		fprintf (stderr, "[signalbox:audio-capture] finalized bytes=%" PRIu32 "\n",
-				capture->bytes);
+		fprintf (stderr, "[signalbox:audio-capture] finalized bytes=%" PRIu32
+				" hash=%016" PRIx64 "\n", capture->bytes, capture->hash);
 	}
 	capture->file = NULL;
 }
@@ -439,6 +457,37 @@ static bool openFilter (player_t * const player) {
 		softfail ("graph_config");
 	}
 
+#ifdef _WIN32
+	if (pcmDiagnosticsEnabled ()) {
+		char sourceLayout[128] = "(unknown)";
+		char sinkLayout[128] = "(unknown)";
+		const AVFilterLink * const source = player->fabuf->outputs[0];
+		const AVFilterLink * const sink = player->fbufsink->inputs[0];
+		(void) av_channel_layout_describe (&source->ch_layout, sourceLayout,
+				sizeof (sourceLayout));
+		(void) av_channel_layout_describe (&sink->ch_layout, sinkLayout,
+				sizeof (sinkLayout));
+		fprintf (stderr, "[signalbox:pcm] graph_source format=%s rate=%d layout=%s"
+				" time_base=%d/%d track_source_rate=%d output_rate=%d\n",
+				av_get_sample_fmt_name (source->format), source->sample_rate,
+				sourceLayout, source->time_base.num, source->time_base.den,
+				cp->sample_rate, getSampleRate (player));
+		fprintf (stderr, "[signalbox:pcm] graph_sink format=%s rate=%d layout=%s"
+				" time_base=%d/%d\n", av_get_sample_fmt_name (sink->format),
+				sink->sample_rate, sinkLayout, sink->time_base.num,
+				sink->time_base.den);
+		char * const graph = avfilter_graph_dump (player->fgraph, NULL);
+		if (graph != NULL) {
+			fprintf (stderr, "[signalbox:pcm] graph_configured_begin\n%s"
+					"[signalbox:pcm] graph_configured_end\n", graph);
+			av_free (graph);
+		}
+		fprintf (stderr, "[signalbox:pcm] track_buffers decoder=%p graph=%p"
+				" action=created\n", (void *) player->cctx,
+				(void *) player->fgraph);
+	}
+#endif
+
 	return true;
 }
 
@@ -561,6 +610,11 @@ static int play (player_t * const player) {
 	pthread_create (&aoplaythread, NULL, BarAoPlayThread, player);
 	enum { FILL, DRAIN, DONE } drainMode = FILL;
 	int ret = 0;
+#ifdef _WIN32
+	bool sourceFrameLogged = false;
+	uint64_t sourceFrameNumber = 0;
+	const bool pcmDiagnostic = pcmDiagnosticsEnabled ();
+#endif
 	const double timeBase = av_q2d (player->st->time_base);
 	while (!shouldQuit (player) && drainMode != DONE) {
 		if (drainMode == FILL) {
@@ -614,6 +668,23 @@ static int play (player_t * const player) {
 			}
 
 			/* XXX: suppresses warning from resample filter */
+			#ifdef _WIN32
+			if (pcmDiagnostic && !sourceFrameLogged) {
+				char frameLayout[128] = "(unknown)";
+				(void) av_channel_layout_describe (&frame->ch_layout, frameLayout,
+						sizeof (frameLayout));
+				fprintf (stderr, "[signalbox:pcm] decoded_source format=%s rate=%d"
+						" layout=%s time_base=%d/%d\n",
+						av_get_sample_fmt_name (frame->format), frame->sample_rate,
+						frameLayout, player->st->time_base.num,
+						player->st->time_base.den);
+				sourceFrameLogged = true;
+			}
+			if (pcmDiagnostic && frame->pts == AV_NOPTS_VALUE)
+				fprintf (stderr, "[signalbox:pcm] source_pts_missing frame=%" PRIu64
+						" fallback=0\n", sourceFrameNumber);
+			sourceFrameNumber++;
+			#endif
 			if (frame->pts == (int64_t) AV_NOPTS_VALUE) {
 				frame->pts = 0;
 			}
@@ -651,6 +722,11 @@ static int play (player_t * const player) {
 }
 
 static void finish (player_t * const player) {
+#ifdef _WIN32
+	if (pcmDiagnosticsEnabled ())
+		fprintf (stderr, "[signalbox:pcm] track_buffers decoder=%p graph=%p"
+				" action=free\n", (void *) player->cctx, (void *) player->fgraph);
+#endif
 	ao_close (player->aoDev);
 	player->aoDev = NULL;
 	if (player->fgraph != NULL) {
@@ -718,15 +794,23 @@ void *BarAoPlayThread (void *data) {
 	unsigned int diagnosticWrites = 0;
 	unsigned int timingAnomalies = 0;
 	const bool timingDiagnostic = windowsDiagnosticEnabled ();
+	const bool pcmDiagnostic = pcmDiagnosticsEnabled ();
 	uint64_t previousPlayStart = 0;
 	double previousDurationMs = 0.0;
 	SbPcmCapture capture = {0};
 	const char * const captureEnv = getenv ("SIGNALBOX_CAPTURE_PCM");
-	const bool captureRequested = captureEnv != NULL &&
-			strcmp (captureEnv, "1") == 0 && !player->pcmCaptureAttempted;
+	const bool captureRequested = (pcmDiagnostic || (captureEnv != NULL &&
+			strcmp (captureEnv, "1") == 0)) && !player->pcmCaptureAttempted;
 	if (captureRequested) player->pcmCaptureAttempted = true;
+	uint64_t pcmBlock = 0;
+	int16_t previousLast[64] = {0};
+	int previousChannels = 0;
+	bool havePreviousSamples = false;
+	int64_t expectedPts = AV_NOPTS_VALUE;
+	int64_t previousPts = AV_NOPTS_VALUE;
 #endif
-	const double timeBase = av_q2d (av_buffersink_get_time_base (player->fbufsink)),
+	const AVRational sinkTimeBase = av_buffersink_get_time_base (player->fbufsink);
+	const double timeBase = av_q2d (sinkTimeBase),
 			timeBaseSt = av_q2d (player->st->time_base);
 	while (!shouldQuit(player)) {
 		pthread_mutex_lock (&player->aoplayLock);
@@ -769,17 +853,115 @@ void *BarAoPlayThread (void *data) {
 					(unsigned int) numChannels,
 					(unsigned int) filteredFrame->sample_rate);
 		}
-		const uint_32 pcmBytes = filteredFrame->nb_samples * numChannels * bps;
+		const bool dimensionsValid = filteredFrame->nb_samples >= 0 &&
+				numChannels > 0 && numChannels <= 64 && bps > 0 &&
+				(size_t) filteredFrame->nb_samples <= SIZE_MAX / (size_t) numChannels /
+					sizeof (int16_t);
+		const size_t expectedPcmBytes = dimensionsValid ?
+				(size_t) filteredFrame->nb_samples * (size_t) numChannels *
+				sizeof (int16_t) : 0;
+		const size_t framePcmBytes = dimensionsValid ?
+				(size_t) filteredFrame->nb_samples * (size_t) numChannels *
+				(size_t) bps : 0;
+		const uint_32 pcmBytes = (uint_32) framePcmBytes;
+		const bool pcmValid = filteredFrame->format == AV_SAMPLE_FMT_S16 &&
+				!av_sample_fmt_is_planar (filteredFrame->format) &&
+				bps == (int) sizeof (int16_t) && dimensionsValid &&
+				filteredFrame->sample_rate > 0 && framePcmBytes == expectedPcmBytes &&
+				framePcmBytes <= UINT32_MAX && filteredFrame->data[0] != NULL;
 		#ifdef _WIN32
-		if (captureRequested && capture.file == NULL && pcmCaptureOpen (&capture,
+		const void * const pcmPointer = filteredFrame->data[0];
+		uint64_t beforeHash = 0;
+		if (pcmDiagnostic) {
+			fprintf (stderr, "[signalbox:pcm] block=%" PRIu64 " nb_samples=%d"
+					" bytes=%zu pts=%" PRId64 " rate=%d channels=%d ptr=%p\n",
+					pcmBlock, filteredFrame->nb_samples, framePcmBytes,
+					filteredFrame->pts, filteredFrame->sample_rate, numChannels,
+					pcmPointer);
+			if (!pcmValid)
+				fprintf (stderr, "[signalbox:pcm] byte_count_invalid block=%" PRIu64
+						" expected=%zu actual=%zu format=%s planar=%d bps=%d\n",
+						pcmBlock, expectedPcmBytes, framePcmBytes,
+						av_get_sample_fmt_name (filteredFrame->format),
+						av_sample_fmt_is_planar (filteredFrame->format), bps);
+			if (filteredFrame->pts == AV_NOPTS_VALUE) {
+				fprintf (stderr, "[signalbox:pcm] pts_missing block=%" PRIu64 "\n",
+						pcmBlock);
+				expectedPts = AV_NOPTS_VALUE;
+			} else {
+				if (expectedPts != AV_NOPTS_VALUE && filteredFrame->pts != expectedPts) {
+					const char * const kind = filteredFrame->pts < previousPts ?
+							"backwards" : filteredFrame->pts < expectedPts ?
+							"overlap" : "gap";
+					fprintf (stderr, "[signalbox:pcm] pts_%s block=%" PRIu64
+							" expected=%" PRId64 " actual=%" PRId64
+							" delta=%" PRId64 " time_base=%d/%d\n", kind,
+							pcmBlock, expectedPts, filteredFrame->pts,
+							filteredFrame->pts - expectedPts, sinkTimeBase.num,
+							sinkTimeBase.den);
+				}
+				expectedPts = filteredFrame->pts + av_rescale_q (
+						filteredFrame->nb_samples, (AVRational) {1,
+						filteredFrame->sample_rate}, sinkTimeBase);
+				previousPts = filteredFrame->pts;
+			}
+			if (pcmValid && filteredFrame->nb_samples > 0) {
+				const int16_t * const samples = pcmPointer;
+				bool discontinuity = false;
+				if (havePreviousSamples && previousChannels == numChannels) {
+					for (int channel = 0; channel < numChannels; channel++) {
+						const int delta = (int) samples[channel] - previousLast[channel];
+						if (delta >= PCM_DISCONTINUITY_THRESHOLD ||
+								delta <= -PCM_DISCONTINUITY_THRESHOLD)
+							discontinuity = true;
+					}
+				}
+				if (discontinuity) {
+					fprintf (stderr, "[signalbox:pcm] discontinuity block=%" PRIu64,
+							pcmBlock);
+					for (int channel = 0; channel < numChannels; channel++) {
+						if (channel == 0)
+							fprintf (stderr, " delta_l=%d", (int) samples[channel] -
+									previousLast[channel]);
+						else if (channel == 1)
+							fprintf (stderr, " delta_r=%d", (int) samples[channel] -
+									previousLast[channel]);
+						else
+							fprintf (stderr, " delta_ch%d=%d", channel,
+									(int) samples[channel] - previousLast[channel]);
+					}
+					fprintf (stderr, " threshold=%d\n", PCM_DISCONTINUITY_THRESHOLD);
+				}
+				for (int channel = 0; channel < numChannels; channel++)
+					previousLast[channel] = samples[(filteredFrame->nb_samples - 1) *
+							numChannels + channel];
+				previousChannels = numChannels;
+				havePreviousSamples = true;
+				beforeHash = pcmHashUpdate (UINT64_C (1469598103934665603),
+						pcmPointer, framePcmBytes);
+			}
+		}
+		bool capturedBlock = false;
+		if (pcmValid && captureRequested && capture.file == NULL && pcmCaptureOpen (&capture,
 				filteredFrame->sample_rate, numChannels))
 			fprintf (stderr, "[signalbox:audio-capture] file=signalbox-pcm-capture.wav"
-					" rate=%d channels=%d bits=16\n",
+					" rate=%d channels=%d bits=16 mode=wb header_rewrite=finalize-only\n",
 					filteredFrame->sample_rate, numChannels);
-		if (capture.file != NULL && capture.bytes <= UINT32_MAX - pcmBytes) {
+		if (pcmValid && capture.file != NULL && capture.bytes <= UINT32_MAX - pcmBytes) {
+			const long beforeOffset = ftell (capture.file);
 			const size_t written = fwrite (filteredFrame->data[0], 1, pcmBytes,
 					capture.file);
 			capture.bytes += (uint32_t) written;
+			capture.hash = pcmHashUpdate (capture.hash, filteredFrame->data[0], written);
+			const long afterOffset = ftell (capture.file);
+			capturedBlock = written == pcmBytes;
+			if (pcmDiagnostic && (beforeOffset != (long) (44u + capture.bytes - written) ||
+					afterOffset != beforeOffset + (long) written || written != pcmBytes))
+				fprintf (stderr, "[signalbox:pcm] capture_integrity block=%" PRIu64
+						" offset=%ld expected_offset=%" PRIu32
+						" after_offset=%ld written=%zu expected_bytes=%" PRIu32 "\n", pcmBlock,
+						beforeOffset, 44u + capture.bytes - (uint32_t) written,
+						afterOffset, written, pcmBytes);
 			if (written != pcmBytes) pcmCaptureClose (&capture);
 		}
 		const double durationMs = filteredFrame->sample_rate > 0 ?
@@ -795,9 +977,19 @@ void *BarAoPlayThread (void *data) {
 		previousPlayStart = playStart;
 		previousDurationMs = durationMs;
 		#endif
-		const int played = ao_play (player->aoDev,
-				(char *) filteredFrame->data[0], pcmBytes);
+		const int played = pcmValid ? ao_play (player->aoDev,
+				(char *) filteredFrame->data[0], pcmBytes) : 0;
 #ifdef _WIN32
+		if (pcmDiagnostic) {
+			const uint64_t afterHash = pcmValid ? pcmHashUpdate (
+					UINT64_C (1469598103934665603), pcmPointer, framePcmBytes) : 0;
+			fprintf (stderr, "[signalbox:pcm] delivery block=%" PRIu64
+					" wav_ptr=%p wav_bytes=%" PRIu32 " ao_ptr=%p ao_bytes=%" PRIu32
+					" captured=%s hash=%016" PRIx64 "%s\n", pcmBlock, pcmPointer, pcmBytes,
+					pcmPointer, pcmBytes, capturedBlock ? "yes" : "no", afterHash,
+					beforeHash != afterHash ? " corruption=memory_changed" : "");
+			pcmBlock++;
+		}
 		if (timingReport) {
 			const uint64_t playMs = SbPlatformMonotonicMs () - playStart;
 			fprintf (stderr, "[signalbox:audio-timing] bytes=%" PRIu32
