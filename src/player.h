@@ -80,8 +80,10 @@ typedef struct {
 	SbSpectrum spectrum;
 	bool spectrumReady;
 #ifdef _WIN32
-	/* Process-lifetime guard: diagnostic capture is deliberately one track. */
-	bool pcmCaptureAttempted;
+	/* Process-lifetime diagnostic capture sequence (zero means no capture). */
+	unsigned int pcmCaptureTracks, pcmCaptureTrack;
+	uint64_t decoderCapturedSamples, filteredCapturedSamples;
+	unsigned int decoderCaptureRate, filteredCaptureRate;
 #endif
 
 	/* settings (must be set before starting the thread) */
