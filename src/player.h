@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <pthread.h>
 #include <stdint.h>
 #include <signal.h>
+#include <stdio.h>
 
 #include <ao/ao.h>
 #include <libavformat/avformat.h>
@@ -84,6 +85,12 @@ typedef struct {
 	unsigned int pcmCaptureTracks, pcmCaptureTrack;
 	uint64_t decoderCapturedSamples, filteredCapturedSamples;
 	unsigned int decoderCaptureRate, filteredCaptureRate;
+	AVIOContext *diagnosticSourceIo, *diagnosticIo;
+	FILE *compressedCapture;
+	uint64_t networkBytes, streamBufferBytes, ffmpegBytes;
+	uint64_t compressedCaptureBytes, compressedCaptureExtent;
+	uint64_t inputReads, inputShortReads, inputSeeks, inputReadErrors;
+	bool compressedCaptureError;
 #endif
 
 	/* settings (must be set before starting the thread) */

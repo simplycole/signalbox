@@ -44,6 +44,7 @@ THE SOFTWARE.
 #include <sys/stat.h>
 
 #include <libavcodec/avcodec.h>
+#include <libavformat/avio.h>
 #include <libavutil/avutil.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
@@ -228,6 +229,45 @@ static void printAoDrivers (void) {
 				"(unknown)" : info->short_name);
 	}
 }
+
+/* libavformat normally opens the URL itself.  Diagnostics interposes one
+ * transparent AVIO layer so the capture contains the bytes returned to the
+ * demuxer, while the underlying AVIO context still owns HTTP and buffering. */
+static int diagnosticRead (void *opaque, uint8_t *buf, int bufSize) {
+	player_t * const player = opaque;
+	const int64_t offset = avio_tell (player->diagnosticSourceIo);
+	const int ret = avio_read (player->diagnosticSourceIo, buf, bufSize);
+	player->inputReads++;
+	if (ret > 0) {
+		player->networkBytes += (uint64_t) ret;
+		player->streamBufferBytes += (uint64_t) ret;
+		player->ffmpegBytes += (uint64_t) ret;
+		if (ret < bufSize) player->inputShortReads++;
+		if (player->compressedCapture != NULL) {
+			if (offset < 0 || _fseeki64 (player->compressedCapture, offset,
+					SEEK_SET) != 0 || fwrite (buf, 1, (size_t) ret,
+					player->compressedCapture) != (size_t) ret) {
+				player->compressedCaptureError = true;
+			} else {
+				player->compressedCaptureBytes += (uint64_t) ret;
+				const uint64_t end = (uint64_t) offset + (uint64_t) ret;
+				if (end > player->compressedCaptureExtent)
+					player->compressedCaptureExtent = end;
+			}
+		}
+	} else if (ret != AVERROR_EOF) {
+		player->inputReadErrors++;
+		fprintf (stderr, "[signalbox:decoder-input] avio_read_error=%d\n", ret);
+	}
+	return ret;
+}
+
+static int64_t diagnosticSeek (void *opaque, int64_t offset, int whence) {
+	player_t * const player = opaque;
+	if (whence == AVSEEK_SIZE) return avio_size (player->diagnosticSourceIo);
+	player->inputSeeks++;
+	return avio_seek (player->diagnosticSourceIo, offset, whence);
+}
 #endif
 
 static void printError (const BarSettings_t * const settings,
@@ -244,7 +284,13 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 #ifdef _WIN32
 	printAoDrivers ();
 #endif
+#ifdef _WIN32
+	/* Recoverable parser/demux/decoder failures do not always propagate through
+	 * an API return value, so expose FFmpeg's error-level diagnostics too. */
+	av_log_set_level (pcmDiagnosticsEnabled () ? AV_LOG_ERROR : AV_LOG_FATAL);
+#else
 	av_log_set_level (AV_LOG_FATAL);
+#endif
 #ifdef HAVE_AV_REGISTER_ALL
 	av_register_all ();
 #endif
@@ -263,6 +309,8 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 #ifdef _WIN32
 	p->pcmCaptureTracks = 0;
 	p->pcmCaptureTrack = 0;
+	p->diagnosticSourceIo = p->diagnosticIo = NULL;
+	p->compressedCapture = NULL;
 #endif
 	BarPlayerReset (p);
 	p->settings = settings;
@@ -378,7 +426,43 @@ static bool openStream (player_t * const player) {
 	av_dict_set (&options, "timeout", timeoutStr, 0);
 
 	assert (player->url != NULL);
-	if ((ret = avformat_open_input (&player->fctx, player->url, NULL, &options)) < 0) {
+#ifdef _WIN32
+	player->pcmCaptureTrack = 0;
+	const bool inputDiagnostic = pcmDiagnosticsEnabled () &&
+			player->pcmCaptureTracks < PCM_CAPTURE_MAX_TRACKS;
+	if (inputDiagnostic) {
+		player->pcmCaptureTrack = ++player->pcmCaptureTracks;
+		player->networkBytes = player->streamBufferBytes = player->ffmpegBytes = 0;
+		player->compressedCaptureBytes = player->compressedCaptureExtent = 0;
+		player->inputReads = player->inputShortReads = player->inputSeeks = 0;
+		player->inputReadErrors = 0;
+		player->compressedCaptureError = false;
+		char path[72];
+		(void) snprintf (path, sizeof (path),
+				"signalbox-compressed-track-%03u.bin", player->pcmCaptureTrack);
+		player->compressedCapture = fopen (path, "w+b");
+		if (player->compressedCapture == NULL)
+			fprintf (stderr, "[signalbox:decoder-input] compressed_open=failed file=%s\n",
+					path);
+		if ((ret = avio_open2 (&player->diagnosticSourceIo, player->url,
+				AVIO_FLAG_READ, &player->fctx->interrupt_callback, &options)) < 0) {
+			softfail ("Unable to open audio URL");
+		}
+		unsigned char * const ioBuffer = av_malloc (32768);
+		if (ioBuffer == NULL || (player->diagnosticIo = avio_alloc_context (
+				ioBuffer, 32768, 0, player, diagnosticRead, NULL,
+				diagnosticSeek)) == NULL) {
+			av_free (ioBuffer);
+			ret = AVERROR (ENOMEM);
+			softfail ("Unable to allocate diagnostic AVIO");
+		}
+		player->fctx->pb = player->diagnosticIo;
+		player->fctx->flags |= AVFMT_FLAG_CUSTOM_IO;
+		ret = avformat_open_input (&player->fctx, NULL, NULL, &options);
+	} else
+#endif
+	ret = avformat_open_input (&player->fctx, player->url, NULL, &options);
+	if (ret < 0) {
 		softfail ("Unable to open audio file");
 	}
 
@@ -417,6 +501,16 @@ static bool openStream (player_t * const player) {
 	if ((ret = avcodec_open2 (player->cctx, decoder, NULL)) < 0) {
 		softfail ("codec_open2");
 	}
+
+#ifdef _WIN32
+	if (inputDiagnostic) {
+		fprintf (stderr, "[signalbox:decoder-input] track=%u container=%s codec=%s"
+				" custom_avio=yes signalbox_decryption=no packet_boundaries=libavformat\n",
+				player->pcmCaptureTrack,
+				player->fctx->iformat == NULL ? "(unknown)" : player->fctx->iformat->name,
+				decoder->name);
+	}
+#endif
 
 	if (player->lastTimestamp > 0) {
 		av_seek_frame (player->fctx, player->streamIdx, player->lastTimestamp, 0);
@@ -667,6 +761,7 @@ static int play (player_t * const player) {
 	pthread_t aoplaythread;
 	enum { FILL, DRAIN, DONE } drainMode = FILL;
 	int ret = 0;
+	bool decoderError = false;
 #ifdef _WIN32
 	bool sourceFrameLogged = false;
 	uint64_t sourceFrameNumber = 0;
@@ -676,9 +771,7 @@ static int play (player_t * const player) {
 	const uint64_t captureSeconds = pcmCaptureLimitSeconds ();
 	const bool captureRequested = pcmDiagnostic &&
 			(captureSeconds > 0 || (captureEnv != NULL &&
-			strcmp (captureEnv, "1") == 0)) &&
-			player->pcmCaptureTracks < PCM_CAPTURE_MAX_TRACKS;
-	player->pcmCaptureTrack = captureRequested ? ++player->pcmCaptureTracks : 0;
+			strcmp (captureEnv, "1") == 0)) && player->pcmCaptureTrack > 0;
 	player->decoderCapturedSamples = player->filteredCapturedSamples = 0;
 	player->decoderCaptureRate = player->filteredCaptureRate = 0;
 	SbPcmCapture decoderCapture = {0};
@@ -686,6 +779,19 @@ static int play (player_t * const player) {
 	uint8_t *decoderCaptureBuffer = NULL;
 	int decoderCaptureBufferSamples = 0;
 	bool decoderCaptureAttempted = false;
+	uint64_t packetCount = 0, packetBytes = 0, packetMissingPts = 0;
+	uint64_t packetMissingDts = 0, packetBackwards = 0, packetDuplicates = 0;
+	uint64_t packetGaps = 0, packetShort = 0, packetZero = 0;
+	uint64_t packetCorrupt = 0, packetDiscard = 0, demuxErrors = 0;
+	uint64_t sendErrors = 0, receiveErrors = 0;
+	uint64_t packetAnomalies = 0;
+	int packetMin = INT_MAX, packetMax = 0;
+	int64_t previousPacketPts = AV_NOPTS_VALUE;
+	int64_t previousPacketDuration = 0;
+	int64_t firstPacketPts = AV_NOPTS_VALUE, lastPacketPts = AV_NOPTS_VALUE;
+	int64_t firstPacketDts = AV_NOPTS_VALUE, lastPacketDts = AV_NOPTS_VALUE;
+	int64_t packetDurationTotal = 0;
+	unsigned int packetFlagsOr = 0;
 #endif
 	pthread_create (&aoplaythread, NULL, BarAoPlayThread, player);
 	const double timeBase = av_q2d (player->st->time_base);
@@ -695,14 +801,28 @@ static int play (player_t * const player) {
 			if (ret == AVERROR_EOF) {
 				/* enter drain mode */
 				drainMode = DRAIN;
-				avcodec_send_packet (cctx, NULL);
+				const int sendRet = avcodec_send_packet (cctx, NULL);
+				if (sendRet < 0 && sendRet != AVERROR_EOF) {
+#ifdef _WIN32
+					if (pcmDiagnostic) {
+						sendErrors++;
+						fprintf (stderr,
+								"[signalbox:decoder-input] drain_send_error=%d\n",
+								sendRet);
+					}
+#endif
+					decoderError = true;
+					ret = sendRet;
+				}
 				debugPrint (DEBUG_AUDIO, "decoder entering drain mode after EOF\n");
-			} else if (pkt->stream_index != player->streamIdx) {
-				/* unused packet */
-				av_packet_unref (pkt);
-				continue;
 			} else if (ret < 0) {
 				/* error, abort */
+#ifdef _WIN32
+				if (pcmDiagnostic) {
+					demuxErrors++;
+					fprintf (stderr, "[signalbox:decoder-input] demux_error=%d\n", ret);
+				}
+#endif
 				/* mark the EOF, so that BarAoPlayThread can quit*/
 				char error[AV_ERROR_MAX_STRING_SIZE];
 				if (av_strerror(ret, error, sizeof(error)) < 0) {
@@ -716,9 +836,62 @@ static int play (player_t * const player) {
 				pthread_cond_broadcast (&player->aoplayCond);
 				pthread_mutex_unlock (&player->aoplayLock);
 				break;
+			} else if (pkt->stream_index != player->streamIdx) {
+				/* unused packet */
+				av_packet_unref (pkt);
+				continue;
 			} else {
 				/* fill buffer */
-				avcodec_send_packet (cctx, pkt);
+#ifdef _WIN32
+				if (pcmDiagnostic) {
+					packetCount++; packetBytes += (uint64_t) pkt->size;
+					packetDurationTotal += pkt->duration;
+					packetFlagsOr |= (unsigned int) pkt->flags;
+					if (firstPacketPts == AV_NOPTS_VALUE) firstPacketPts = pkt->pts;
+					if (firstPacketDts == AV_NOPTS_VALUE) firstPacketDts = pkt->dts;
+					lastPacketPts = pkt->pts; lastPacketDts = pkt->dts;
+					if (pkt->size < packetMin) packetMin = pkt->size;
+					if (pkt->size > packetMax) packetMax = pkt->size;
+					bool anomaly = false;
+					if (pkt->size == 0) { packetZero++; anomaly = true; }
+					else if (pkt->size < 8) { packetShort++; anomaly = true; }
+					if (pkt->pts == AV_NOPTS_VALUE) { packetMissingPts++; anomaly = true; }
+					if (pkt->dts == AV_NOPTS_VALUE) { packetMissingDts++; anomaly = true; }
+					if (pkt->flags & AV_PKT_FLAG_CORRUPT) { packetCorrupt++; anomaly = true; }
+					if (pkt->flags & AV_PKT_FLAG_DISCARD) { packetDiscard++; anomaly = true; }
+					if (previousPacketPts != AV_NOPTS_VALUE && pkt->pts != AV_NOPTS_VALUE) {
+						if (pkt->pts < previousPacketPts) { packetBackwards++; anomaly = true; }
+						else if (pkt->pts == previousPacketPts) { packetDuplicates++; anomaly = true; }
+						else if (previousPacketDuration > 0 && pkt->pts !=
+								previousPacketPts + previousPacketDuration) {
+							packetGaps++; anomaly = true;
+						}
+					}
+					if (anomaly && packetAnomalies++ < 20)
+						fprintf (stderr, "[signalbox:decoder-input] packet_anomaly"
+								" number=%" PRIu64 " size=%d pts=%" PRId64
+								" dts=%" PRId64 " duration=%" PRId64 " flags=0x%x\n",
+								packetCount, pkt->size, pkt->pts, pkt->dts,
+								pkt->duration, pkt->flags);
+					previousPacketPts = pkt->pts;
+					previousPacketDuration = pkt->duration;
+				}
+#endif
+				const int sendRet = avcodec_send_packet (cctx, pkt);
+				if (sendRet < 0) {
+#ifdef _WIN32
+					if (pcmDiagnostic) {
+						sendErrors++;
+						fprintf (stderr,
+								"[signalbox:decoder-input] send_packet_error=%d\n",
+								sendRet);
+					}
+#endif
+					ret = sendRet;
+					decoderError = true;
+					drainMode = DONE;
+					break;
+				}
 			}
 		}
 
@@ -735,8 +908,19 @@ static int play (player_t * const player) {
 				pthread_cond_broadcast (&player->aoplayCond);
 				pthread_mutex_unlock (&player->aoplayLock);
 				break;
-			} else if (ret != 0) {
+			} else if (ret == AVERROR (EAGAIN)) {
 				/* no more output */
+				break;
+			} else if (ret < 0) {
+#ifdef _WIN32
+				if (pcmDiagnostic) {
+					receiveErrors++;
+					fprintf (stderr,
+							"[signalbox:decoder-input] receive_frame_error=%d\n", ret);
+				}
+#endif
+				decoderError = true;
+				drainMode = DONE;
 				break;
 			}
 
@@ -857,12 +1041,38 @@ static int play (player_t * const player) {
 
 		av_packet_unref (pkt);
 	}
+	if (decoderError) {
+		pthread_mutex_lock (&player->aoplayLock);
+		(void) av_buffersrc_add_frame (player->fabuf, NULL);
+		pthread_cond_broadcast (&player->aoplayCond);
+		pthread_mutex_unlock (&player->aoplayLock);
+	}
 	av_frame_free (&frame);
 	av_packet_free (&pkt);
 	#ifdef _WIN32
 	pcmCaptureClose (&decoderCapture);
 	swr_free (&decoderCaptureSwr);
 	av_freep (&decoderCaptureBuffer);
+	if (pcmDiagnostic) {
+		fprintf (stderr, "[signalbox:decoder-input-summary] track=%u packets=%" PRIu64
+				" bytes=%" PRIu64 " size_min=%d size_max=%d missing_pts=%" PRIu64
+				" missing_dts=%" PRIu64 " backwards=%" PRIu64 " duplicates=%" PRIu64
+				" gaps=%" PRIu64 " zero=%" PRIu64 " short=%" PRIu64
+				" corrupt=%" PRIu64 " discard=%" PRIu64 " demux_errors=%" PRIu64
+				" send_errors=%" PRIu64 " receive_errors=%" PRIu64
+				" packet_anomalies=%" PRIu64 " anomaly_logs_suppressed=%" PRIu64
+				" first_pts=%" PRId64 " last_pts=%" PRId64
+				" first_dts=%" PRId64 " last_dts=%" PRId64
+				" duration_total=%" PRId64 " flags_or=0x%x\n",
+				player->pcmCaptureTrack, packetCount, packetBytes,
+				packetMin == INT_MAX ? 0 : packetMin, packetMax, packetMissingPts,
+				packetMissingDts, packetBackwards, packetDuplicates, packetGaps,
+				packetZero, packetShort, packetCorrupt, packetDiscard, demuxErrors,
+				sendErrors, receiveErrors, packetAnomalies,
+				packetAnomalies > 20 ? packetAnomalies - 20 : 0,
+				firstPacketPts, lastPacketPts, firstPacketDts, lastPacketDts,
+				packetDurationTotal, packetFlagsOr);
+	}
 	#endif
 	debugPrint (DEBUG_AUDIO, "decoder is done, waiting for ao player\n");
 	pthread_join (aoplaythread, NULL);
@@ -904,6 +1114,41 @@ static void finish (player_t * const player) {
 	if (player->fctx != NULL) {
 		avformat_close_input (&player->fctx);
 	}
+#ifdef _WIN32
+	int64_t bytesRemaining = 0;
+	if (player->diagnosticSourceIo != NULL) {
+		const int64_t size = avio_size (player->diagnosticSourceIo);
+		const int64_t position = avio_tell (player->diagnosticSourceIo);
+		if (size >= 0 && position >= 0 && size > position)
+			bytesRemaining = size - position;
+	}
+	if (player->diagnosticIo != NULL)
+		avio_context_free (&player->diagnosticIo);
+	if (player->diagnosticSourceIo != NULL)
+		(void) avio_closep (&player->diagnosticSourceIo);
+	if (player->compressedCapture != NULL) {
+		if (fclose (player->compressedCapture) != 0)
+			player->compressedCaptureError = true;
+		player->compressedCapture = NULL;
+	}
+	if (pcmDiagnosticsEnabled () && player->pcmCaptureTrack > 0) {
+		fprintf (stderr, "[signalbox:stream-continuity-summary] track=%u"
+				" bytes_received_from_network=%" PRIu64
+				" bytes_written_into_stream_buffer=%" PRIu64
+				" bytes_read_by_ffmpeg=%" PRIu64
+				" bytes_remaining_at_end=%" PRId64 " reads=%" PRIu64
+				" short_reads=%" PRIu64 " seeks=%" PRIu64
+				" read_errors=%" PRIu64 " capture_bytes_written=%" PRIu64
+				" capture_extent=%" PRIu64 " capture_error=%s"
+				" accounting_scope=avio_protocol_boundary\n",
+				player->pcmCaptureTrack, player->networkBytes,
+				player->streamBufferBytes, player->ffmpegBytes, bytesRemaining,
+				player->inputReads,
+				player->inputShortReads, player->inputSeeks, player->inputReadErrors,
+				player->compressedCaptureBytes, player->compressedCaptureExtent,
+				player->compressedCaptureError ? "yes" : "no");
+	}
+#endif
 }
 
 /*	player thread; for every song a new thread is started
@@ -963,7 +1208,10 @@ void *BarAoPlayThread (void *data) {
 	double previousDurationMs = 0.0;
 	SbPcmCapture capture = {0};
 	const uint64_t captureSeconds = pcmCaptureLimitSeconds ();
-	const bool captureRequested = player->pcmCaptureTrack > 0;
+	const char * const captureEnv = getenv ("SIGNALBOX_CAPTURE_PCM");
+	const bool captureRequested = player->pcmCaptureTrack > 0 &&
+			(captureSeconds > 0 || (captureEnv != NULL &&
+			strcmp (captureEnv, "1") == 0));
 	const bool logSampleJumps = pcmJumpLoggingEnabled ();
 	uint64_t pcmBlock = 0;
 	uint64_t cumulativeSamples = 0;
