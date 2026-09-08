@@ -335,6 +335,12 @@ a clean VM before becoming a release dependency. Its old release cadence and
 uncertain behavior across current Windows audio stacks make it unsuitable as
 the architectural endpoint.
 
+During W3 testing, Parallels Desktop guest audio introduced audible
+popping/zapping, while the same captured WAV and M4A files played cleanly on
+macOS and physical Windows hardware. This was observed on the tested setup; do
+not use Parallels guest audio as the final reference for Signalbox audio
+quality. Validate playback on physical Windows hardware.
+
 Backend comparison:
 
 | Backend | Fit |
