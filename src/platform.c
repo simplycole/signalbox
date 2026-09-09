@@ -9,6 +9,7 @@ static void (*shutdownHandler) (void);
 #ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
+#include <wchar.h>
 
 static BOOL WINAPI SbPlatformConsoleHandler (DWORD event) {
 	if (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT ||
@@ -32,12 +33,74 @@ static char *SbPlatformWideToUtf8 (const wchar_t *value) {
 	}
 	return result;
 }
+
+static wchar_t *SbPlatformUtf8ToWide (const char *value) {
+	const int size = MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, value,
+			-1, NULL, 0);
+	if (size <= 0) return NULL;
+	wchar_t *result = malloc ((size_t) size * sizeof (*result));
+	if (result == NULL || MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS,
+			value, -1, result, size) <= 0) {
+		free (result);
+		return NULL;
+	}
+	return result;
+}
 #else
 #include <signal.h>
 
 static void SbPlatformSignalHandler (int signalNumber) {
 	(void) signalNumber;
 	if (shutdownHandler != NULL) shutdownHandler ();
+}
+#endif
+
+#ifdef _WIN32
+char *SbPlatformFindExecutableSibling (const char *filename) {
+	if (filename == NULL) return NULL;
+
+	const DWORD capacity = 32768;
+	wchar_t *module = malloc ((size_t) capacity * sizeof (*module));
+	if (module == NULL) return NULL;
+	const DWORD length = GetModuleFileNameW (NULL, module, capacity);
+	if (length == 0 || length >= capacity) {
+		free (module);
+		return NULL;
+	}
+
+	wchar_t *separator = wcsrchr (module, L'\\');
+	if (separator == NULL) separator = wcsrchr (module, L'/');
+	if (separator == NULL) {
+		free (module);
+		return NULL;
+	}
+	const size_t directoryLength = (size_t) (separator - module + 1);
+	wchar_t *wideFilename = SbPlatformUtf8ToWide (filename);
+	if (wideFilename == NULL) {
+		free (module);
+		return NULL;
+	}
+	const size_t filenameLength = wcslen (wideFilename);
+	wchar_t *path = malloc ((directoryLength + filenameLength + 1) *
+			sizeof (*path));
+	if (path == NULL) {
+		free (wideFilename);
+		free (module);
+		return NULL;
+	}
+	wmemcpy (path, module, directoryLength);
+	wmemcpy (path + directoryLength, wideFilename, filenameLength + 1);
+	free (wideFilename);
+	free (module);
+
+	const DWORD attributes = GetFileAttributesW (path);
+	char *result = NULL;
+	if (attributes != INVALID_FILE_ATTRIBUTES &&
+			(attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+		result = SbPlatformWideToUtf8 (path);
+	}
+	free (path);
+	return result;
 }
 #endif
 

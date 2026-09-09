@@ -224,6 +224,18 @@ small interface before adopting a direct WASAPI backend (the preferred final
 backend). Ship a ZIP containing the executable, dependency DLLs, licenses, and
 notices.
 
+A portable Windows bundle should include:
+
+```text
+signalbox.exe
+cert.pem
+required DLLs
+```
+
+When `ca_bundle` is not explicitly configured, Signalbox automatically uses
+`cert.pem` beside the executable. An explicit `ca_bundle` always takes
+precedence.
+
 The next milestone after W2 validation is **W3: Windows authenticated playback
 + audio backend bring-up**.
 

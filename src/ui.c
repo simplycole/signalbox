@@ -47,6 +47,7 @@ THE SOFTWARE.
 
 #include "ui.h"
 #include "debug.h"
+#include "platform.h"
 #include "ui_readline.h"
 #include "ui_renderer.h"
 
@@ -216,9 +217,17 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 	setAndCheck (CURLOPT_NOPROGRESS, 0);
 	setAndCheck (CURLOPT_POST, 1);
 	setAndCheck (CURLOPT_TIMEOUT, settings->timeout);
+#ifdef _WIN32
+	char *bundledCa = NULL;
+#endif
 	if (settings->caBundle != NULL) {
 		setAndCheck (CURLOPT_CAINFO, settings->caBundle);
 	}
+#ifdef _WIN32
+	else if ((bundledCa = SbPlatformFindExecutableSibling ("cert.pem")) != NULL) {
+		setAndCheck (CURLOPT_CAINFO, bundledCa);
+	}
+#endif
 
 	if (settings->bindTo!= NULL) {
 		if (curl_easy_setopt (http, CURLOPT_INTERFACE,
@@ -277,6 +286,9 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 	} while (true);
 
 	curl_slist_free_all (list);
+#ifdef _WIN32
+	free (bundledCa);
+#endif
 
 	req->responseData = buffer.data;
 	debugPrint (DEBUG_NETWORK, "→ %s\n", req->responseData);
