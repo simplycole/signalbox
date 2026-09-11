@@ -51,6 +51,7 @@ typedef struct {
 	SbMetadataResolver metadataResolver;
 	SbMetadataResult metadata;
 	SbLyricsResult lyrics;
+	SbAlbumArtResult albumArt;
 	SbTrackIdentity trackIdentity;
 	uint64_t enrichmentGeneration;
 	bool useTui;

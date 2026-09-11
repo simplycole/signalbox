@@ -46,6 +46,17 @@ accepted. The aliases toggle retained modal state in the main TUI loop; async
 results refresh an open view without a nested input/render loop. Both lookups
 and failures leave Pandora playback unchanged.
 
+The enrichment worker also owns a schema-versioned JSON cache which survives
+restarts. Metadata and lyrics use provider-separated keys in the shared file;
+corrupt or incompatible files are ignored, transient failures are excluded,
+and flushed temporary files are atomically replaced. Successful MusicBrainz
+results retain recording, release, and release-group MBIDs internally. The
+release MBID drives Cover Art Archive lookup, preferring a front 500px image.
+Encoded JPEG, PNG, or WebP data (at most 5 MiB) is stored separately under
+`art/`. A generic result and renderer contract expose status, provider, URL,
+MIME type, cached path, dimensions, and release identity without coupling the
+UI to Cover Art Archive. Generation checks prevent stale UI publication.
+
 LRCLIB is an open/community lyrics service requiring no API key. Signalbox
 identifies itself with its version and project URL, spaces requests, honors a
 numeric `Retry-After` after rate limiting when practical, and treats all

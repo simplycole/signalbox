@@ -1,0 +1,8 @@
+#include "enrichment_cache.h"
+#include "enrichment.h"
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+int main(void){char path[256];snprintf(path,sizeof(path),"/tmp/signalbox-cache-%ld.json",(long)getpid());SbPersistentCache c;SbPersistentCacheInit(&c,strdup(path));time_t now=1700000000;assert(!SbCacheStatePersistent(SB_LOOKUP_ERROR));assert(SbCacheTtl(SB_CACHE_ART,SB_LOOKUP_NO_MATCH)<SbCacheTtl(SB_CACHE_ART,SB_LOOKUP_AVAILABLE));assert(SbPersistentCachePut(&c,"musicbrainz","k",SB_LOOKUP_AVAILABLE,"{\"title\":\"x\"}",SB_CACHE_METADATA,now));assert(!SbPersistentCachePut(&c,"musicbrainz","e",SB_LOOKUP_ERROR,"{}",SB_CACHE_METADATA,now));assert(SbPersistentCacheWrite(&c));SbPersistentCacheDestroy(&c);SbPersistentCacheInit(&c,strdup(path));assert(SbPersistentCacheLoad(&c,now+1));assert(SbPersistentCacheGet(&c,"musicbrainz","k",SB_CACHE_METADATA,now+1));assert(!SbPersistentCacheGet(&c,"musicbrainz","k",SB_CACHE_METADATA,now+100*86400));SbPersistentCacheDestroy(&c);FILE*f=fopen(path,"wb");fputs("{\"schema_version\":999,\"entries\":[]}",f);fclose(f);SbPersistentCacheInit(&c,strdup(path));assert(!SbPersistentCacheLoad(&c,now));for(size_t i=0;i<SB_CACHE_MAX_ENTRIES+1;i++){char key[32];snprintf(key,sizeof(key),"key-%zu",i);assert(SbPersistentCachePut(&c,"lrclib",key,SB_LOOKUP_NO_MATCH,"{}",SB_CACHE_LYRICS,now+(time_t)i));}assert(c.count==SB_CACHE_MAX_ENTRIES);assert(!SbPersistentCacheGet(&c,"lrclib","key-0",SB_CACHE_LYRICS,now+SB_CACHE_MAX_ENTRIES));SbPersistentCacheDestroy(&c);f=fopen(path,"wb");fputs("broken",f);fclose(f);SbPersistentCacheInit(&c,strdup(path));assert(!SbPersistentCacheLoad(&c,now));SbPersistentCacheDestroy(&c);remove(path);puts("enrichment cache tests passed");}

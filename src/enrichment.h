@@ -22,6 +22,9 @@ typedef enum {
 	SB_LOOKUP_ERROR
 } SbLookupStatus;
 
+#include "enrichment_cache.h"
+#include "album_art.h"
+
 SbLookupStatus SbMusicBrainzHttpStatus (long, int);
 bool SbMusicBrainzShouldRetry (long, int, unsigned int);
 
@@ -30,7 +33,7 @@ typedef struct {
 	char artist[SB_ENRICH_TEXT_MAX], title[SB_ENRICH_TEXT_MAX];
 	char release[SB_ENRICH_TEXT_MAX], releaseDate[32];
 	char artistId[SB_ENRICH_ID_MAX], recordingId[SB_ENRICH_ID_MAX];
-	char releaseId[SB_ENRICH_ID_MAX], provider[32];
+	char releaseId[SB_ENRICH_ID_MAX], releaseGroupId[SB_ENRICH_ID_MAX], provider[32];
 	double confidence;
 	char error[SB_ENRICH_ERROR_MAX];
 } SbMetadataResult;
@@ -67,18 +70,27 @@ typedef struct {
 
 typedef struct {
 	pthread_t thread;
+	pthread_t artThread;
 	pthread_mutex_t lock;
 	pthread_cond_t cond;
-	bool started, stopping, pending, resultReady, lyricsResultReady;
+	bool started, artStarted, stopping, pending, artPending, resultReady, lyricsResultReady;
+	bool artResultReady;
 	uint64_t pendingGeneration, metadataResultGeneration, lyricsResultGeneration;
+	uint64_t artResultGeneration;
 	SbTrackIdentity pendingIdentity;
+	char pendingArtReleaseId[SB_ENRICH_ID_MAX];
+	uint64_t pendingArtGeneration;
 	SbMetadataResult completed;
 	SbLyricsResult completedLyrics;
+	SbAlbumArtResult completedArt;
 	SbMetadataProvider provider;
 	SbLyricsProvider lyricsProvider;
 	SbEnrichmentCacheEntry cache[SB_ENRICH_CACHE_MAX];
 	SbLyricsCacheEntry lyricsCache[SB_ENRICH_CACHE_MAX];
 	size_t cacheNext, lyricsCacheNext;
+	SbPersistentCache persistent;
+	SbPersistentCache artPersistent;
+	char *artDirectory;
 } SbMetadataResolver;
 
 void SbTrackIdentitySet (SbTrackIdentity *, const char *, const char *,
@@ -105,4 +117,5 @@ void SbMetadataResolverRequest (SbMetadataResolver *, const SbTrackIdentity *,
 bool SbMetadataResolverPoll (SbMetadataResolver *, uint64_t,
 		SbMetadataResult *);
 bool SbLyricsResolverPoll (SbMetadataResolver *, uint64_t, SbLyricsResult *);
+bool SbAlbumArtResolverPoll (SbMetadataResolver *, uint64_t, SbAlbumArtResult *);
 void SbMetadataResolverDestroy (SbMetadataResolver *);

@@ -106,6 +106,13 @@ static const char *jsonString (json_object *obj, const char *key) {
 			json_object_get_string (value) : "";
 }
 
+static char *metadataSerialize(const SbMetadataResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"status",json_object_new_int(r->status));json_object_object_add(o,"artist",json_object_new_string(r->artist));json_object_object_add(o,"title",json_object_new_string(r->title));json_object_object_add(o,"release",json_object_new_string(r->release));json_object_object_add(o,"release_date",json_object_new_string(r->releaseDate));json_object_object_add(o,"artist_id",json_object_new_string(r->artistId));json_object_object_add(o,"recording_id",json_object_new_string(r->recordingId));json_object_object_add(o,"release_id",json_object_new_string(r->releaseId));json_object_object_add(o,"confidence",json_object_new_double(r->confidence));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
+static bool metadataDeserialize(const char*s,SbMetadataResult*r){json_object*o=json_tokener_parse(s),*v=NULL;if(!o)return false;SbMetadataResultInit(r);copyText(r->provider,sizeof(r->provider),"MusicBrainz");json_object_object_get_ex(o,"status",&v);r->status=(SbLookupStatus)json_object_get_int(v);copyText(r->artist,sizeof(r->artist),jsonString(o,"artist"));copyText(r->title,sizeof(r->title),jsonString(o,"title"));copyText(r->release,sizeof(r->release),jsonString(o,"release"));copyText(r->releaseDate,sizeof(r->releaseDate),jsonString(o,"release_date"));copyText(r->artistId,sizeof(r->artistId),jsonString(o,"artist_id"));copyText(r->recordingId,sizeof(r->recordingId),jsonString(o,"recording_id"));copyText(r->releaseId,sizeof(r->releaseId),jsonString(o,"release_id"));if(json_object_object_get_ex(o,"confidence",&v))r->confidence=json_object_get_double(v);json_object_put(o);return SbCacheStatePersistent(r->status);}
+static char *lyricsSerialize(const SbLyricsResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"status",json_object_new_int(r->status));json_object_object_add(o,"artist",json_object_new_string(r->artist));json_object_object_add(o,"title",json_object_new_string(r->title));json_object_object_add(o,"album",json_object_new_string(r->album));json_object_object_add(o,"record_id",json_object_new_string(r->recordId));json_object_object_add(o,"instrumental",json_object_new_boolean(r->instrumental));json_object_object_add(o,"plain",json_object_new_string(r->plainLyrics?r->plainLyrics:""));json_object_object_add(o,"synced",json_object_new_string(r->syncedLyrics?r->syncedLyrics:""));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
+static bool lyricsDeserialize(const char*s,SbLyricsResult*r){json_object*o=json_tokener_parse(s),*v=NULL;if(!o)return false;SbLyricsResultInit(r);copyText(r->provider,sizeof(r->provider),"LRCLIB");json_object_object_get_ex(o,"status",&v);r->status=(SbLookupStatus)json_object_get_int(v);copyText(r->artist,sizeof(r->artist),jsonString(o,"artist"));copyText(r->title,sizeof(r->title),jsonString(o,"title"));copyText(r->album,sizeof(r->album),jsonString(o,"album"));copyText(r->recordId,sizeof(r->recordId),jsonString(o,"record_id"));if(json_object_object_get_ex(o,"instrumental",&v))r->instrumental=json_object_get_boolean(v);const char*p=jsonString(o,"plain"),*y=jsonString(o,"synced");if(*p)r->plainLyrics=strdup(p);if(*y)r->syncedLyrics=strdup(y);json_object_put(o);return SbCacheStatePersistent(r->status);}
+static char *artSerialize(const SbAlbumArtResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"url",json_object_new_string(r->sourceUrl));json_object_object_add(o,"mime",json_object_new_string(r->mimeType));json_object_object_add(o,"path",json_object_new_string(r->cachedPath));json_object_object_add(o,"width",json_object_new_int(r->width));json_object_object_add(o,"height",json_object_new_int(r->height));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
+static bool artDeserialize(const SbCacheEntry*e,const char*release,SbAlbumArtResult*r){json_object*o=json_tokener_parse(e->payload),*v=NULL;if(!o)return false;SbAlbumArtResultInit(r);r->status=e->state;copyText(r->releaseId,sizeof(r->releaseId),release);copyText(r->sourceUrl,sizeof(r->sourceUrl),jsonString(o,"url"));copyText(r->mimeType,sizeof(r->mimeType),jsonString(o,"mime"));copyText(r->cachedPath,sizeof(r->cachedPath),jsonString(o,"path"));if(json_object_object_get_ex(o,"width",&v))r->width=json_object_get_int(v);if(json_object_object_get_ex(o,"height",&v))r->height=json_object_get_int(v);json_object_put(o);if(r->status==SB_LOOKUP_AVAILABLE){FILE*f=fopen(r->cachedPath,"rb");if(!f)return false;fclose(f);}return true;}
+
 bool SbLrclibParse (const char *json, SbLyricsResult *result) {
 	SbLyricsResultInit (result); copyText (result->provider,
 			sizeof (result->provider), "LRCLIB");
@@ -461,6 +468,10 @@ bool SbMusicBrainzParse (const char *json, const SbTrackIdentity *identity,
 			copyText (result->release, sizeof (result->release), jsonString (release, "title"));
 			copyText (result->releaseDate, sizeof (result->releaseDate), jsonString (release, "date"));
 			copyText (result->releaseId, sizeof (result->releaseId), jsonString (release, "id"));
+			json_object *group = NULL;
+			if (json_object_object_get_ex (release, "release-group", &group))
+				copyText (result->releaseGroupId, sizeof (result->releaseGroupId),
+						jsonString (group, "id"));
 		}
 	}
 	json_object_put (root); return result->status == SB_LOOKUP_AVAILABLE;
@@ -737,6 +748,27 @@ static bool lrclibLookup (const SbTrackIdentity *id, SbLyricsResult *result,
 	return found;
 }
 
+static void *artResolverThread(void *arg) {
+	SbMetadataResolver *r=arg;
+	for (;;) {
+		pthread_mutex_lock(&r->lock);
+		while(!r->artPending&&!r->stopping) pthread_cond_wait(&r->cond,&r->lock);
+		if(r->stopping){pthread_mutex_unlock(&r->lock);break;}
+		char release[SB_ENRICH_ID_MAX]; copyText(release,sizeof(release),r->pendingArtReleaseId);
+		uint64_t generation=r->pendingArtGeneration; r->artPending=false;
+		pthread_mutex_unlock(&r->lock);
+		SbAlbumArtResult art; SbAlbumArtResultInit(&art);
+		const SbCacheEntry *cached=release[0]?SbPersistentCacheGet(&r->artPersistent,"coverartarchive",release,SB_CACHE_ART,time(NULL)):NULL;
+		if(cached&&artDeserialize(cached,release,&art)) {}
+		else if(release[0]&&r->artDirectory) { SbCoverArtLookup(release,r->artDirectory,&art); if(art.status==SB_LOOKUP_AVAILABLE||art.status==SB_LOOKUP_NO_MATCH){char*p=artSerialize(&art);if(p){SbPersistentCachePut(&r->artPersistent,"coverartarchive",release,art.status,p,SB_CACHE_ART,time(NULL));free(p);SbPersistentCacheWrite(&r->artPersistent);}} }
+		else art.status=SB_LOOKUP_NO_MATCH;
+		pthread_mutex_lock(&r->lock); r->completedArt=art;
+		r->artResultGeneration=generation; r->artResultReady=true;
+		pthread_mutex_unlock(&r->lock);
+	}
+	return NULL;
+}
+
 static void *resolverThread (void *arg) {
 	SbMetadataResolver *r = arg; time_t lastMetadataRequest = 0, lastLyricsRequest = 0;
 	for (;;) {
@@ -749,6 +781,7 @@ static void *resolverThread (void *arg) {
 		for (size_t i = 0; i < SB_ENRICH_CACHE_MAX; i++) if (r->cache[i].used && strcmp (key, r->cache[i].key) == 0) {
 			result = r->cache[i].result; cached = true; break;
 		}
+		if (!cached) { const SbCacheEntry *e=SbPersistentCacheGet(&r->persistent,r->provider.name,key,SB_CACHE_METADATA,time(NULL)); if(e) cached=metadataDeserialize(e->payload,&result); }
 		char lyricsKey[80]; SbTrackCacheKey (r->lyricsProvider.name, &id,
 				lyricsKey, sizeof (lyricsKey));
 		SbLyricsResult lyrics; SbLyricsResultInit (&lyrics); bool lyricsCached = false;
@@ -757,6 +790,7 @@ static void *resolverThread (void *arg) {
 				SbLyricsResultCopy (&lyrics, &r->lyricsCache[i].result);
 				lyricsCached = true; break;
 			}
+		if (!lyricsCached) { const SbCacheEntry *e=SbPersistentCacheGet(&r->persistent,r->lyricsProvider.name,lyricsKey,SB_CACHE_LYRICS,time(NULL)); if(e) lyricsCached=lyricsDeserialize(e->payload,&lyrics); }
 		pthread_mutex_unlock (&r->lock);
 		/* Metadata goes first: LRCLIB retries and Retry-After pauses must never
 		 * starve MusicBrainz on the shared, playback-independent worker. */
@@ -770,10 +804,16 @@ static void *resolverThread (void *arg) {
 				result.status == SB_LOOKUP_NO_MATCH)) {
 			SbEnrichmentCacheEntry *e = &r->cache[r->cacheNext++ % SB_ENRICH_CACHE_MAX];
 			e->used = true; copyText (e->key, sizeof (e->key), key); e->result = result;
+			char *payload=metadataSerialize(&result); if(payload){SbPersistentCachePut(&r->persistent,r->provider.name,key,result.status,payload,SB_CACHE_METADATA,time(NULL));free(payload);SbPersistentCacheWrite(&r->persistent);}
 		}
 		r->completed = result; r->metadataResultGeneration = generation;
 		r->resultReady = true;
 		pthread_mutex_unlock (&r->lock);
+		pthread_mutex_lock(&r->lock);
+		copyText(r->pendingArtReleaseId,sizeof(r->pendingArtReleaseId),
+				result.status==SB_LOOKUP_AVAILABLE?result.releaseId:"");
+		r->pendingArtGeneration=generation; r->artPending=true;
+		pthread_cond_broadcast(&r->cond); pthread_mutex_unlock(&r->lock);
 		if (!lyricsCached) {
 			time_t now = time (NULL);
 			if (lastLyricsRequest != 0 && now <= lastLyricsRequest) SbPlatformSleepMs (1000);
@@ -787,6 +827,7 @@ static void *resolverThread (void *arg) {
 			if (e->used) SbLyricsResultDestroy (&e->result);
 			e->used = true; copyText (e->key, sizeof (e->key), lyricsKey);
 			SbLyricsResultInit (&e->result); SbLyricsResultCopy (&e->result, &lyrics);
+			char *payload=lyricsSerialize(&lyrics); if(payload){SbPersistentCachePut(&r->persistent,r->lyricsProvider.name,lyricsKey,lyrics.status,payload,SB_CACHE_LYRICS,time(NULL));free(payload);SbPersistentCacheWrite(&r->persistent);}
 		}
 		SbLyricsResultCopy (&r->completedLyrics, &lyrics);
 		r->lyricsResultGeneration = generation; r->lyricsResultReady = true;
@@ -800,13 +841,17 @@ void SbMetadataResolverInit (SbMetadataResolver *r) {
 	r->provider = (SbMetadataProvider) {"musicbrainz", musicBrainzLookup, NULL};
 	r->lyricsProvider = (SbLyricsProvider) {"lrclib", lrclibLookup, NULL};
 	SbLyricsResultInit (&r->completedLyrics);
+	SbAlbumArtResultInit(&r->completedArt); SbPersistentCacheInit(&r->persistent,SbPlatformCachePath("enrichment-v1.json")); SbPersistentCacheLoad(&r->persistent,time(NULL)); r->artDirectory=SbPlatformCachePath("art"); if(r->artDirectory)SbPlatformEnsureDirectory(r->artDirectory);
+	SbPersistentCacheInit(&r->artPersistent,SbPlatformCachePath("album-art-v1.json")); SbPersistentCacheLoad(&r->artPersistent,time(NULL));
 }
 bool SbMetadataResolverStart (SbMetadataResolver *r) {
-	r->started = pthread_create (&r->thread, NULL, resolverThread, r) == 0; return r->started;
+	r->artStarted=pthread_create(&r->artThread,NULL,artResolverThread,r)==0;
+	r->started = pthread_create (&r->thread, NULL, resolverThread, r) == 0;
+	return r->started;
 }
 void SbMetadataResolverRequest (SbMetadataResolver *r, const SbTrackIdentity *id, uint64_t generation) {
 	pthread_mutex_lock (&r->lock); r->pendingIdentity = *id; r->pendingGeneration = generation;
-	r->pending = true; pthread_cond_signal (&r->cond); pthread_mutex_unlock (&r->lock);
+	r->pending = true; pthread_cond_broadcast (&r->cond); pthread_mutex_unlock (&r->lock);
 }
 bool SbMetadataResolverPoll (SbMetadataResolver *r, uint64_t generation, SbMetadataResult *out) {
 	bool ready = false; pthread_mutex_lock (&r->lock);
@@ -822,10 +867,12 @@ bool SbLyricsResolverPoll (SbMetadataResolver *r, uint64_t generation, SbLyricsR
 	}
 	pthread_mutex_unlock (&r->lock); return ready;
 }
+bool SbAlbumArtResolverPoll(SbMetadataResolver*r,uint64_t generation,SbAlbumArtResult*out){bool ready=false;pthread_mutex_lock(&r->lock);if(r->artResultReady){ready=r->artResultGeneration==generation;if(ready)*out=r->completedArt;r->artResultReady=false;}pthread_mutex_unlock(&r->lock);return ready;}
 void SbMetadataResolverDestroy (SbMetadataResolver *r) {
-	if (r->started) { pthread_mutex_lock (&r->lock); r->stopping = true; pthread_cond_signal (&r->cond); pthread_mutex_unlock (&r->lock); pthread_join (r->thread, NULL); }
+	if (r->started || r->artStarted) { pthread_mutex_lock (&r->lock); r->stopping = true; pthread_cond_broadcast (&r->cond); pthread_mutex_unlock (&r->lock); if(r->started)pthread_join (r->thread, NULL); if(r->artStarted)pthread_join(r->artThread,NULL); }
 	SbLyricsResultDestroy (&r->completedLyrics);
 	for (size_t i = 0; i < SB_ENRICH_CACHE_MAX; i++)
 		if (r->lyricsCache[i].used) SbLyricsResultDestroy (&r->lyricsCache[i].result);
+	SbPersistentCacheDestroy(&r->persistent); SbPersistentCacheDestroy(&r->artPersistent); free(r->artDirectory);
 	pthread_cond_destroy (&r->cond); pthread_mutex_destroy (&r->lock);
 }

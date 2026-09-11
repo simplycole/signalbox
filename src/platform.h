@@ -6,6 +6,9 @@
 
 /* Returned paths are UTF-8 and owned by the caller. */
 char *SbPlatformConfigPath (const char *filename);
+char *SbPlatformCachePath (const char *filename);
+bool SbPlatformEnsureDirectory (const char *path);
+bool SbPlatformAtomicReplace (const char *temporary, const char *destination);
 char *SbPlatformJoinPath (const char *directory, const char *filename);
 #ifdef _WIN32
 /* Returns an absolute UTF-8 path when the executable sibling exists. */

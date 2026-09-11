@@ -589,6 +589,8 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 	app->metadata.status = SB_LOOKUP_LOADING;
 	SbLyricsResultDestroy (&app->lyrics); app->lyrics.status = SB_LOOKUP_LOADING;
 	snprintf (app->lyrics.provider, sizeof (app->lyrics.provider), "LRCLIB");
+	SbAlbumArtResultInit(&app->albumArt); app->albumArt.status=SB_LOOKUP_LOADING;
+	app->uiModel.artState=SB_LOOKUP_LOADING; app->uiModel.artCachedPath[0]='\0';
 	if (app->metadataResolver.started) SbMetadataResolverRequest (
 			&app->metadataResolver, &app->trackIdentity, app->enrichmentGeneration);
 	else { app->metadata.status = SB_LOOKUP_ERROR; snprintf (app->metadata.error,
@@ -733,6 +735,14 @@ static void BarMainLoop (BarApp_t *app) {
 					(unsigned long long) app->enrichmentGeneration,
 					(int) lyrics.status, lyrics.error);
 			SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+		}
+		SbAlbumArtResult art;
+		if (SbAlbumArtResolverPoll(&app->metadataResolver,app->enrichmentGeneration,&art)) {
+			app->albumArt=art; app->uiModel.artState=art.status;
+			snprintf(app->uiModel.artProvider,sizeof(app->uiModel.artProvider),"%s",art.provider);
+			snprintf(app->uiModel.artCachedPath,sizeof(app->uiModel.artCachedPath),"%s",art.cachedPath);
+			app->uiModel.artWidth=art.width; app->uiModel.artHeight=art.height;
+			SbUiRendererRender(&app->uiRenderer,&app->uiModel,SB_UI_RENDER_STATE);
 		}
 		/* song finished playing, clean up things/scrobble song */
 		if (BarPlayerGetMode (player) == PLAYER_FINISHED) {

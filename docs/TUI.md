@@ -36,6 +36,19 @@ only when that local spectrum toggle does not collide with a configured action.
 On shorter terminals the overlay scrolls with arrows or `j`/`k`, Page Up/Down,
 and Home/End; Esc closes it.
 
+## Enrichment cache
+
+Caching and background album-art resolution are enabled by default. macOS and
+Linux use `${XDG_CACHE_HOME}/signalbox`, falling back to `~/.cache/signalbox`;
+Windows uses `%LOCALAPPDATA%\\Signalbox`. `enrichment-v1.json` contains
+inspectable metadata and lyrics entries, while encoded cover files live in
+`art/`. Deleting the directory is safe and only causes data to be fetched again.
+
+Positive and instrumental entries expire after 60 days, metadata/lyrics misses
+after 7 days, and art misses after 3 days. Errors are never persisted. The
+4096-entry bound uses least-recently-used pruning. Writes occur on the
+enrichment worker using a flushed temporary file and atomic replacement.
+
 ## Decision
 
 Use **ncursesw** for Signalbox's eventual full-screen interface. Keep the

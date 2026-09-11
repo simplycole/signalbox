@@ -5,6 +5,7 @@
 #include <string.h>
 #ifndef _WIN32
 #include <errno.h>
+#include <sys/stat.h>
 #endif
 
 static void (*shutdownHandler) (void);
@@ -149,6 +150,56 @@ char *SbPlatformConfigPath (const char *filename) {
 	char *path = SbPlatformJoinPath (directory, filename);
 	free (directory);
 	return path;
+#endif
+}
+
+bool SbPlatformEnsureDirectory (const char *path) {
+ if (path == NULL || *path == '\0') return false;
+#ifdef _WIN32
+ wchar_t *wide = SbPlatformUtf8ToWide (path); if (wide == NULL) return false;
+ const BOOL ok = CreateDirectoryW (wide, NULL); const DWORD error = GetLastError ();
+ free (wide); return ok || error == ERROR_ALREADY_EXISTS;
+#else
+ return mkdir (path, 0700) == 0 || errno == EEXIST;
+#endif
+}
+
+char *SbPlatformCachePath (const char *filename) {
+ if (filename == NULL) return NULL;
+#ifdef _WIN32
+ wchar_t *local = NULL;
+ if (SHGetKnownFolderPath (&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, NULL,
+   &local) != S_OK) return NULL;
+ char *base = SbPlatformWideToUtf8 (local); CoTaskMemFree (local);
+#else
+ const char *baseValue = getenv ("XDG_CACHE_HOME"); char *fallback = NULL;
+ if (baseValue == NULL || *baseValue == '\0') {
+  const char *home = getenv ("HOME"); if (home == NULL || *home == '\0') return NULL;
+  fallback = SbPlatformJoinPath (home, ".cache"); baseValue = fallback;
+ }
+ char *base = strdup (baseValue); free (fallback);
+#endif
+ if (base == NULL) return NULL;
+ SbPlatformEnsureDirectory (base);
+ char *directory = SbPlatformJoinPath (base,
+#ifdef _WIN32
+   "Signalbox"
+#else
+   "signalbox"
+#endif
+ ); free (base);
+ if (directory == NULL || !SbPlatformEnsureDirectory (directory)) { free (directory); return NULL; }
+ char *path = SbPlatformJoinPath (directory, filename); free (directory); return path;
+}
+
+bool SbPlatformAtomicReplace (const char *temporary, const char *destination) {
+#ifdef _WIN32
+ wchar_t *from = SbPlatformUtf8ToWide (temporary), *to = SbPlatformUtf8ToWide (destination);
+ if (from == NULL || to == NULL) { free (from); free (to); return false; }
+ const bool ok = MoveFileExW (from, to, MOVEFILE_REPLACE_EXISTING |
+   MOVEFILE_WRITE_THROUGH) != 0; free (from); free (to); return ok;
+#else
+ return rename (temporary, destination) == 0;
 #endif
 }
 

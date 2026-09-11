@@ -39,6 +39,8 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/credential.c \
 		${PIANOBAR_DIR}/debug.c \
 		${PIANOBAR_DIR}/enrichment.c \
+		${PIANOBAR_DIR}/enrichment_cache.c \
+		${PIANOBAR_DIR}/album_art.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
 		${PIANOBAR_DIR}/spectrum.c \
@@ -195,7 +197,7 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
-			${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
+		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
 			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
@@ -204,8 +206,16 @@ spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h src/platform.
 	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
-enrichment-test: tests/enrichment_test.c src/enrichment.c src/enrichment.h src/debug.c src/debug.h src/modal_state.h src/mouse_state.h src/platform.c src/platform.h
-	${CC} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_test.c src/enrichment.c src/debug.c src/platform.c -lpthread ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+enrichment-test: tests/enrichment_test.c src/enrichment.c src/enrichment.h src/enrichment_cache.c src/album_art.c src/debug.c src/debug.h src/modal_state.h src/mouse_state.h src/platform.c src/platform.h
+	${CC} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_test.c src/enrichment.c src/enrichment_cache.c src/album_art.c src/debug.c src/platform.c -lpthread ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	./$@$(EXEEXT)
+
+enrichment-cache-test: tests/enrichment_cache_test.c src/enrichment_cache.c src/enrichment_cache.h src/platform.c src/platform.h
+	${CC} -std=c99 -O2 -I src ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_cache_test.c src/enrichment_cache.c src/platform.c ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	./$@$(EXEEXT)
+
+album-art-test: tests/album_art_test.c src/album_art.c src/album_art.h src/platform.c src/platform.h
+	${CC} -std=c99 -O2 -I src ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/album_art_test.c src/album_art.c src/platform.c ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 playlist-prefetch-test: tests/playlist_prefetch_test.c src/playlist_prefetch.h ${LIBPIANO_SRC}

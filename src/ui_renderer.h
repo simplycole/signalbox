@@ -66,6 +66,9 @@ typedef struct {
 	uint64_t stationsGeneration;
 	SbSpectrumSnapshot spectrum;
 	bool visualizerEnabled;
+	int artState;
+	char artProvider[32], artCachedPath[1024];
+	unsigned int artWidth, artHeight;
 } SbUiModel;
 
 typedef enum {
