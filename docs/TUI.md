@@ -94,6 +94,16 @@ commands, contexts, help, and configuration keys. A separate command-handler
 table binds each command to a `BarUiAct*` function. Help remains generated from
 the binding metadata.
 
+In the curses interface, `i` opens the unified, scrollable Track Info modal
+containing available Pandora and MusicBrainz fields (`I` is an alias). `L`
+opens the scrollable LRCLIB Lyrics modal, and `l` is also accepted. Pressing
+either modal's opening key again closes it. Both enrichment modals refresh in
+place while provider work completes, and the normal main-loop cadence keeps
+elapsed time, progress, spectrum, status, and track transitions live behind
+the retained overlay. Lyrics use plain text when present or
+display timestamp-free lines derived from retained synchronized lyrics.
+Up/Down and j/k scroll; Escape or Enter also closes.
+
 ### Output and events
 
 `BarUiMsg()` writes synchronously to stdout, emits ANSI erase-line for most
@@ -512,6 +522,22 @@ C4 keeps the established configured direct bindings instead of adding a
 station action menu. The compact help overlay groups the advanced bindings;
 the footer remains limited to navigation, tune, playback, volume, help, and
 quit.
+
+## Diagnostics
+
+Set `SIGNALBOX_DEBUG_TUI=1` for input and modal diagnostics. In TUI mode these
+messages are written to `signalbox-tui-debug.log` in the directory where
+Signalbox was started; they are never written onto the curses terminal. The
+file is replaced once per run, line-buffered for useful crash evidence, and
+closed during normal process shutdown. Normal runs do not create it.
+
+The Apple-supplied ncurses ABI v1 exposes Terminal's wheel-toward-top gesture
+as `BUTTON4_PRESSED`. It has no `BUTTON5_*` API. Captured `BUTTON1_CLICKED`
+records are ambiguous with real primary-button clicks and are deliberately not
+treated as wheel-toward-bottom. Keyboard scrolling remains available in both
+directions. The broad mouse mask is currently required to capture the ABI's
+complete compatibility event stream for diagnostics; decoding remains limited
+to unambiguous wheel bits, so click and position noise cannot scroll a pane.
 
 ## Research sources
 

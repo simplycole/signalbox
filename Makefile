@@ -38,6 +38,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/platform.c \
 		${PIANOBAR_DIR}/credential.c \
 		${PIANOBAR_DIR}/debug.c \
+		${PIANOBAR_DIR}/enrichment.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
 		${PIANOBAR_DIR}/spectrum.c \
@@ -194,13 +195,21 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
-			${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe pianobar libpiano.so* \
+			${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
 			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
 
 spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h src/platform.c src/platform.h
 	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	./$@$(EXEEXT)
+
+enrichment-test: tests/enrichment_test.c src/enrichment.c src/enrichment.h src/debug.c src/debug.h src/modal_state.h src/mouse_state.h src/platform.c src/platform.h
+	${CC} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_test.c src/enrichment.c src/debug.c src/platform.c -lpthread ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	./$@$(EXEEXT)
+
+playlist-prefetch-test: tests/playlist_prefetch_test.c src/playlist_prefetch.h ${LIBPIANO_SRC}
+	${CC} -std=c99 -O2 -I src -I ${LIBPIANO_INCLUDE} ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} ${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} -o $@$(EXEEXT) tests/playlist_prefetch_test.c ${LIBPIANO_SRC} ${ALL_LDFLAGS}
 	./$@$(EXEEXT)
 
 ifeq (${DYNLINK},1)
@@ -231,4 +240,4 @@ uninstall:
 	${DESTDIR}/${LIBDIR}/libpiano.a \
 	${DESTDIR}/${INCDIR}/piano.h
 
-.PHONY: install install-libpiano uninstall test debug all spectrum-test
+.PHONY: install install-libpiano uninstall test debug all spectrum-test enrichment-test playlist-prefetch-test

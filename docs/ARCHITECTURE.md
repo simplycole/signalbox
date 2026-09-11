@@ -4,6 +4,55 @@ This document describes two different things: the pianobar-derived code that
 exists today, and the architecture Signalbox intends to grow toward. Target
 components named below are design boundaries, not implemented modules.
 
+## Metadata enrichment
+
+`src/enrichment.c` implements a provider-neutral enrichment boundary. A Pandora
+song is copied into a `SbTrackIdentity`; original display strings are retained
+while separately normalized artist/title values form a provider-tagged cache
+key. The main loop submits that identity to one bounded worker, never the audio
+thread. A newer track replaces a queued request, and generation checking rejects
+completed results belonging to an older track.
+
+The first metadata adapter queries the public MusicBrainz recording search API
+with artist and title, a descriptive User-Agent, a short timeout, and at most
+one uncached request per second. Conservative normalized artist/title scoring
+reports available, no-match, or non-fatal error state. Results use a generic
+model containing canonical names, release information, external IDs, provider,
+and confidence. A 32-entry provider-aware in-memory cache avoids duplicate
+requests during a run. Persistence is intentionally deferred until cache-file
+versioning, atomic writes, and an appropriate platform data path are defined.
+
+Lyrics have their own provider-neutral result and provider interfaces rather
+than sharing the metadata provider shape. LRCLIB is the current community
+lyrics adapter. It uses the original Pandora artist/title and, when available,
+album and reliable duration. A bounded lookup ladder tries the constrained
+identity, a conservatively cleaned edition title, artist/title without album or
+duration constraints, and finally one structured LRCLIB search. Search results
+must have strong normalized title/artist agreement and, when available, album
+and duration support; weak or ambiguous candidates are rejected. Metadata runs
+first on the same coalescing enrichment worker, preventing LRCLIB timeouts or
+rate-limit pauses from starving MusicBrainz; neither provider can block playback
+or create an unbounded queue. Metadata and lyrics use separate provider-aware
+32-entry caches; successful, instrumental, and normal no-match lyric results are
+cached, while transient failures are not.
+
+The generic lyrics result retains LRCLIB's matched identity, record ID,
+instrumental flag, plain lyrics, and synchronized lyrics. The current UI renders
+plain text (or strips timestamps from synchronized lyrics when plain text is
+absent), while preserving the original synchronized value for a future
+time-synced display. Lowercase `i` opens the one unified Track Info view;
+uppercase `I` is a harmless alias. `L` opens Lyrics, with lowercase `l` also
+accepted. The aliases toggle retained modal state in the main TUI loop; async
+results refresh an open view without a nested input/render loop. Both lookups
+and failures leave Pandora playback unchanged.
+
+LRCLIB is an open/community lyrics service requiring no API key. Signalbox
+identifies itself with its version and project URL, spaces requests, honors a
+numeric `Retry-After` after rate limiting when practical, and treats all
+provider errors as non-fatal. The abstraction permits a licensed provider such
+as Musixmatch in the future; Signalbox makes no claim that lyric text is public
+domain or licensed by Signalbox.
+
 ## Current state
 
 The current application is a single C program with a statically linked-in

@@ -23,7 +23,39 @@ THE SOFTWARE.
 
 #include "debug.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+
+static FILE *tuiDebugFile;
+
+bool tuiDebugInit (const bool useTui) {
+	if (!useTui || !tuiDebugEnable ()) return false;
+	tuiDebugFile = fopen ("signalbox-tui-debug.log", "w");
+	if (tuiDebugFile == NULL) return false;
+	/* Line buffering preserves the last complete event without per-event fsync. */
+	setvbuf (tuiDebugFile, NULL, _IOLBF, 0);
+	atexit (tuiDebugClose);
+	tuiDebugPrint ("debug_log path=signalbox-tui-debug.log\n");
+	return true;
+}
+
+void tuiDebugClose (void) {
+	if (tuiDebugFile != NULL) {
+		tuiDebugPrint ("debug_log closing\n");
+		fclose (tuiDebugFile);
+		tuiDebugFile = NULL;
+	}
+}
+
+void tuiDebugPrint (const char * const format, ...) {
+	if (tuiDebugFile == NULL) return;
+	va_list args;
+	va_start (args, format);
+	fputs ("[signalbox:tui] ", tuiDebugFile);
+	vfprintf (tuiDebugFile, format, args);
+	va_end (args);
+}
+
 #ifdef HAVE_DEBUGLOG
 unsigned int debug = 0;
 #endif
-

@@ -14,6 +14,8 @@ typedef enum {
 typedef struct {
 	int status;
 	int key;
+	/* -1 is wheel up, +1 is wheel down. */
+	int wheelDirection;
 	SbTerminalInputSource source;
 	uint16_t virtualKey;
 	uint32_t unicode;

@@ -185,7 +185,8 @@ static bool temporaryCurlError (const CURLcode code) {
 	assert (httpret == CURLE_OK);
 
 static CURLcode BarPianoHttpRequest (CURL * const http,
-		const BarSettings_t * const settings, PianoRequest_t * const req) {
+		const BarSettings_t * const settings, PianoRequest_t * const req,
+		const bool quiet) {
 	buffer buffer = {NULL, 0};
 	sig_atomic_t lint = 0, *prevint;
 
@@ -201,9 +202,13 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 	assert (ret >= 0 && ret <= (int) sizeof (url));
 	debugPrint (DEBUG_NETWORK, "← %s\n", url);
 
-	/* save the previous interrupt destination */
-	prevint = interrupted;
-	interrupted = &lint;
+	/* Foreground requests remain interruptible.  A prefetch must not steal the
+	 * process-wide signal target from the audio player. */
+	prevint = NULL;
+	if (!quiet) {
+		prevint = interrupted;
+		interrupted = &lint;
+	}
 
 	curl_easy_reset (http);
 	CURLcode httpret;
@@ -233,7 +238,7 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 		if (curl_easy_setopt (http, CURLOPT_INTERFACE,
 				settings->bindTo) != CURLE_OK) {
 			/* if binding fails, notice about that */
-			BarUiMsg (settings, MSG_ERR, "bindTo (%s) is invalid!\n",
+			if (!quiet) BarUiMsg (settings, MSG_ERR, "bindTo (%s) is invalid!\n",
 					settings->bindTo);
 		}
 	}
@@ -245,14 +250,14 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 		if (curl_easy_setopt (http, CURLOPT_PROXY,
 				settings->controlProxy) != CURLE_OK) {
 			/* if setting proxy fails, url is invalid */
-			BarUiMsg (settings, MSG_ERR, "Control proxy (%s) is invalid!\n",
+			if (!quiet) BarUiMsg (settings, MSG_ERR, "Control proxy (%s) is invalid!\n",
 					 settings->controlProxy);
 		}
 	} else if (settings->proxy != NULL && strlen (settings->proxy) > 0) {
 		if (curl_easy_setopt (http, CURLOPT_PROXY,
 				settings->proxy) != CURLE_OK) {
 			/* if setting proxy fails, url is invalid */
-			BarUiMsg (settings, MSG_ERR, "Proxy (%s) is invalid!\n",
+			if (!quiet) BarUiMsg (settings, MSG_ERR, "Proxy (%s) is invalid!\n",
 					 settings->proxy);
 		}
 	}
@@ -272,13 +277,13 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 			if (retry >= settings->maxRetry) {
 				break;
 			}
-			if (SbUiRendererIsCurses (SbUiRendererGetActive ())) {
+			if (!quiet && SbUiRendererIsCurses (SbUiRendererGetActive ())) {
 				BarUiMsg (settings, MSG_QUESTION,
 						"Warning: request failed — retrying (%u/%u)",
 						retry, settings->maxRetry);
 			}
 		} else {
-			if (retry > 1 && SbUiRendererIsCurses (SbUiRendererGetActive ())) {
+			if (!quiet && retry > 1 && SbUiRendererIsCurses (SbUiRendererGetActive ())) {
 				BarUiMsg (settings, MSG_INFO, "Playback request recovered");
 			}
 			break;
@@ -293,7 +298,7 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 	req->responseData = buffer.data;
 	debugPrint (DEBUG_NETWORK, "→ %s\n", req->responseData);
 
-	interrupted = prevint;
+	if (!quiet) interrupted = prevint;
 
 	return httpret;
 }
@@ -303,6 +308,7 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
  */
 bool BarUiPianoCall (BarApp_t * const app, const PianoRequestType_t type,
 		void * const data, PianoReturn_t * const pRet, CURLcode * const wRet) {
+	pthread_mutex_lock (&app->pianoLock);
 	PianoReturn_t pRetLocal = PIANO_RET_OK;
 	CURLcode wRetLocal = CURLE_OK;
 	bool ret = false;
@@ -320,7 +326,7 @@ bool BarUiPianoCall (BarApp_t * const app, const PianoRequestType_t type,
 			goto cleanup;
 		}
 
-		wRetLocal = BarPianoHttpRequest (app->http, &app->settings, &req);
+		wRetLocal = BarPianoHttpRequest (app->http, &app->settings, &req, false);
 		if (wRetLocal == CURLE_ABORTED_BY_CALLBACK) {
 			BarUiMsg (&app->settings, MSG_NONE, "Interrupted.\n");
 			goto cleanup;
@@ -373,7 +379,31 @@ cleanup:
 			ret ? SB_UI_ACTIVITY_READY : SB_UI_ACTIVITY_ERROR);
 	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
 
+	pthread_mutex_unlock (&app->pianoLock);
 	return ret;
+}
+
+/* Playlist prefetch uses a snapshot of the authenticated piano handle and its
+ * own curl easy handle. GET_PLAYLIST only reads handle authentication state
+ * and returns an independently-owned song list. */
+bool BarUiPianoCallQuiet (BarApp_t * const app, CURL * const http,
+		const PianoRequestType_t type, void * const data,
+		PianoReturn_t * const pRet, CURLcode * const wRet) {
+	pthread_mutex_lock (&app->pianoLock);
+	PianoHandle_t ph = app->ph;
+	PianoRequest_t req = {.data = data, .responseData = NULL};
+	*pRet = PianoRequest (&ph, &req, type);
+	if (*pRet == PIANO_RET_OK) {
+		*wRet = BarPianoHttpRequest (http, &app->settings, &req, true);
+		if (*wRet == CURLE_OK) *pRet = PianoResponse (&ph, &req);
+	} else {
+		*wRet = CURLE_OK;
+	}
+	free (req.responseData);
+	PianoDestroyRequest (&req);
+	const bool success = *pRet == PIANO_RET_OK && *wRet == CURLE_OK;
+	pthread_mutex_unlock (&app->pianoLock);
+	return success;
 }
 
 /*	Station sorting functions */

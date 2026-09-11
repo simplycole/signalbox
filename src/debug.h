@@ -36,17 +36,10 @@ inline static bool tuiDebugEnable () {
 	return value != NULL && value[0] != '\0' && value[0] != '0';
 }
 
-__attribute__((format(printf, 1, 2)))
-inline static void tuiDebugPrint (const char * const format, ...) {
-	if (tuiDebugEnable ()) {
-		va_list fmtargs;
-		va_start (fmtargs, format);
-		fputs ("[signalbox:tui] ", stderr);
-		vfprintf (stderr, format, fmtargs);
-		va_end (fmtargs);
-		fflush (stderr);
-	}
-}
+/* Opened only for a TUI run.  Diagnostics never share curses' terminal. */
+bool tuiDebugInit (bool useTui);
+void tuiDebugClose (void);
+void tuiDebugPrint (const char *, ...) __attribute__((format(printf, 1, 2)));
 
 #ifdef HAVE_DEBUGLOG
 

@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <errno.h>
+#endif
 
 static void (*shutdownHandler) (void);
 
@@ -167,10 +170,17 @@ bool SbPlatformWaitForConsoleInput (const int timeoutMs) {
 	return WaitForSingleObject (input, timeout) == WAIT_OBJECT_0;
 }
 
-void SbPlatformSleepMs (const unsigned int milliseconds) {
-	Sleep ((DWORD) milliseconds);
-}
 #endif
+
+void SbPlatformSleepMs (const unsigned int milliseconds) {
+#ifdef _WIN32
+	Sleep ((DWORD) milliseconds);
+#else
+	struct timespec delay = {(time_t) (milliseconds / 1000),
+			(long) (milliseconds % 1000) * 1000000L};
+	while (nanosleep (&delay, &delay) != 0 && errno == EINTR) {}
+#endif
+}
 
 bool SbPlatformLocalTime (const time_t value, struct tm *result) {
 	if (result == NULL) return false;

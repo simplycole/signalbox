@@ -1,4 +1,5 @@
 #include "terminal_input.h"
+#include "mouse_state.h"
 
 #include <stdio.h>
 #include <windows.h>
@@ -61,7 +62,7 @@ bool SbTerminalInputInit (void) {
 	/* Signalbox consumes INPUT_RECORDs. PDCursesMod owns drawing only. Keep
 	 * processed input as inherited, request resize records, and prevent ConPTY
 	 * from replacing native key records with a VT byte stream. */
-	mode |= ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
+	mode |= ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS;
 	mode &= ~(ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_LINE_INPUT |
 			ENABLE_ECHO_INPUT | ENABLE_QUICK_EDIT_MODE);
 	return SetConsoleMode (input, mode) != 0;
@@ -123,6 +124,17 @@ SbTerminalInputEvent SbTerminalReadInput (int timeoutMs) {
 			(void) SbTerminalDrainResizeEvents ();
 			return (SbTerminalInputEvent) {
 				.status = KEY_CODE_YES, .key = KEY_RESIZE,
+				.source = SB_TERMINAL_INPUT_WIN32_EVENT,
+			};
+		}
+		if (record.EventType == MOUSE_EVENT &&
+				(record.Event.MouseEvent.dwEventFlags & MOUSE_WHEELED) != 0) {
+			const SHORT delta = (SHORT) HIWORD (
+					record.Event.MouseEvent.dwButtonState);
+			if (delta == 0) continue;
+			return (SbTerminalInputEvent) {
+				.status = KEY_CODE_YES, .key = KEY_MOUSE,
+				.wheelDirection = SbUiMouseWheelFromNativeDelta (delta),
 				.source = SB_TERMINAL_INPUT_WIN32_EVENT,
 			};
 		}

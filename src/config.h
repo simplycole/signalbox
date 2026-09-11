@@ -2,9 +2,7 @@
 
 /* package name */
 #define PACKAGE "pianobar"
-#define PROGRAM_NAME "signalbox"
-
-#define VERSION "2024.12.21-dev"
+#include "version.h"
 
 /* glibc feature test macros, define _before_ including other files */
 #define _POSIX_C_SOURCE 200809L

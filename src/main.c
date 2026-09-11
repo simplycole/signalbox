@@ -65,11 +65,98 @@ THE SOFTWARE.
 #include "platform.h"
 #include "credential.h"
 #include "debug.h"
+#include "playlist_prefetch.h"
 #include "terminal.h"
 #include "ui.h"
 #include "ui_act.h"
 #include "ui_dispatch.h"
 #include "ui_readline.h"
+
+static const char *BarMainLookupState (const SbLookupStatus status) {
+	switch (status) {
+		case SB_LOOKUP_LOADING: return "Loading";
+		case SB_LOOKUP_AVAILABLE: return "Available";
+		case SB_LOOKUP_INSTRUMENTAL: return "Instrumental";
+		case SB_LOOKUP_NO_MATCH: return "No match";
+		case SB_LOOKUP_UNAVAILABLE: return "Temporarily unavailable";
+		case SB_LOOKUP_ERROR: return "Error";
+		default: return "Not requested";
+	}
+}
+
+static void BarMainAppendField (char *text, const size_t size,
+		const char *label, const char *value) {
+	if (value == NULL || value[0] == '\0') return;
+	size_t used = strlen (text);
+	if (used < size) snprintf (text + used, size - used, "%s%s: %s",
+			used > 0 ? "\n" : "", label, value);
+}
+
+static char *BarMainTrackInfoText (BarApp_t *app) {
+	if (app->playlist == NULL) return strdup ("No song playing");
+	const SbMetadataResult *m = &app->metadata; const PianoSong_t *song = app->playlist;
+	char text[3000] = "PANDORA";
+	BarMainAppendField (text, sizeof (text), "Artist", app->trackIdentity.artist);
+	BarMainAppendField (text, sizeof (text), "Track", app->trackIdentity.title);
+	BarMainAppendField (text, sizeof (text), "Album", app->trackIdentity.album);
+	BarMainAppendField (text, sizeof (text), "Station", app->trackIdentity.station);
+	if (app->trackIdentity.duration > 0) { char duration[32];
+		snprintf (duration, sizeof (duration), "%u:%02u", app->trackIdentity.duration / 60,
+				app->trackIdentity.duration % 60); BarMainAppendField (text, sizeof (text), "Length", duration); }
+	BarMainAppendField (text, sizeof (text), "Rating",
+			song->rating == PIANO_RATE_LOVE ? "Loved" : song->rating == PIANO_RATE_BAN ? "Banned" : NULL);
+	strncat (text, "\n\nENRICHMENT", sizeof (text) - strlen (text) - 1);
+	BarMainAppendField (text, sizeof (text), "State", BarMainLookupState (m->status));
+	BarMainAppendField (text, sizeof (text), "Provider", m->provider);
+	if (m->status == SB_LOOKUP_AVAILABLE) {
+		char confidence[32]; snprintf (confidence, sizeof (confidence), "%.0f%%", m->confidence * 100.0);
+		BarMainAppendField (text, sizeof (text), "Canonical Artist", m->artist);
+		BarMainAppendField (text, sizeof (text), "Canonical Track", m->title);
+		BarMainAppendField (text, sizeof (text), "Release", m->release);
+		char releaseDate[16];
+		if (SbMusicBrainzFormatDate (m->releaseDate, releaseDate, sizeof (releaseDate)))
+			BarMainAppendField (text, sizeof (text), "Release Date", releaseDate);
+		BarMainAppendField (text, sizeof (text), "Confidence", confidence);
+	}
+	return strdup (text);
+}
+
+static char *BarMainLyricsText (BarApp_t *app) {
+	if (app->playlist == NULL) return strdup ("No song playing");
+	const SbLyricsResult *lyrics = &app->lyrics; char *body = NULL;
+	SbLyricsDisplayText (lyrics, &body); const char *message = NULL;
+	if (lyrics->status == SB_LOOKUP_LOADING) message = "Looking up lyrics...";
+	else if (lyrics->status == SB_LOOKUP_INSTRUMENTAL) message = "Instrumental track\nNo lyrics";
+	else if (lyrics->status == SB_LOOKUP_NO_MATCH) message = "Lyrics unavailable\nNo match found";
+	else if (lyrics->status == SB_LOOKUP_ERROR) message = "Lyrics unavailable\nProvider error";
+	else if (body == NULL) message = "Lyrics unavailable\nNo match found";
+	const char *artist = lyrics->artist[0] ? lyrics->artist : app->trackIdentity.artist;
+	const char *title = lyrics->title[0] ? lyrics->title : app->trackIdentity.title;
+	const char *album = lyrics->album[0] ? lyrics->album : app->trackIdentity.album;
+	size_t needed = strlen (artist) + strlen (title) + strlen (album) +
+			strlen (body != NULL ? body : message) + 16;
+	char *text = malloc (needed);
+	if (text != NULL) snprintf (text, needed, "%s — %s%s%s\n\n%s", artist, title,
+			album[0] ? "\n" : "", album, body != NULL ? body : message);
+	free (body);
+	return text != NULL ? text : strdup ("Lyrics unavailable\nProvider error");
+}
+
+typedef struct { BarApp_t *app; bool lyrics; } BarEnrichmentModal;
+
+static char *BarMainEnrichmentModalText (void *opaque) {
+	BarEnrichmentModal *modal = opaque; BarApp_t *app = modal->app;
+	return modal->lyrics ? BarMainLyricsText (app) : BarMainTrackInfoText (app);
+}
+
+static void BarMainShowEnrichmentModal (BarApp_t *app, const bool lyrics) {
+	static BarEnrichmentModal modal;
+	modal = (BarEnrichmentModal) {app, lyrics};
+	SbUiRendererDynamicTextModal (&app->uiRenderer, &app->uiModel,
+			lyrics ? "LYRICS" : "TRACK INFO",
+			lyrics ? SB_UI_CMD_LYRICS : SB_UI_CMD_TRACK_INFO,
+			BarMainEnrichmentModalText, &modal);
+}
 
 /*	authenticate user
  */
@@ -333,6 +420,10 @@ static void BarMainHandleUserInput (BarApp_t *app) {
 					app->visualizerEnabled);
 			SbUiRendererRender (&app->uiRenderer, &app->uiModel,
 					SB_UI_RENDER_STATE);
+		} else if (event.command == SB_UI_CMD_TRACK_INFO) {
+			BarMainShowEnrichmentModal (app, false);
+		} else if (event.command == SB_UI_CMD_LYRICS) {
+			BarMainShowEnrichmentModal (app, true);
 		} else if (event.historySelected) {
 			BarUiActHistorySelected (app, event.historyIndex);
 		} else if (event.command != SB_UI_CMD_NONE) {
@@ -381,6 +472,8 @@ static void BarMainGetPlaylist (BarApp_t *app) {
 		app->nextStation = NULL;
 	} else {
 		app->playlist = reqData.retPlaylist;
+		app->playlistGeneration++;
+		app->prefetch.lastAttemptRemaining = SIZE_MAX;
 		if (app->playlist == NULL) {
 			BarUiMsg (&app->settings, MSG_INFO, "No tracks left.\n");
 			app->nextStation = NULL;
@@ -391,6 +484,88 @@ static void BarMainGetPlaylist (BarApp_t *app) {
 	BarUiStartEventCmd (&app->settings, "stationfetchplaylist",
 			app->curStation, app->playlist, &app->player, app->ph.stations,
 			pRet, wRet);
+}
+
+static void *BarMainPrefetchThread (void *data) {
+	BarApp_t *app = data;
+	CURL *http = curl_easy_init ();
+	PianoSong_t *result = NULL;
+	PianoReturn_t pRet = PIANO_RET_P_INTERNAL;
+	CURLcode wRet = CURLE_FAILED_INIT;
+	if (http != NULL) {
+		PianoStation_t station = {0};
+		station.id = app->prefetch.stationId;
+		PianoRequestDataGetPlaylist_t request = {.station = &station,
+				.quality = app->settings.audioQuality, .retPlaylist = NULL};
+		(void) BarUiPianoCallQuiet (app, http, PIANO_REQUEST_GET_PLAYLIST,
+				&request, &pRet, &wRet);
+		result = request.retPlaylist;
+		curl_easy_cleanup (http);
+	}
+	pthread_mutex_lock (&app->prefetch.lock);
+	app->prefetch.result = result;
+	app->prefetch.pianoResult = pRet;
+	app->prefetch.curlResult = wRet;
+	app->prefetch.complete = true;
+	pthread_mutex_unlock (&app->prefetch.lock);
+	return NULL;
+}
+
+static void BarMainPollPrefetch (BarApp_t *app) {
+	if (!app->prefetch.inFlight) return;
+	pthread_mutex_lock (&app->prefetch.lock);
+	const bool complete = app->prefetch.complete;
+	pthread_mutex_unlock (&app->prefetch.lock);
+	if (!complete) return;
+	pthread_join (app->prefetch.thread, NULL);
+	const bool current = app->prefetch.generation == app->playlistGeneration &&
+			app->curStation != NULL && app->nextStation == app->curStation &&
+			app->curStation->id != NULL && strcmp (app->curStation->id,
+			app->prefetch.stationId) == 0;
+	if (app->prefetch.pianoResult == PIANO_RET_OK &&
+			app->prefetch.curlResult == CURLE_OK && current) {
+		const size_t added = SbPlaylistAppendUnique (&app->playlist,
+				app->prefetch.result);
+		app->prefetch.result = NULL;
+		tuiDebugPrint ("prefetch complete added=%zu generation=%llu\n", added,
+				(unsigned long long) app->playlistGeneration);
+		SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+	} else {
+		if (!current) tuiDebugPrint ("prefetch discarded stale_station generation=%llu current_generation=%llu\n",
+				(unsigned long long) app->prefetch.generation,
+				(unsigned long long) app->playlistGeneration);
+		else tuiDebugPrint ("prefetch failed piano=%d curl=%d\n",
+				(int) app->prefetch.pianoResult, (int) app->prefetch.curlResult);
+		PianoDestroyPlaylist (app->prefetch.result);
+		app->prefetch.result = NULL;
+	}
+	free (app->prefetch.stationId); app->prefetch.stationId = NULL;
+	app->prefetch.complete = false; app->prefetch.inFlight = false;
+}
+
+static void BarMainMaybePrefetch (BarApp_t *app) {
+	BarMainPollPrefetch (app);
+	if (app->prefetch.inFlight || app->playlist == NULL ||
+			app->curStation == NULL || app->nextStation != app->curStation) return;
+	const size_t queued = SbPlaylistCount (app->playlist);
+	const size_t remaining = BarPlayerGetMode (&app->player) == PLAYER_DEAD ?
+			queued : queued > 0 ? queued - 1 : 0;
+	if (!SbPlaylistPrefetchNeeded (remaining, app->prefetch.inFlight,
+			app->prefetch.lastAttemptRemaining)) return;
+	app->prefetch.lastAttemptRemaining = remaining;
+	app->prefetch.stationId = strdup (app->curStation->id);
+	if (app->prefetch.stationId == NULL) return;
+	app->prefetch.generation = app->playlistGeneration;
+	app->prefetch.complete = false; app->prefetch.inFlight = true;
+	if (pthread_create (&app->prefetch.thread, NULL,
+			BarMainPrefetchThread, app) != 0) {
+		free (app->prefetch.stationId); app->prefetch.stationId = NULL;
+		app->prefetch.inFlight = false;
+		return;
+	}
+	tuiDebugPrint ("prefetch started queue_remaining=%zu station=%s generation=%llu\n",
+			remaining, app->curStation->id,
+			(unsigned long long) app->playlistGeneration);
 }
 
 /*	start new player thread
@@ -404,6 +579,20 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 
 	SbUiModelSetSong (&app->uiModel, curSong, app->curStation->isQuickMix ?
 			PianoFindStationById (app->ph.stations, curSong->stationId) : NULL);
+	const PianoStation_t *identityStation = app->curStation->isQuickMix ?
+			PianoFindStationById (app->ph.stations, curSong->stationId) : app->curStation;
+	SbTrackIdentitySet (&app->trackIdentity, curSong->artist, curSong->title,
+			curSong->album, identityStation != NULL ? identityStation->name : NULL,
+			curSong->length);
+	app->enrichmentGeneration++;
+	SbMetadataResultInit (&app->metadata);
+	app->metadata.status = SB_LOOKUP_LOADING;
+	SbLyricsResultDestroy (&app->lyrics); app->lyrics.status = SB_LOOKUP_LOADING;
+	snprintf (app->lyrics.provider, sizeof (app->lyrics.provider), "LRCLIB");
+	if (app->metadataResolver.started) SbMetadataResolverRequest (
+			&app->metadataResolver, &app->trackIdentity, app->enrichmentGeneration);
+	else { app->metadata.status = SB_LOOKUP_ERROR; snprintf (app->metadata.error,
+			sizeof (app->metadata.error), "Metadata worker unavailable"); }
 	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_SONG);
 
 	static const char httpPrefix[] = "http://";
@@ -526,6 +715,25 @@ static void BarMainLoop (BarApp_t *app) {
 	player_t * const player = &app->player;
 
 	while (!app->doQuit) {
+		BarMainMaybePrefetch (app);
+		SbMetadataResult enriched;
+		if (SbMetadataResolverPoll (&app->metadataResolver,
+				app->enrichmentGeneration, &enriched)) {
+			app->metadata = enriched;
+			tuiDebugPrint ("enrichment result provider=musicbrainz generation=%llu state=%d detail=%s\n",
+					(unsigned long long) app->enrichmentGeneration,
+					(int) enriched.status, enriched.error);
+			SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+		}
+		SbLyricsResult lyrics;
+		if (SbLyricsResolverPoll (&app->metadataResolver,
+				app->enrichmentGeneration, &lyrics)) {
+			SbLyricsResultDestroy (&app->lyrics); app->lyrics = lyrics;
+			tuiDebugPrint ("enrichment result provider=lrclib generation=%llu state=%d detail=%s\n",
+					(unsigned long long) app->enrichmentGeneration,
+					(int) lyrics.status, lyrics.error);
+			SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+		}
 		/* song finished playing, clean up things/scrobble song */
 		if (BarPlayerGetMode (player) == PLAYER_FINISHED) {
 			if (player->interrupted != 0) {
@@ -575,6 +783,12 @@ static void BarMainLoop (BarApp_t *app) {
 	if (BarPlayerGetMode (player) != PLAYER_DEAD) {
 		pthread_join (playerThread, NULL);
 	}
+	if (app->prefetch.inFlight) {
+		pthread_join (app->prefetch.thread, NULL);
+		PianoDestroyPlaylist (app->prefetch.result);
+		free (app->prefetch.stationId);
+		app->prefetch.inFlight = false;
+	}
 }
 
 sig_atomic_t *interrupted = NULL;
@@ -608,6 +822,13 @@ int main (int argc, char **argv) {
 	debugEnable();
 
 	memset (&app, 0, sizeof (app));
+	pthread_mutexattr_t pianoLockAttr;
+	pthread_mutexattr_init (&pianoLockAttr);
+	pthread_mutexattr_settype (&pianoLockAttr, PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init (&app.pianoLock, &pianoLockAttr);
+	pthread_mutexattr_destroy (&pianoLockAttr);
+	pthread_mutex_init (&app.prefetch.lock, NULL);
+	app.prefetch.lastAttemptRemaining = SIZE_MAX;
 	for (int i = 1; i < argc; i++) {
 		if (strcmp (argv[i], "--tui") == 0) {
 			if (mode == MODE_CLASSIC) {
@@ -674,6 +895,7 @@ int main (int argc, char **argv) {
 	app.useTui = mode == MODE_TUI ||
 			(mode == MODE_AUTO && terminalSupportsTui);
 	app.tuiTheme = tuiTheme;
+	(void) tuiDebugInit (app.useTui);
 
 #if defined(SIGNALBOX_PDCURSES_WINCON)
 	if (app.useTui)
@@ -784,6 +1006,10 @@ int main (int argc, char **argv) {
 	curl_global_init (CURL_GLOBAL_DEFAULT);
 	app.http = curl_easy_init ();
 	assert (app.http != NULL);
+	SbMetadataResolverInit (&app.metadataResolver);
+	SbMetadataResolverStart (&app.metadataResolver);
+	SbMetadataResultInit (&app.metadata);
+	SbLyricsResultInit (&app.lyrics);
 
 	/* init fds */
 #ifdef _WIN32
@@ -838,6 +1064,8 @@ int main (int argc, char **argv) {
 	PianoDestroy (&app.ph);
 	PianoDestroyPlaylist (app.songHistory);
 	PianoDestroyPlaylist (app.playlist);
+	SbMetadataResolverDestroy (&app.metadataResolver);
+	SbLyricsResultDestroy (&app.lyrics);
 	curl_easy_cleanup (app.http);
 	curl_global_cleanup ();
 	BarPlayerDestroy (&app.player);
@@ -845,6 +1073,8 @@ int main (int argc, char **argv) {
 	SbUiRendererSetActive (NULL);
 	SbUiModelDestroy (&app.uiModel);
 	BarSettingsDestroy (&app.settings);
+	pthread_mutex_destroy (&app.prefetch.lock);
+	pthread_mutex_destroy (&app.pianoLock);
 
 	/* restore terminal attributes, zsh doesn't need this, bash does... */
 	BarTermRestore ();

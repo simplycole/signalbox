@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include "settings.h"
 #include "ui_readline.h"
 #include "ui_renderer.h"
+#include "enrichment.h"
 
 typedef struct {
 	PianoHandle_t ph;
@@ -47,12 +48,30 @@ typedef struct {
 	BarReadlineFds_t input;
 	SbUiModel uiModel;
 	SbUiRenderer uiRenderer;
+	SbMetadataResolver metadataResolver;
+	SbMetadataResult metadata;
+	SbLyricsResult lyrics;
+	SbTrackIdentity trackIdentity;
+	uint64_t enrichmentGeneration;
 	bool useTui;
 	bool passwordFromSecureStore;
 	bool rememberLogin;
 	bool visualizerEnabled;
 	SbTuiTheme tuiTheme;
 	unsigned int playerErrors;
+	pthread_mutex_t pianoLock;
+	struct {
+		pthread_t thread;
+		pthread_mutex_t lock;
+		bool inFlight, complete;
+		PianoSong_t *result;
+		PianoReturn_t pianoResult;
+		CURLcode curlResult;
+		char *stationId;
+		uint64_t generation;
+		size_t lastAttemptRemaining;
+	} prefetch;
+	uint64_t playlistGeneration;
 } BarApp_t;
 
 #include <signal.h>

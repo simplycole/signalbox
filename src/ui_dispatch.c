@@ -93,6 +93,8 @@ static const BarKeyShortcutFunc_t commandHandlers[SB_UI_CMD_COUNT] = {
 	[SB_UI_CMD_VOLUME_RESET] = BarUiActVolReset,
 	[SB_UI_CMD_SETTINGS] = BarUiActSettings,
 	[SB_UI_CMD_ACTIVATE_STATION] = BarUiActActivateStation,
+	[SB_UI_CMD_TRACK_INFO] = NULL,
+	[SB_UI_CMD_LYRICS] = NULL,
 };
 
 static const char *BarUiCommandDiagnosticName (const SbUiCommand command) {

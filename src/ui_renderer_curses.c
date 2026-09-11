@@ -25,6 +25,9 @@
 #endif
 
 #include "debug.h"
+#include "modal_state.h"
+#include "mouse_state.h"
+#include "upcoming_layout.h"
 #include "station_browser.h"
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
@@ -100,7 +103,17 @@ typedef struct {
 	int screenCols;
 	SbTuiSizeState sizeState;
 	bool recoveryPending;
+	WINDOW *textModalWindow;
+	char textModalTitle[80];
+	SbUiCommand textModalCommand;
+	SbUiTextModalContentFn textModalContent;
+	void *textModalData;
+	char *textModalOwnedText;
+	SbUiModalScrollState textModalScroll;
 } SbUiCursesData;
+
+static void SbUiCursesDrawTextModal (const SbUiRenderer *,
+		const SbUiModel *);
 
 static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
 	return BarUiCommandFromKey (renderer->settings, 'V') == SB_UI_CMD_NONE;
@@ -335,6 +348,7 @@ typedef struct {
 	int status;
 	int rawKey;
 	int key;
+	int wheelDirection;
 #ifdef _WIN32
 	SbTerminalInputEvent terminalEvent;
 #endif
@@ -451,7 +465,8 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 #ifdef _WIN32
 	(void) window;
 	const SbTerminalInputEvent event = SbTerminalReadInput (timeoutMs);
-	const SbTuiInput input = {event.status, event.key, event.key, event};
+	const SbTuiInput input = {event.status, event.key, event.key,
+			event.wheelDirection, event};
 #else
 	(void) timeoutMs;
 	/* Keep the status and output value separate.  wget_wch() returns a status;
@@ -461,7 +476,7 @@ static SbTuiInput SbUiCursesReadKey (WINDOW *window,
 	const int rawKey = status == ERR ? ERR : (int) key;
 	/* The shared renderer treats all three common Enter forms identically. */
 	const int normalized = rawKey == '\r' || rawKey == KEY_ENTER ? '\n' : rawKey;
-	const SbTuiInput input = {status, rawKey, normalized};
+	const SbTuiInput input = {status, rawKey, normalized, 0};
 #endif
 #ifdef SIGNALBOX_PDCURSESMOD
 	SbUiCursesDebugKey (input, context, passwordActive);
@@ -598,6 +613,9 @@ static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows)
 	HELP_BLANK (); HELP_SECTION ("UPCOMING");
 	HELP_CONFIG (SB_UI_CMD_UPCOMING, "browse upcoming");
 	SB_TUI_HELP_COMMAND ("Enter", "selected-track actions");
+	HELP_BLANK (); HELP_SECTION ("TRACK");
+	SB_TUI_HELP_COMMAND ("i", "track info");
+	SB_TUI_HELP_COMMAND ("L", "lyrics");
 	if (SbUiCursesVisualizerKeyAvailable (renderer)) {
 		HELP_BLANK (); HELP_SECTION ("VISUALIZER");
 		SB_TUI_HELP_COMMAND ("V", "toggle spectrum");
@@ -1291,10 +1309,19 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		/* Heading + top breathing row + bars + labels + bottom breathing row. */
 		const int spectrumHeight = spectrumRows > 0 ? spectrumRows + 4 : 0;
 		const int upcomingY = spectrumY + spectrumHeight;
-		const int maxUpcoming = rows >= 44 ? 4 : rows >= 34 ? 3 : 2;
+		int upcomingCosts[6];
+		size_t costCount = 0;
+		const PianoSong_t *upcomingSong = model->song != NULL ?
+				PianoListNextP (model->song) : NULL;
+		PianoListForeachP (upcomingSong) {
+			if (costCount == sizeof (upcomingCosts) / sizeof (*upcomingCosts)) break;
+			upcomingCosts[costCount++] = SbUiCursesMetadataWraps (
+					upcomingSong->artist, upcomingSong->title,
+					upcomingSong->album, rightWidth) ? 2 : 1;
+		}
 		const int upcomingRows = upcomingCount > 0 && rows >= 30 ?
-				(int) (upcomingCount < (size_t) maxUpcoming ? upcomingCount :
-				(size_t) maxUpcoming) : 0;
+				SbUiUpcomingHeight (upcomingCosts, costCount,
+						statusY - upcomingY, 6) : 0;
 		const int historyY = upcomingY + (upcomingRows > 0 ? upcomingRows + 2 : 0);
 		SbUiCursesHLine (stdscr, historyY - 1, split + 1, cols - split - 2);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
@@ -1360,7 +1387,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				statusY - dividerY - 3, cols - 4);
 	}
 
-	if (data->helpVisible) {
+	if (data->helpVisible && data->textModalContent == NULL) {
 		SbHelpRow helpRows[48];
 		const size_t helpRowCount = SbUiCursesHelpRows (renderer, helpRows);
 		const int wantedHeight = (int) helpRowCount + 5;
@@ -1414,9 +1441,19 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 	if (data->recoveryPending) {
 		wnoutrefresh (stdscr);
+		SbUiCursesDrawTextModal (renderer, model);
+		if (data->textModalWindow != NULL) wnoutrefresh (data->textModalWindow);
 		doupdate ();
 		data->recoveryPending = false;
-	} else refresh ();
+	} else {
+		/* Publish a complete virtual frame atomically.  Direct refresh() mixed
+		 * with popup refreshes exposed the erased intermediate frame on some
+		 * curses backends during navigation. */
+		wnoutrefresh (stdscr);
+		SbUiCursesDrawTextModal (renderer, model);
+		if (data->textModalWindow != NULL) wnoutrefresh (data->textModalWindow);
+		doupdate ();
+	}
 }
 
 static WINDOW *SbUiCursesModal (const SbUiCursesData *data,
@@ -1826,28 +1863,169 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 	}
 }
 
-void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
-		const char *title, const char *text) {
-	if (!SbUiRendererIsCurses (renderer)) return;
-	size_t offset = 0;
-	for (;;) {
-		SbUiCursesFrame (renderer, model);
-		int rows, cols;
-		getmaxyx (stdscr, rows, cols);
-		(void) cols;
-		SbUiCursesData * const data = renderer->data;
-		WINDOW *window = SbUiCursesModal (data, title,
-				"Up/Down or j/k scroll; Esc or Enter closes", rows < 24 ? rows - 2 : 22);
-		if (window == NULL) continue;
-		int wh, ww;
-		getmaxyx (window, wh, ww);
-		const int lineWidth = ww - 4;
-		char copy[2048];
-		snprintf (copy, sizeof (copy), "%s", text != NULL ? text : "No information available.");
-		const char *lines[128];
+static bool SbUiCursesModalToggleKey (const SbUiRenderer *renderer,
+		const int key, const SbUiCommand toggleCommand) {
+	if (key < 0 || key > UCHAR_MAX || toggleCommand == SB_UI_CMD_NONE) return false;
+	if (toggleCommand == SB_UI_CMD_TRACK_INFO && (key == 'i' || key == 'I')) return true;
+	if (toggleCommand == SB_UI_CMD_LYRICS && (key == 'l' || key == 'L')) return true;
+	return BarUiCommandFromKey (renderer->settings, (char) key) == toggleCommand;
+}
+
+typedef struct {
+	int direction;
+	int getmouseResult;
+	unsigned long long sequence;
+	int x, y, z;
+	uint64_t rawState;
+	const char *form;
+	char bits[320];
+} SbUiCursesWheel;
+
+static SbUiCursesWheel SbUiCursesWheelEvent (const SbTuiInput input,
+		const bool scrollContext) {
+	static unsigned long long sequence;
+	(void) scrollContext;
+#ifdef _WIN32
+	if (input.wheelDirection != 0) return (SbUiCursesWheel) {
+			.direction = input.wheelDirection, .form = "win32-wheel-delta"};
+#endif
+#ifdef KEY_MOUSE
+	if (input.key == KEY_MOUSE) {
+		const unsigned long long eventSequence = ++sequence;
+		MEVENT event;
+		const int getmouseResult = getmouse (&event);
+		if (getmouseResult == OK) {
+			uint64_t upMask = 0, downMask = 0, legacyDownMask = 0,
+					reportMask = 0;
+			int mouseVersion = 0;
+#ifdef NCURSES_MOUSE_VERSION
+			mouseVersion = NCURSES_MOUSE_VERSION;
+#endif
+#ifdef BUTTON4_PRESSED
+			upMask = (uint64_t) BUTTON4_PRESSED;
+#endif
+#ifdef BUTTON5_PRESSED
+			downMask = (uint64_t) BUTTON5_PRESSED;
+#endif
+
+#ifdef REPORT_MOUSE_POSITION
+			reportMask = (uint64_t) REPORT_MOUSE_POSITION;
+#endif
+			const int direction = SbUiMouseWheelDirection (
+					(uint64_t) event.bstate, upMask, downMask,
+					legacyDownMask, reportMask, mouseVersion);
+			const char *form = direction < 0 ? "BUTTON4_PRESSED" :
+					direction > 0 && downMask != 0 ? "BUTTON5_PRESSED" :
+					direction > 0 ?
+					"BUTTON2_PRESSED(ncurses-v1-wheel-down)" :
+					"unrecognized-or-conflicting";
+			SbUiCursesWheel decoded = {.direction = direction,
+					.getmouseResult = getmouseResult,
+					.sequence = eventSequence,
+					.x = event.x, .y = event.y, .z = event.z,
+					.rawState = (uint64_t) event.bstate, .form = form};
+#define SB_MOUSE_BIT(name) SbUiMouseBitName (decoded.bits, sizeof (decoded.bits), \
+			(uint64_t) event.bstate, (uint64_t) (name), #name)
+#ifdef BUTTON1_PRESSED
+			SB_MOUSE_BIT (BUTTON1_PRESSED); SB_MOUSE_BIT (BUTTON1_RELEASED);
+			SB_MOUSE_BIT (BUTTON1_CLICKED);
+#endif
+#ifdef BUTTON2_PRESSED
+			SB_MOUSE_BIT (BUTTON2_PRESSED); SB_MOUSE_BIT (BUTTON2_RELEASED);
+			SB_MOUSE_BIT (BUTTON2_CLICKED);
+#endif
+#ifdef BUTTON3_PRESSED
+			SB_MOUSE_BIT (BUTTON3_PRESSED); SB_MOUSE_BIT (BUTTON3_RELEASED);
+			SB_MOUSE_BIT (BUTTON3_CLICKED);
+#endif
+#ifdef BUTTON4_PRESSED
+			SB_MOUSE_BIT (BUTTON4_PRESSED); SB_MOUSE_BIT (BUTTON4_RELEASED);
+			SB_MOUSE_BIT (BUTTON4_CLICKED);
+#endif
+#ifdef BUTTON5_PRESSED
+			SB_MOUSE_BIT (BUTTON5_PRESSED);
+#ifdef BUTTON5_RELEASED
+			SB_MOUSE_BIT (BUTTON5_RELEASED);
+#endif
+#ifdef BUTTON5_CLICKED
+			SB_MOUSE_BIT (BUTTON5_CLICKED);
+#endif
+#endif
+#ifdef REPORT_MOUSE_POSITION
+			SB_MOUSE_BIT (REPORT_MOUSE_POSITION);
+#endif
+#undef SB_MOUSE_BIT
+			if (decoded.bits[0] == '\0') snprintf (decoded.bits,
+					sizeof (decoded.bits), "none-recognized");
+			return decoded;
+		}
+		return (SbUiCursesWheel) {.getmouseResult = getmouseResult,
+				.sequence = eventSequence,
+				.form = "getmouse-error"};
+	}
+#endif
+	return (SbUiCursesWheel) {.form = "not-mouse"};
+}
+
+void SbUiRendererDynamicTextModal (SbUiRenderer *renderer,
+		const SbUiModel *model, const char *title,
+		const SbUiCommand toggleCommand, SbUiTextModalContentFn contentFn,
+		void *contentData) {
+	if (!SbUiRendererIsCurses (renderer) || contentFn == NULL) return;
+	SbUiCursesData * const data = renderer->data;
+	if (toggleCommand != SB_UI_CMD_NONE && data->textModalContent != NULL &&
+			data->textModalCommand == toggleCommand) {
+		if (data->textModalWindow != NULL) delwin (data->textModalWindow);
+		data->textModalWindow = NULL; data->textModalContent = NULL;
+		free (data->textModalOwnedText); data->textModalOwnedText = NULL;
+	} else {
+		if (data->textModalWindow != NULL) delwin (data->textModalWindow);
+		if (contentData != data) {
+			free (data->textModalOwnedText); data->textModalOwnedText = NULL;
+		}
+		data->textModalWindow = NULL;
+		snprintf (data->textModalTitle, sizeof (data->textModalTitle), "%s", title);
+		data->textModalCommand = toggleCommand;
+		data->textModalContent = contentFn;
+		data->textModalData = contentData;
+		SbUiModalScrollOpen (&data->textModalScroll, model->songGeneration);
+		data->helpVisible = false;
+	}
+	SbUiCursesFrame (renderer, model);
+}
+
+static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
+		const SbUiModel *model) {
+	SbUiCursesData * const data = renderer->data;
+	if (data->textModalContent == NULL || data->sizeState != SB_TUI_SIZE_NORMAL) return;
+	int rows, cols; getmaxyx (stdscr, rows, cols); (void) cols;
+	if (data->textModalWindow == NULL) data->textModalWindow = SbUiCursesModal (
+			data, data->textModalTitle,
+			"Up/Down or j/k scroll; Esc, Enter, or opening key closes",
+			rows < 24 ? rows - 2 : 22);
+	WINDOW * const window = data->textModalWindow;
+	if (window == NULL) return;
+	SbUiModalScrollObserveIdentity (&data->textModalScroll,
+			model->songGeneration);
+	char *text = data->textModalContent (data->textModalData);
+	char *copy = strdup (text != NULL ? text : "No information available.");
+	free (text);
+	if (copy == NULL) return;
+	int wh, ww; getmaxyx (window, wh, ww); const int lineWidth = ww - 4;
+	werase (window); wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0); SbUiCursesBox (window);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_BORDER, 0);
+	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
+	SbUiCursesWPut (window, 1, 2, ww - 4, data->textModalTitle);
+	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
+	SbUiCursesWPut (window, 3, 2, ww - 4,
+			"Up/Down or j/k scroll; Esc, Enter, or opening key closes");
+		const size_t lineCapacity = strlen (copy) + 1;
+		const char **lines = calloc (lineCapacity, sizeof (*lines));
+		if (lines == NULL) { free (copy); return; }
 		size_t lineCount = 0;
 		char *cursor = copy;
-		while (*cursor != '\0' && lineCount < sizeof (lines) / sizeof (*lines)) {
+		while (*cursor != '\0' && lineCount < lineCapacity) {
 			while (*cursor == ' ' || *cursor == '\n') cursor++;
 			if (*cursor == '\0') break;
 			lines[lineCount++] = cursor;
@@ -1865,22 +2043,29 @@ void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
 			cursor = cut + 1;
 		}
 		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
-		if (offset >= lineCount) offset = lineCount > 0 ? lineCount - 1 : 0;
-		for (size_t i = 0; i < visible && offset + i < lineCount; i++)
+		SbUiModalScrollClamp (&data->textModalScroll, lineCount, visible);
+		for (size_t i = 0; i < visible &&
+				data->textModalScroll.offset + i < lineCount; i++)
 			SbUiCursesWPut (window, 5 + (int) i, 2, lineWidth,
-					lines[offset + i]);
-		wrefresh (window);
-		const int key = SbUiCursesReadKey (window,
-				SB_TUI_INPUT_MODAL, false, -1).key;
-		delwin (window);
-		if (key == 27 || key == '\n' || key == '\r' || key == KEY_ENTER) {
-			SbUiCursesFrame (renderer, model);
-			return;
-		}
-		if ((key == KEY_UP || key == 'k') && offset > 0) offset--;
-		else if ((key == KEY_DOWN || key == 'j') && offset + visible < lineCount)
-			offset++;
-	}
+					lines[data->textModalScroll.offset + i]);
+	free (lines); free (copy);
+}
+
+static char *SbUiCursesStaticText (void *opaque) {
+	const SbUiCursesData *data = opaque;
+	return strdup (data->textModalOwnedText != NULL ? data->textModalOwnedText :
+			"No information available.");
+}
+
+void SbUiRendererTextModal (SbUiRenderer *renderer, const SbUiModel *model,
+		const char *title, const char *text) {
+	if (!SbUiRendererIsCurses (renderer)) return;
+	SbUiCursesData * const data = renderer->data;
+	free (data->textModalOwnedText);
+	data->textModalOwnedText = strdup (text != NULL ? text :
+			"No information available.");
+	SbUiRendererDynamicTextModal (renderer, model, title, SB_UI_CMD_NONE,
+			SbUiCursesStaticText, data);
 }
 
 void SbUiRendererSongDetails (SbUiRenderer *renderer, const SbUiModel *model,
@@ -2155,15 +2340,38 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	const int timeoutMs = model->visualizerEnabled ? 80 : 1000;
-	const int key = SbUiCursesReadKey (stdscr, data->helpVisible ?
+	const SbTuiInput input = SbUiCursesReadKey (stdscr,
+			data->textModalContent != NULL ?
+			SB_TUI_INPUT_MODAL : data->helpVisible ?
 			SB_TUI_INPUT_HELP : SB_TUI_INPUT_MAIN, false,
-			timeoutMs).key;
+			timeoutMs);
+	int key = input.key;
+	const SbUiCursesWheel wheelEvent = SbUiCursesWheelEvent (input,
+			data->textModalContent != NULL || data->helpVisible);
+	const int wheel = wheelEvent.direction;
+	if (key == KEY_MOUSE && data->textModalContent == NULL)
+		tuiDebugPrint ("mouse_event seq=%llu key=KEY_MOUSE getmouse_rc=%d xyz=%d,%d,%d raw_bstate=0x%llx bits=%s ncurses_mouse_version=%d decoded_form=%s decoded_direction=%s direction=%d modal_active=0 action=%s\n",
+				wheelEvent.sequence, wheelEvent.getmouseResult,
+				wheelEvent.x, wheelEvent.y, wheelEvent.z,
+				(unsigned long long) wheelEvent.rawState, wheelEvent.bits,
+#ifdef NCURSES_MOUSE_VERSION
+				NCURSES_MOUSE_VERSION,
+#else
+				0,
+#endif
+				wheelEvent.form,
+				wheel < 0 ? "toward-top" : wheel > 0 ? "toward-bottom" : "ignored", wheel,
+				wheel != 0 ? "routed-to-background" : "ignored");
 	if (key == ERR) {
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (key == KEY_RESIZE) {
 		SbUiCursesHandleResize (data);
+		if (data->textModalWindow != NULL) {
+			delwin (data->textModalWindow);
+			data->textModalWindow = NULL;
+		}
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
@@ -2176,6 +2384,61 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		SbUiCursesFrame (renderer, model);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
+	if (data->textModalContent != NULL) {
+		if (key == 27 || key == '\n' || key == '\r' || key == KEY_ENTER ||
+				SbUiCursesModalToggleKey (renderer, key,
+						data->textModalCommand)) {
+			if (data->textModalWindow != NULL) delwin (data->textModalWindow);
+			data->textModalWindow = NULL;
+			data->textModalContent = NULL;
+			free (data->textModalOwnedText); data->textModalOwnedText = NULL;
+		} else {
+			/* Live content and resize recovery can change the retained bound
+			 * between input events. Refresh it before every navigation action so
+			 * keyboard and wheel consume the current content/viewport clamp. */
+			if (wheel != 0 || key == KEY_UP || key == 'k' ||
+					key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
+					key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)
+				SbUiCursesFrame (renderer, model);
+			const size_t visible = data->textModalWindow != NULL &&
+					getmaxy (data->textModalWindow) > 6 ?
+					(size_t) getmaxy (data->textModalWindow) - 6 : 1;
+			const size_t oldOffset = data->textModalScroll.offset;
+			if (SbUiMouseWheelOwnedByModal (1, wheel)) {
+				SbUiModalScrollWheel (&data->textModalScroll, wheel);
+			} else if (key == KEY_UP || key == 'k')
+				SbUiModalScrollLines (&data->textModalScroll, -1);
+			else if (key == KEY_DOWN || key == 'j')
+				SbUiModalScrollLines (&data->textModalScroll, 1);
+			else if (key == KEY_HOME) data->textModalScroll.offset = 0;
+			else if (key == KEY_END)
+				data->textModalScroll.offset = data->textModalScroll.maximum;
+			else if (key == KEY_PPAGE)
+				SbUiModalScrollPage (&data->textModalScroll, -1, visible);
+			else if (key == KEY_NPAGE)
+				SbUiModalScrollPage (&data->textModalScroll, 1, visible);
+			if (key == KEY_MOUSE)
+				tuiDebugPrint ("modal_wheel seq=%llu getmouse_rc=%d xyz=%d,%d,%d raw_bstate=0x%llx bits=%s ncurses_mouse_version=%d decoded_form=%s decoded_direction=%s old_offset=%zu requested_delta=%d new_offset=%zu max_scroll=%zu action=%s\n",
+						wheelEvent.sequence, wheelEvent.getmouseResult,
+						wheelEvent.x, wheelEvent.y, wheelEvent.z,
+						(unsigned long long) wheelEvent.rawState,
+						wheelEvent.bits[0] != '\0' ? wheelEvent.bits : "unavailable",
+#ifdef NCURSES_MOUSE_VERSION
+						NCURSES_MOUSE_VERSION,
+#else
+						0,
+#endif
+						wheelEvent.form,
+						wheel < 0 ? "toward-top" : wheel > 0 ? "toward-bottom" : "ignored",
+						oldOffset, wheel * 3, data->textModalScroll.offset,
+						data->textModalScroll.maximum,
+						wheel != 0 ? "consumed-by-modal" : "ignored-by-modal");
+		}
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (wheel < 0) key = KEY_UP;
+	else if (wheel > 0) key = KEY_DOWN;
 	if (data->helpVisible && (key == KEY_UP || key == 'k' ||
 			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
 			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
@@ -2318,6 +2581,10 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		wtimeout (stdscr, model->visualizerEnabled ? 1000 : 80);
 		return (SbUiCommandEvent) {SB_UI_CMD_TOGGLE_VISUALIZER, NULL};
 	}
+	if (!data->helpVisible && (key == 'i' || key == 'I'))
+		return (SbUiCommandEvent) {SB_UI_CMD_TRACK_INFO, NULL};
+	if (!data->helpVisible && (key == 'l' || key == 'L'))
+		return (SbUiCommandEvent) {SB_UI_CMD_LYRICS, NULL};
 	if (key >= 0 && key <= UCHAR_MAX) {
 		const SbUiCommand command = BarUiCommandFromKey (renderer->settings,
 				(char) key);
@@ -2399,6 +2666,8 @@ static void SbUiCursesShutdown (SbUiRenderer *renderer) {
 #ifdef SIGNALBOX_PDCURSESMOD
 		SbUiCursesCloseKeyLog ();
 #endif
+		if (data->textModalWindow != NULL) delwin (data->textModalWindow);
+		free (data->textModalOwnedText);
 		endwin ();
 		delscreen (data->screen);
 		pthread_mutex_destroy (&data->statusLock);
@@ -2538,6 +2807,26 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	cbreak ();
 	noecho ();
 	keypad (stdscr, TRUE);
+	mmask_t requestedMouseEvents = ALL_MOUSE_EVENTS;
+#ifdef BUTTON4_PRESSED
+	requestedMouseEvents |= BUTTON4_PRESSED;
+#endif
+#ifdef BUTTON5_PRESSED
+	requestedMouseEvents |= BUTTON5_PRESSED;
+#elif defined(NCURSES_MOUSE_VERSION) && NCURSES_MOUSE_VERSION == 1 && \
+		defined(BUTTON2_PRESSED)
+	requestedMouseEvents |= BUTTON2_PRESSED;
+#endif
+	const mmask_t enabledMouseEvents = mousemask (requestedMouseEvents, NULL);
+	tuiDebugPrint ("mousemask requested=0x%llx enabled=0x%llx ncurses_mouse_version=%d\n",
+			(unsigned long long) requestedMouseEvents,
+			(unsigned long long) enabledMouseEvents,
+#ifdef NCURSES_MOUSE_VERSION
+			NCURSES_MOUSE_VERSION
+#else
+			0
+#endif
+			);
 	wtimeout (stdscr, settings->visualizerSpectrum ? 80 : 1000);
 #ifdef _WIN32
 	if (!SbTerminalInputInit ()) {

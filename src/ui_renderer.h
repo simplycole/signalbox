@@ -60,6 +60,8 @@ typedef struct {
 	size_t historyCount;
 	size_t historyCapacity;
 	uint64_t generation;
+	/* Changes only when the current song identity changes. */
+	uint64_t songGeneration;
 	/* Changes only when the canonical station collection is refreshed. */
 	uint64_t stationsGeneration;
 	SbSpectrumSnapshot spectrum;
@@ -74,6 +76,7 @@ typedef enum {
 } SbUiRenderEvent;
 
 typedef struct SbUiRenderer SbUiRenderer;
+typedef char *(*SbUiTextModalContentFn) (void *);
 
 typedef enum {
 	SB_TUI_THEME_PHOSPHOR = 0,
@@ -124,6 +127,8 @@ void SbUiRendererSongDetails (SbUiRenderer *, const SbUiModel *,
 		const PianoSong_t *, const PianoStation_t *, time_t);
 void SbUiRendererTextModal (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *);
+void SbUiRendererDynamicTextModal (SbUiRenderer *, const SbUiModel *,
+		const char *, SbUiCommand, SbUiTextModalContentFn, void *);
 bool SbUiRendererToggleList (SbUiRenderer *, const SbUiModel *,
 		const char *, const char *const *, bool *, size_t);
 void SbUiRendererRender (SbUiRenderer *, const SbUiModel *, SbUiRenderEvent);

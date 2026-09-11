@@ -73,6 +73,9 @@ typedef enum {
 	SB_UI_CMD_ACTIVATE_STATION,
 	/* TUI-local; main updates analyzer/model state without network dispatch. */
 	SB_UI_CMD_TOGGLE_VISUALIZER,
+	/* TUI-local provider-neutral surfaces. */
+	SB_UI_CMD_TRACK_INFO,
+	SB_UI_CMD_LYRICS,
 	SB_UI_CMD_COUNT,
 } SbUiCommand;
 

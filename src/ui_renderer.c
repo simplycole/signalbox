@@ -12,8 +12,6 @@
 
 static void SbUiModelChanged (SbUiModel *model) {
 	++model->generation;
-	tuiDebugPrint ("model_generation=%llu\n",
-			(unsigned long long) model->generation);
 }
 
 static void SbUiModelCopyText (char *dest, const size_t size,
@@ -98,6 +96,7 @@ void SbUiModelSetSong (SbUiModel *model, const PianoSong_t *song,
 	assert (model != NULL);
 	if (song != model->song) {
 		SbUiModelRememberSong (model);
+		++model->songGeneration;
 	}
 	model->song = song;
 	model->songStation = songStation;
