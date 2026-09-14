@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "spectrum.h"
 #include "ui_types.h"
+#include "lyrics_sync.h"
 
 typedef enum {
 	SB_UI_PLAYBACK_STOPPED = 0,
@@ -69,6 +70,7 @@ typedef struct {
 	int artState;
 	char artProvider[32], artCachedPath[1024];
 	unsigned int artWidth, artHeight;
+	SbSyncedLyrics syncedLyrics;
 } SbUiModel;
 
 typedef enum {
@@ -113,6 +115,7 @@ void SbUiModelSetProgress (SbUiModel *, unsigned int, unsigned int,
 void SbUiModelSetVolume (SbUiModel *, int);
 void SbUiModelSetActivity (SbUiModel *, SbUiActivityState);
 void SbUiModelSetSpectrum (SbUiModel *, const SbSpectrumSnapshot *, bool);
+bool SbUiModelSetSyncedLyrics (SbUiModel *, const char *);
 
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
 bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *, SbTuiTheme);

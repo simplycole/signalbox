@@ -67,6 +67,7 @@ void SbUiModelDestroy (SbUiModel *model) {
 	model->history = NULL;
 	model->historyCount = 0;
 	model->historyCapacity = 0;
+	SbSyncedLyricsDestroy (&model->syncedLyrics);
 }
 
 void SbUiModelInit (SbUiModel *model) {
@@ -97,10 +98,18 @@ void SbUiModelSetSong (SbUiModel *model, const PianoSong_t *song,
 	if (song != model->song) {
 		SbUiModelRememberSong (model);
 		++model->songGeneration;
+		SbSyncedLyricsDestroy (&model->syncedLyrics);
 	}
 	model->song = song;
 	model->songStation = songStation;
 	SbUiModelChanged (model);
+}
+
+bool SbUiModelSetSyncedLyrics (SbUiModel *model, const char *payload) {
+	assert (model != NULL);
+	const bool parsed = SbSyncedLyricsParse (&model->syncedLyrics, payload);
+	SbUiModelChanged (model);
+	return parsed;
 }
 
 void SbUiModelSetVolume (SbUiModel *model, const int volumeDb) {

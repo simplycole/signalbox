@@ -121,7 +121,9 @@ static char *BarMainTrackInfoText (BarApp_t *app) {
 	}
 	strncat (text, "\n\nLYRICS", sizeof (text) - strlen (text) - 1);
 	BarMainAppendField (text, sizeof (text), "State",
-			BarMainLookupState (app->lyrics.status));
+			SbTuiPresentationLyricsState (app->lyrics.status,
+					app->lyrics.plainLyrics != NULL,
+					app->uiModel.syncedLyrics.count));
 	BarMainAppendField (text, sizeof (text), "Provider", app->lyrics.provider);
 	strncat (text, "\n\nALBUM ART", sizeof (text) - strlen (text) - 1);
 	BarMainAppendField (text, sizeof (text), "State",
@@ -747,6 +749,24 @@ static void BarMainLoop (BarApp_t *app) {
 		if (SbLyricsResolverPoll (&app->metadataResolver,
 				app->enrichmentGeneration, &lyrics)) {
 			SbLyricsResultDestroy (&app->lyrics); app->lyrics = lyrics;
+			SbUiModelSetSyncedLyrics (&app->uiModel,
+					lyrics.status == SB_LOOKUP_AVAILABLE ? lyrics.syncedLyrics : NULL);
+			if (lyrics.status == SB_LOOKUP_AVAILABLE)
+				tuiDebugPrint ("lyrics_sync mode=%s lines=%zu\n",
+						app->uiModel.syncedLyrics.count > 0 ? "synced" : "plain",
+						app->uiModel.syncedLyrics.count);
+			tuiDebugPrint ("lyrics_sync identity pandora_artist=\"%s\" pandora_title=\"%s\" pandora_album=\"%s\" pandora_duration=%u lrclib_artist=\"%s\" lrclib_title=\"%s\" lrclib_album=\"%s\" lrclib_duration=%.3f\n",
+					app->trackIdentity.artist, app->trackIdentity.title,
+					app->trackIdentity.album, app->trackIdentity.duration,
+					lyrics.artist, lyrics.title, lyrics.album, lyrics.duration);
+			if (app->uiModel.syncedLyrics.count > 0 && app->trackIdentity.duration > 0) {
+				const int64_t finalMs = app->uiModel.syncedLyrics.lines[
+						app->uiModel.syncedLyrics.count - 1].timestamp_ms;
+				if (finalMs > (int64_t) app->trackIdentity.duration * 1000 + 15000)
+					tuiDebugPrint ("lyrics_sync suspicious_timeline final_timestamp_ms=%lld track_duration_ms=%lld\n",
+							(long long) finalMs,
+							(long long) app->trackIdentity.duration * 1000);
+			}
 			tuiDebugPrint ("enrichment result provider=lrclib generation=%llu state=%d detail=%s\n",
 					(unsigned long long) app->enrichmentGeneration,
 					(int) lyrics.status, lyrics.error);

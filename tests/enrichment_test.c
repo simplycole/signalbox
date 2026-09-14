@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -148,6 +149,25 @@ static void testMusicBrainzHttpStates (void) {
 	assert (SbMusicBrainzHttpStatus (200, 0) == SB_LOOKUP_LOADING);
 }
 
+static void testLrclibTransientPolicy (void) {
+	/* 503/timeout retry once; a subsequent 200 is then handled normally. */
+	assert (SbLrclibShouldRetry (503, CURLE_OK, 1));
+	assert (!SbLrclibShouldRetry (200, CURLE_OK, 2));
+	assert (!SbLrclibShouldRetry (503, CURLE_OK, 2));
+	assert (SbLrclibShouldRetry (0, CURLE_OPERATION_TIMEDOUT, 1));
+	assert (!SbLrclibShouldRetry (0, CURLE_OPERATION_TIMEDOUT, 2));
+	/* 404 is a genuine no-match and proceeds through the lookup ladder. */
+	assert (!SbLrclibTransientFailure (404, CURLE_OK));
+	assert (!SbLrclibShouldRetry (404, CURLE_OK, 1));
+	assert (SbLrclibTransientFailure (429, CURLE_OK));
+	assert (SbLrclibTransientFailure (500, CURLE_OK));
+	assert (SbLrclibTransientFailure (502, CURLE_OK));
+	assert (SbLrclibTransientFailure (504, CURLE_OK));
+	assert (SbLrclibRetryDelayMs (0) == 1000);
+	assert (SbLrclibRetryDelayMs (3) == 3000);
+	assert (SbLrclibRetryDelayMs (30) == 5000);
+}
+
 static void testCacheKey (void) {
 	SbTrackIdentity a, b; char ka[80], kb[80];
 	SbTrackIdentitySet (&a, "The Artist", "A Song!", NULL, NULL, 0);
@@ -239,7 +259,7 @@ static void testStaleResult (void) {
 
 static void testLrclibPlainAndSynced (void) {
 	const char json[] = "{\"id\":42,\"trackName\":\"Night Signal\","
-		"\"artistName\":\"Test Operator\",\"albumName\":\"Synthetic Airwaves\","
+		"\"artistName\":\"Test Operator\",\"albumName\":\"Synthetic Airwaves\",\"duration\":212.75,"
 		"\"instrumental\":false,\"plainLyrics\":\"Signal in the static\\nGreen phosphor in the night\","
 		"\"syncedLyrics\":\"[00:01.00] Signal in the static\\n[00:03.50] Green phosphor in the night\"}";
 	SbLyricsResult result;
@@ -247,11 +267,20 @@ static void testLrclibPlainAndSynced (void) {
 	assert (result.status == SB_LOOKUP_AVAILABLE);
 	assert (strcmp (result.provider, "LRCLIB") == 0);
 	assert (strcmp (result.recordId, "42") == 0);
+	assert (result.duration == 212.75);
 	assert (strstr (result.plainLyrics, "Signal in the static") != NULL);
 	assert (strstr (result.syncedLyrics, "[00:03.50]") != NULL);
 	char *display = NULL; assert (SbLyricsDisplayText (&result, &display));
 	assert (strcmp (display, result.plainLyrics) == 0); free (display);
 	SbLyricsResultDestroy (&result);
+	assert (SbLrclibParse ("{\"id\":43,\"trackName\":\"Plain\","
+			"\"artistName\":\"Artist\",\"albumName\":\"Album\","
+			"\"instrumental\":false,\"plainLyrics\":\"Only plain lyrics\","
+			"\"syncedLyrics\":null}", &result));
+	assert (result.plainLyrics != NULL && result.syncedLyrics == NULL);
+	display = NULL; assert (SbLyricsDisplayText (&result, &display));
+	assert (strcmp (display, "Only plain lyrics") == 0);
+	free (display); SbLyricsResultDestroy (&result);
 }
 
 static void testLrclibSyncedOnlyAndInstrumental (void) {
@@ -482,13 +511,24 @@ static void testLyricsResolverCacheAndFailures (void) {
 	SbMetadataResolverRequest (&resolver, &id, 6);
 	assert (waitLyrics (&resolver, 6, &result));
 	assert (result.status == SB_LOOKUP_ERROR && mock.lyricsCalls >= 3);
+	SbLyricsResultDestroy (&result);
+	/* Transient unavailability is never retained as a negative match. */
+	SbTrackIdentitySet (&id, "Operator", "Temporary Link", NULL, NULL, 0);
+	mock.lyricsStatus = SB_LOOKUP_UNAVAILABLE;
+	const int beforeTransient = mock.lyricsCalls;
+	SbMetadataResolverRequest (&resolver, &id, 7);
+	assert (waitLyrics (&resolver, 7, &result)); SbLyricsResultDestroy (&result);
+	SbMetadataResolverRequest (&resolver, &id, 8);
+	assert (waitLyrics (&resolver, 8, &result));
+	assert (result.status == SB_LOOKUP_UNAVAILABLE &&
+			mock.lyricsCalls == beforeTransient + 2);
 	SbLyricsResultDestroy (&result); SbMetadataResolverDestroy (&resolver);
 }
 
 int main (void) {
 	testNormalization (); testRetainedModalScroll (); testRetainedModalScrollBounds ();
 	testCursesWheelStateMapping (); testMouseBitNames (); testUpcomingHeight ();
-	testMusicBrainzHttpStates ();
+	testMusicBrainzHttpStates (); testLrclibTransientPolicy ();
 	testCacheKey (); testBestMatch (); testAlbumAwareArtRelease ();
 	testMusicBrainzDateFormatting ();
 	testErrorsAndNoMatch (); testStaleResult (); testLrclibPlainAndSynced ();

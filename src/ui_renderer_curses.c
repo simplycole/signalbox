@@ -120,6 +120,9 @@ typedef struct {
 	bool artOverlayVisible;
 	char artOverlayPath[1024];
 	unsigned int artOverlayColumns, artOverlayRows;
+	SbLyricCursor lyricCursor;
+	uint64_t lyricCursorGeneration;
+	size_t loggedLyricIndex;
 } SbUiCursesData;
 
 static void SbUiCursesDrawTextModal (const SbUiRenderer *,
@@ -925,9 +928,10 @@ static SbTuiColorRole SbUiCursesTextRole (const SbTuiTextRole role) {
 	}
 }
 
-static void SbUiCursesNowPlaying (const SbUiCursesData *data,
+static void SbUiCursesNowPlaying (SbUiCursesData *data,
 		const SbUiModel *model, const int y,
-		const int x, const int height, const int width) {
+		const int x, const int height, const int width,
+		const SbLyricsDisplay lyricsDisplay) {
 	if (height <= 0) return;
 	SbUiCursesLabelValue (data, y, x, width, "Artist: ",
 			model->song != NULL ? model->song->artist : NULL,
@@ -947,17 +951,61 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 				station != NULL ? station->name : NULL,
 				SB_TUI_COLOR_STATION_ACTIVE, A_BOLD);
 	}
-	if (height > 5) SbUiCursesProgress (data, model, y + 5, x, width);
-	if (height > 6) {
+	if (data->lyricCursorGeneration != model->songGeneration) {
+		SbLyricCursorReset (&data->lyricCursor);
+		data->lyricCursorGeneration = model->songGeneration;
+		data->loggedLyricIndex = SIZE_MAX;
+	}
+	bool reseek = false;
+	const int64_t playbackMs = (int64_t) model->elapsed * 1000;
+	const SbLyricContext lyric = SbSyncedLyricsLookupCursor (&model->syncedLyrics,
+			playbackMs, &data->lyricCursor, &reseek);
+	const int64_t effectiveMs = playbackMs + model->syncedLyrics.offset_ms;
+	if (reseek) tuiDebugPrint ("lyrics_sync reseek reason=playback_discontinuity playback_ms=%lld lyrics_offset_ms=%lld effective_ms=%lld\n",
+			(long long) playbackMs, (long long) model->syncedLyrics.offset_ms,
+			(long long) effectiveMs);
+	if (lyric.current_index != data->loggedLyricIndex) {
+		tuiDebugPrint ("lyrics_sync playback_ms=%lld lyrics_offset_ms=%lld effective_ms=%lld current_index=%lld current_timestamp_ms=%lld next_timestamp_ms=%lld\n",
+				(long long) playbackMs, (long long) model->syncedLyrics.offset_ms,
+				(long long) effectiveMs,
+				lyric.current_index == SIZE_MAX ? -1LL : (long long) lyric.current_index,
+				lyric.current != NULL ? (long long) lyric.current->timestamp_ms : -1LL,
+				lyric.next != NULL ? (long long) lyric.next->timestamp_ms : -1LL);
+		data->loggedLyricIndex = lyric.current_index;
+	}
+	const bool showLyrics = SbTuiPresentationInlineLyrics (lyricsDisplay,
+			model->syncedLyrics.count) && height >= 7;
+	const bool showThree = showLyrics && lyricsDisplay == SB_LYRICS_DISPLAY_THREE_LINE &&
+			height >= 11;
+	int progressRow = 5, stateRow = 6;
+	if (showThree) {
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, A_DIM);
+		SbUiCursesPut (y + 5, x, width, lyric.previous != NULL ? lyric.previous->text : "");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_MUTED, A_DIM);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_TRACK, A_BOLD);
+		SbUiCursesPut (y + 6, x, width, lyric.current != NULL ? lyric.current->text : "");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_TRACK, A_BOLD);
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_PRIMARY, 0);
+		SbUiCursesPut (y + 7, x, width, lyric.next != NULL ? lyric.next->text : "");
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_PRIMARY, 0);
+		progressRow = 9; stateRow = 10;
+	} else if (showLyrics) {
+		SbUiCursesAttrOn (data, SB_TUI_COLOR_TRACK, A_BOLD);
+		SbUiCursesPut (y + 4, x, width, lyric.current != NULL ? lyric.current->text :
+				(lyric.next != NULL ? lyric.next->text : ""));
+		SbUiCursesAttrOff (data, SB_TUI_COLOR_TRACK, A_BOLD);
+	}
+	if (height > progressRow) SbUiCursesProgress (data, model, y + progressRow, x, width);
+	if (height > stateRow) {
 		const SbTuiColorRole playbackRole = model->playback == SB_UI_PLAYBACK_PAUSED ?
 				SB_TUI_COLOR_WARNING : SB_TUI_COLOR_STATUS;
 		SbUiCursesAttrOn (data, playbackRole, A_BOLD);
-		SbUiCursesPut (y + 6, x, width, SbUiCursesPlayback (model));
+		SbUiCursesPut (y + stateRow, x, width, SbUiCursesPlayback (model));
 		SbUiCursesAttrOff (data, playbackRole, A_BOLD);
 		char volume[40];
 		snprintf (volume, sizeof (volume), "Volume %+d dB", model->volumeDb);
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_WARNING, 0);
-		SbUiCursesPut (y + 6, x + 12, width - 12, volume);
+		SbUiCursesPut (y + stateRow, x + 12, width - 12, volume);
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_WARNING, 0);
 		const char *rating = SbUiCursesRating (data, model->song);
 		const int ratingX = x + 12 + (int) strlen (volume) + 3;
@@ -968,7 +1016,7 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 			ratingRole = SB_TUI_COLOR_ERROR;
 		if (ratingX < x + width) {
 			SbUiCursesAttrOn (data, ratingRole, 0);
-			SbUiCursesPut (y + 6, ratingX, x + width - ratingX, rating);
+			SbUiCursesPut (y + stateRow, ratingX, x + width - ratingX, rating);
 			SbUiCursesAttrOff (data, ratingRole, 0);
 		}
 	}
@@ -1436,7 +1484,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const SbArtLayout artLayout = SbUiCursesArtLayout (renderer, model, &artY, &artX);
 		const int nowX = artLayout.visible ? rightX + (int) artLayout.columns + 2 : rightX;
 		SbUiCursesNowPlaying (data, model, 6, nowX, nowPlayingHeight,
-				rightWidth - (nowX - rightX));
+				rightWidth - (nowX - rightX), renderer->settings->lyricsDisplay);
 		if (spectrumRows > 0) SbUiCursesSpectrum (data, model, spectrumY + 2,
 				rightX, spectrumRows, rightWidth);
 		if (upcomingRows > 0) SbUiCursesUpcoming (data, model, upcomingY + 1,
@@ -1454,7 +1502,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		SbUiCursesNowPlaying (data, model, 6, split + 2, statusY - 7,
-				cols - split - 4);
+				cols - split - 4, renderer->settings->lyricsDisplay);
 	} else {
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_SECTION,
 				data->focus == SB_TUI_FOCUS_STATIONS ? A_BOLD : 0);
@@ -1469,7 +1517,8 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		SbUiCursesPut (dividerY + 1, 2, cols - 4, "NOW PLAYING");
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_SECTION, A_BOLD);
 		SbUiCursesNowPlaying (data, model, dividerY + 2, 2,
-				statusY - dividerY - 3, cols - 4);
+				statusY - dividerY - 3, cols - 4,
+				renderer->settings->lyricsDisplay);
 	}
 
 	if (data->helpVisible && data->textModalContent == NULL) {
@@ -2134,6 +2183,8 @@ static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 		}
 		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
 		SbUiModalScrollClamp (&data->textModalScroll, lineCount, visible);
+		const SbLyricContext modalLyric = SbSyncedLyricsLookup (
+				&model->syncedLyrics, (int64_t) model->elapsed * 1000);
 		size_t lyricsHeaderEnd = 0;
 		if (strcmp (data->textModalTitle, "LYRICS") == 0) {
 			while (lyricsHeaderEnd < lineCount && lines[lyricsHeaderEnd][0] != '\0')
@@ -2190,9 +2241,16 @@ static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
 				}
 			} else {
-				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
+				const bool currentLyric = strcmp (data->textModalTitle, "LYRICS") == 0 &&
+						modalLyric.current != NULL &&
+						strcmp (line, modalLyric.current->text) == 0;
+				SbUiCursesWAttrOn (window, data, currentLyric ?
+						SB_TUI_COLOR_TRACK : SB_TUI_COLOR_PRIMARY,
+						currentLyric ? A_BOLD : 0);
 				SbUiCursesWPut (window, y, 2, lineWidth, line);
-				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
+				SbUiCursesWAttrOff (window, data, currentLyric ?
+						SB_TUI_COLOR_TRACK : SB_TUI_COLOR_PRIMARY,
+						currentLyric ? A_BOLD : 0);
 			}
 			wattrset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
 		}
@@ -2329,6 +2387,8 @@ static void SbUiCursesLocalNotice (SbUiCursesData *data, const char *notice) {
 	snprintf (data->status, sizeof (data->status), "%s", notice);
 	data->statusSeverity = SB_UI_NOTICE_INFO;
 	data->statusExpires = time (NULL) + 4;
+	SbLyricCursorReset (&data->lyricCursor);
+	data->loggedLyricIndex = SIZE_MAX;
 	pthread_mutex_unlock (&data->statusLock);
 }
 

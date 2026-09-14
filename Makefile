@@ -39,6 +39,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/credential.c \
 		${PIANOBAR_DIR}/debug.c \
 		${PIANOBAR_DIR}/enrichment.c \
+		${PIANOBAR_DIR}/lyrics_sync.c \
 		${PIANOBAR_DIR}/enrichment_cache.c \
 		${PIANOBAR_DIR}/album_art.c \
 		${PIANOBAR_DIR}/art_renderer.c \
@@ -202,7 +203,7 @@ clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
 		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
-		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
+		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
 
@@ -228,6 +229,10 @@ art-renderer-test: tests/art_renderer_test.c src/art_renderer.c src/art_renderer
 
 tui-presentation-test: tests/tui_presentation_test.c src/tui_presentation.c src/tui_presentation.h
 	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/tui_presentation_test.c src/tui_presentation.c
+	./$@$(EXEEXT)
+
+lyrics-sync-test: tests/lyrics_sync_test.c src/lyrics_sync.c src/lyrics_sync.h
+	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/lyrics_sync_test.c src/lyrics_sync.c
 	./$@$(EXEEXT)
 
 playlist-prefetch-test: tests/playlist_prefetch_test.c src/playlist_prefetch.h ${LIBPIANO_SRC}

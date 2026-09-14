@@ -108,8 +108,8 @@ static const char *jsonString (json_object *obj, const char *key) {
 
 static char *metadataSerialize(const SbMetadataResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"status",json_object_new_int(r->status));json_object_object_add(o,"artist",json_object_new_string(r->artist));json_object_object_add(o,"title",json_object_new_string(r->title));json_object_object_add(o,"release",json_object_new_string(r->release));json_object_object_add(o,"release_date",json_object_new_string(r->releaseDate));json_object_object_add(o,"artist_id",json_object_new_string(r->artistId));json_object_object_add(o,"recording_id",json_object_new_string(r->recordingId));json_object_object_add(o,"release_id",json_object_new_string(r->releaseId));json_object_object_add(o,"release_group_id",json_object_new_string(r->releaseGroupId));json_object_object_add(o,"confidence",json_object_new_double(r->confidence));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
 static bool metadataDeserialize(const char*s,SbMetadataResult*r){json_object*o=json_tokener_parse(s),*v=NULL;if(!o)return false;SbMetadataResultInit(r);copyText(r->provider,sizeof(r->provider),"MusicBrainz");json_object_object_get_ex(o,"status",&v);r->status=(SbLookupStatus)json_object_get_int(v);copyText(r->artist,sizeof(r->artist),jsonString(o,"artist"));copyText(r->title,sizeof(r->title),jsonString(o,"title"));copyText(r->release,sizeof(r->release),jsonString(o,"release"));copyText(r->releaseDate,sizeof(r->releaseDate),jsonString(o,"release_date"));copyText(r->artistId,sizeof(r->artistId),jsonString(o,"artist_id"));copyText(r->recordingId,sizeof(r->recordingId),jsonString(o,"recording_id"));copyText(r->releaseId,sizeof(r->releaseId),jsonString(o,"release_id"));copyText(r->releaseGroupId,sizeof(r->releaseGroupId),jsonString(o,"release_group_id"));if(json_object_object_get_ex(o,"confidence",&v))r->confidence=json_object_get_double(v);json_object_put(o);return SbCacheStatePersistent(r->status);}
-static char *lyricsSerialize(const SbLyricsResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"status",json_object_new_int(r->status));json_object_object_add(o,"artist",json_object_new_string(r->artist));json_object_object_add(o,"title",json_object_new_string(r->title));json_object_object_add(o,"album",json_object_new_string(r->album));json_object_object_add(o,"record_id",json_object_new_string(r->recordId));json_object_object_add(o,"instrumental",json_object_new_boolean(r->instrumental));json_object_object_add(o,"plain",json_object_new_string(r->plainLyrics?r->plainLyrics:""));json_object_object_add(o,"synced",json_object_new_string(r->syncedLyrics?r->syncedLyrics:""));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
-static bool lyricsDeserialize(const char*s,SbLyricsResult*r){json_object*o=json_tokener_parse(s),*v=NULL;if(!o)return false;SbLyricsResultInit(r);copyText(r->provider,sizeof(r->provider),"LRCLIB");json_object_object_get_ex(o,"status",&v);r->status=(SbLookupStatus)json_object_get_int(v);copyText(r->artist,sizeof(r->artist),jsonString(o,"artist"));copyText(r->title,sizeof(r->title),jsonString(o,"title"));copyText(r->album,sizeof(r->album),jsonString(o,"album"));copyText(r->recordId,sizeof(r->recordId),jsonString(o,"record_id"));if(json_object_object_get_ex(o,"instrumental",&v))r->instrumental=json_object_get_boolean(v);const char*p=jsonString(o,"plain"),*y=jsonString(o,"synced");if(*p)r->plainLyrics=strdup(p);if(*y)r->syncedLyrics=strdup(y);json_object_put(o);return SbCacheStatePersistent(r->status);}
+static char *lyricsSerialize(const SbLyricsResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"status",json_object_new_int(r->status));json_object_object_add(o,"artist",json_object_new_string(r->artist));json_object_object_add(o,"title",json_object_new_string(r->title));json_object_object_add(o,"album",json_object_new_string(r->album));json_object_object_add(o,"record_id",json_object_new_string(r->recordId));json_object_object_add(o,"duration",json_object_new_double(r->duration));json_object_object_add(o,"instrumental",json_object_new_boolean(r->instrumental));json_object_object_add(o,"plain",json_object_new_string(r->plainLyrics?r->plainLyrics:""));json_object_object_add(o,"synced",json_object_new_string(r->syncedLyrics?r->syncedLyrics:""));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
+static bool lyricsDeserialize(const char*s,SbLyricsResult*r){json_object*o=json_tokener_parse(s),*v=NULL;if(!o)return false;SbLyricsResultInit(r);copyText(r->provider,sizeof(r->provider),"LRCLIB");json_object_object_get_ex(o,"status",&v);r->status=(SbLookupStatus)json_object_get_int(v);copyText(r->artist,sizeof(r->artist),jsonString(o,"artist"));copyText(r->title,sizeof(r->title),jsonString(o,"title"));copyText(r->album,sizeof(r->album),jsonString(o,"album"));copyText(r->recordId,sizeof(r->recordId),jsonString(o,"record_id"));if(json_object_object_get_ex(o,"duration",&v))r->duration=json_object_get_double(v);if(json_object_object_get_ex(o,"instrumental",&v))r->instrumental=json_object_get_boolean(v);const char*p=jsonString(o,"plain"),*y=jsonString(o,"synced");if(*p)r->plainLyrics=strdup(p);if(*y)r->syncedLyrics=strdup(y);json_object_put(o);return SbCacheStatePersistent(r->status);}
 static char *artSerialize(const SbAlbumArtResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"release_id",json_object_new_string(r->releaseId));json_object_object_add(o,"url",json_object_new_string(r->sourceUrl));json_object_object_add(o,"mime",json_object_new_string(r->mimeType));json_object_object_add(o,"path",json_object_new_string(r->cachedPath));json_object_object_add(o,"width",json_object_new_int(r->width));json_object_object_add(o,"height",json_object_new_int(r->height));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
 static bool artDeserialize(const SbCacheEntry*e,const char*release,SbAlbumArtResult*r){json_object*o=json_tokener_parse(e->payload),*v=NULL;if(!o)return false;SbAlbumArtResultInit(r);r->status=e->state;const char*stored=jsonString(o,"release_id");copyText(r->releaseId,sizeof(r->releaseId),*stored?stored:release);copyText(r->sourceUrl,sizeof(r->sourceUrl),jsonString(o,"url"));copyText(r->mimeType,sizeof(r->mimeType),jsonString(o,"mime"));copyText(r->cachedPath,sizeof(r->cachedPath),jsonString(o,"path"));if(json_object_object_get_ex(o,"width",&v))r->width=json_object_get_int(v);if(json_object_object_get_ex(o,"height",&v))r->height=json_object_get_int(v);json_object_put(o);if(r->status==SB_LOOKUP_AVAILABLE){FILE*f=fopen(r->cachedPath,"rb");if(!f)return false;fclose(f);}return true;}
 
@@ -127,6 +127,9 @@ bool SbLrclibParse (const char *json, SbLyricsResult *result) {
 	copyText (result->artist, sizeof (result->artist), jsonString (root, "artistName"));
 	copyText (result->title, sizeof (result->title), jsonString (root, "trackName"));
 	copyText (result->album, sizeof (result->album), jsonString (root, "albumName"));
+	json_object *duration = NULL;
+	if (json_object_object_get_ex (root, "duration", &duration))
+		result->duration = json_object_get_double (duration);
 	if (json_object_object_get_ex (root, "instrumental", &instrumental))
 		result->instrumental = json_object_get_boolean (instrumental);
 	const char *plain = jsonString (root, "plainLyrics");
@@ -687,9 +690,23 @@ static size_t lrclibHeader (char *ptr, size_t size, size_t count, void *userdata
 	return length;
 }
 
-static bool lrclibRequest (const SbTrackIdentity *id, const char *artistName,
+bool SbLrclibTransientFailure (const long status, const int curlCode) {
+	return curlCode != CURLE_OK || status == 429 || status == 500 ||
+			status == 502 || status == 503 || status == 504;
+}
+
+bool SbLrclibShouldRetry (const long status, const int curlCode,
+		const unsigned int attempt) {
+	return attempt < 2 && SbLrclibTransientFailure (status, curlCode);
+}
+
+unsigned int SbLrclibRetryDelayMs (const long retryAfter) {
+	return (unsigned int) (retryAfter > 0 ? (retryAfter > 5 ? 5 : retryAfter) : 1) * 1000;
+}
+
+static bool lrclibRequestOnce (const SbTrackIdentity *id, const char *artistName,
 		const char *title, const bool constrained, const char *variant,
-		const unsigned int stepNumber, SbLyricsResult *result, long *retryAfter,
+		const unsigned int attempt, SbLyricsResult *result, long *retryAfter,
 		SbLrclibLookupTrace *trace) {
 	CURL *curl = curl_easy_init (); SbHttpBuffer body = {NULL, 0};
 	SbLrclibHeaders headers = {0};
@@ -723,7 +740,7 @@ static bool lrclibRequest (const SbTrackIdentity *id, const char *artistName,
 	curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &status); curl_easy_cleanup (curl);
 	trace->attempts++; trace->httpStatus = status; trace->curlCode = code;
 	enrichmentDebugPrint ("lyrics provider=lrclib attempt=%u step=%s endpoint=/api/get lookup_artist=\"%s\" lookup_title=\"%s\" album_included=%s duration_included=%s http=%ld network_error=\"%s\"\n",
-			stepNumber, variant, artistName, title, constrained && id->album[0] ? "yes" : "no",
+			attempt, variant, artistName, title, constrained && id->album[0] ? "yes" : "no",
 			constrained && id->duration > 0 && id->duration <= 3600 ? "yes" : "no",
 			status, code == CURLE_OK ? "none" : curl_easy_strerror (code));
 	if (retryAfter != NULL) *retryAfter = headers.retryAfter;
@@ -749,7 +766,8 @@ static bool lrclibRequest (const SbTrackIdentity *id, const char *artistName,
 	free (body.data); SbLyricsResultInit (result);
 	copyText (result->provider, sizeof (result->provider), "LRCLIB");
 	if (code == CURLE_OK && status == 404) { result->status = SB_LOOKUP_NO_MATCH; return false; }
-	result->status = SB_LOOKUP_ERROR;
+	result->status = SbLrclibTransientFailure (status, code) ?
+			SB_LOOKUP_UNAVAILABLE : SB_LOOKUP_ERROR;
 	copyText (result->error, sizeof (result->error), "LRCLIB request failed"); return false;
 failed:
 	if (curl != NULL) curl_easy_cleanup (curl);
@@ -758,7 +776,24 @@ failed:
 	copyText (result->error, sizeof (result->error), "LRCLIB request failed"); return false;
 }
 
-static bool lrclibSearchRequest (const SbTrackIdentity *id, const char *artistName,
+static bool lrclibRequest (const SbTrackIdentity *id, const char *artistName,
+		const char *title, const bool constrained, const char *variant,
+		SbLyricsResult *result, SbLrclibLookupTrace *trace) {
+	long retryAfter = 0;
+	for (unsigned int attempt = 1; attempt <= 2; attempt++) {
+		const bool found = lrclibRequestOnce (id, artistName, title, constrained,
+				variant, attempt, result, &retryAfter, trace);
+		if (found || !SbLrclibShouldRetry (trace->httpStatus,
+				trace->curlCode, attempt)) return found;
+		const unsigned int delay = SbLrclibRetryDelayMs (retryAfter);
+		enrichmentDebugPrint ("lyrics provider=lrclib retry delay_ms=%u\n", delay);
+		SbPlatformSleepMs (delay);
+		SbLyricsResultDestroy (result);
+	}
+	return false;
+}
+
+static bool lrclibSearchRequestOnce (const SbTrackIdentity *id, const char *artistName,
 		const char *title, const unsigned int stepNumber, SbLyricsResult *result,
 		long *retryAfter, SbLrclibLookupTrace *trace) {
 	CURL *curl = curl_easy_init (); SbHttpBuffer body = {NULL, 0};
@@ -800,18 +835,36 @@ failed:
 	if (curl != NULL) curl_easy_cleanup (curl);
 	free (body.data); SbLyricsResultInit (result);
 	copyText (result->provider, sizeof (result->provider), "LRCLIB");
-	result->status = SB_LOOKUP_ERROR;
+	result->status = SbLrclibTransientFailure (status, code) ?
+			SB_LOOKUP_UNAVAILABLE : SB_LOOKUP_ERROR;
 	copyText (result->error, sizeof (result->error), "LRCLIB search failed");
+	return false;
+}
+
+static bool lrclibSearchRequest (const SbTrackIdentity *id,
+		const char *artistName, const char *title, SbLyricsResult *result,
+		SbLrclibLookupTrace *trace) {
+	long retryAfter = 0;
+	for (unsigned int attempt = 1; attempt <= 2; attempt++) {
+		const bool found = lrclibSearchRequestOnce (id, artistName, title,
+				attempt, result, &retryAfter, trace);
+		if (found || !SbLrclibShouldRetry (trace->httpStatus,
+				trace->curlCode, attempt)) return found;
+		const unsigned int delay = SbLrclibRetryDelayMs (retryAfter);
+		enrichmentDebugPrint ("lyrics provider=lrclib retry delay_ms=%u\n", delay);
+		SbPlatformSleepMs (delay);
+		SbLyricsResultDestroy (result);
+	}
 	return false;
 }
 
 static bool lrclibLookup (const SbTrackIdentity *id, SbLyricsResult *result,
 		void *unused) {
-	(void) unused; long retryAfter = 0; SbLrclibLookupTrace trace = {0};
+	(void) unused; SbLrclibLookupTrace trace = {0};
 	enrichmentDebugPrint ("lyrics lookup provider=lrclib original_artist=\"%s\" original_title=\"%s\" original_album=\"%s\" original_duration=%u\n",
 			id->artist, id->title, id->album, id->duration);
 	bool found = lrclibRequest (id, id->artist, id->title, true, "exact",
-			1, result, &retryAfter, &trace);
+			result, &trace);
 	char title[SB_ENRICH_TEXT_MAX]; const bool cleanedTitle =
 			SbLyricsFallbackTitle (id->title, title, sizeof (title));
 	char artist[SB_ENRICH_TEXT_MAX]; const bool baseArtist =
@@ -820,7 +873,7 @@ static bool lrclibLookup (const SbTrackIdentity *id, SbLyricsResult *result,
 		if (cleanedTitle) {
 			SbPlatformSleepMs (300);
 			found = lrclibRequest (id, id->artist, title, true,
-					"clean-title", 2, result, &retryAfter, &trace);
+					"clean-title", result, &trace);
 		}
 	}
 	if (!found && result->status == SB_LOOKUP_NO_MATCH) {
@@ -828,23 +881,18 @@ static bool lrclibLookup (const SbTrackIdentity *id, SbLyricsResult *result,
 		found = lrclibRequest (id, baseArtist ? artist : id->artist,
 				cleanedTitle ? title : id->title, false,
 				baseArtist ? "base-artist-unconstrained" : "unconstrained",
-				cleanedTitle ? 3 : 2, result, &retryAfter, &trace);
+				result, &trace);
 	}
 	if (!found && result->status == SB_LOOKUP_NO_MATCH) {
 		SbPlatformSleepMs (300);
 		found = lrclibSearchRequest (id, baseArtist ? artist : id->artist,
-				cleanedTitle ? title : id->title, trace.attempts + 1,
-				result, &retryAfter, &trace);
+				cleanedTitle ? title : id->title, result, &trace);
 	}
-	/* A bounded pause prevents another queued request from ignoring a 429,
-	 * without creating a retry loop or blocking playback/main UI. */
-	if (result->status == SB_LOOKUP_ERROR && retryAfter > 0)
-		SbPlatformSleepMs ((unsigned int) (retryAfter > 60 ? 60 : retryAfter) * 1000);
 	if (found) enrichmentDebugPrint ("lyrics lookup result=available step=%s score=%.3f\n",
 			trace.successfulStep, trace.score);
 	else if (result->status == SB_LOOKUP_NO_MATCH)
 		enrichmentDebugPrint ("lyrics lookup result=no_match attempts=%u\n", trace.attempts);
-	else enrichmentDebugPrint ("lyrics lookup result=error provider=lrclib http=%ld network_error=\"%s\"\n",
+	else enrichmentDebugPrint ("lyrics lookup result=temporarily_unavailable provider=lrclib http=%ld network_error=\"%s\"\n",
 			trace.httpStatus, trace.curlCode == CURLE_OK ? "none" :
 			curl_easy_strerror (trace.curlCode));
 	return found;

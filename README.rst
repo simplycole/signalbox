@@ -47,6 +47,8 @@ Highlights
   and numeric jump
 - Now-playing metadata, adaptive progress, signed-dB volume, upcoming queue,
   and full in-memory session history
+- Synced LRCLIB lyrics with an adaptive previous/current/next strip and
+  current-line highlighting in the full Lyrics view
 - Native TUI flows for station creation, rename/delete, QuickMix, genres,
   seeds, feedback, bookmarks, and station modes
 - Configurable bindings with an in-app, responsive, scrollable HELP overlay
@@ -97,6 +99,10 @@ are reflected there automatically.
 The inherited action keys can be remapped in the config. ``V`` is available
 for the visualizer only when it does not conflict with a configured action;
 lowercase ``v`` retains its pianobar action.
+
+Set ``lyrics_display = three-line`` (the default), ``line``, or ``off`` in
+the config to control inline synced lyrics. The full Lyrics view remains
+available when the inline display is off or only plain lyrics are available.
 
 Build and run
 -------------

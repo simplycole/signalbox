@@ -249,6 +249,7 @@ void BarSettingsRead (BarSettings_t *settings) {
 	settings->sampleRate = 0; /* default to stream sample rate */
 	settings->visualizerSpectrum = true;
 	settings->albumArtMode = SB_ALBUM_ART_AUTO;
+	settings->lyricsDisplay = SB_LYRICS_DISPLAY_THREE_LINE;
 
 	settings->msgFormat[MSG_NONE].prefix = NULL;
 	settings->msgFormat[MSG_NONE].postfix = NULL;
@@ -486,6 +487,13 @@ void BarSettingsRead (BarSettings_t *settings) {
 				else if (streq (val, "off")) settings->albumArtMode = SB_ALBUM_ART_OFF;
 				else BarUiMsg (settings, MSG_INFO,
 						"Unknown album_art '%s' at %s:%zu; keeping current setting\n",
+						val, path, lineNum);
+			} else if (streq ("lyrics_display", key)) {
+				if (streq (val, "off")) settings->lyricsDisplay = SB_LYRICS_DISPLAY_OFF;
+				else if (streq (val, "line")) settings->lyricsDisplay = SB_LYRICS_DISPLAY_LINE;
+				else if (streq (val, "three-line")) settings->lyricsDisplay = SB_LYRICS_DISPLAY_THREE_LINE;
+				else BarUiMsg (settings, MSG_INFO,
+						"Unknown lyrics_display '%s' at %s:%zu; keeping current setting\n",
 						val, path, lineNum);
 			} else if (strncmp (formatMsgPrefix, key,
 					strlen (formatMsgPrefix)) == 0) {

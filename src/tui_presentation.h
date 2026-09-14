@@ -32,6 +32,9 @@ bool SbTuiPresentationSplitField (const char *line, size_t *labelLength,
 		const char **value, SbTuiTextRole *valueRole);
 bool SbTuiPresentationLyricsHeader (char *out, size_t size,
 		const char *artist, const char *title, const char *album);
+const char *SbTuiPresentationLyricsState (int status, bool hasPlainLyrics,
+		size_t syncedLineCount);
+bool SbTuiPresentationInlineLyrics (int displayMode, size_t syncedLineCount);
 bool SbTuiPresentationStatus (char *out, size_t size, const char *status,
 		int artState, size_t availableWidth);
 int SbTuiArtStatusUpdate (SbTuiArtStatus *, uint64_t generation, int state,

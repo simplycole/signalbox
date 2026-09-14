@@ -26,6 +26,19 @@ int main (void) {
 	assert (strcmp (text, "Deftones — Entombed\nKoi No Yokan\n\n") == 0);
 	assert (SbTuiPresentationLyricsHeader (text, sizeof (text), "Artist", "Title", ""));
 	assert (strcmp (text, "Artist — Title\n\n") == 0);
+	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_AVAILABLE,
+			true, 0), "Plain") == 0);
+	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_AVAILABLE,
+			true, 22), "Synced") == 0);
+	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_INSTRUMENTAL,
+			false, 0), "Instrumental") == 0);
+	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_NO_MATCH,
+			false, 0), "No match") == 0);
+	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_ERROR,
+			false, 0), "Temporarily unavailable") == 0);
+	assert (!SbTuiPresentationInlineLyrics (2, 0)); /* plain stays out of inline */
+	assert (SbTuiPresentationInlineLyrics (2, 22)); /* synced renders inline */
+	assert (!SbTuiPresentationInlineLyrics (0, 22)); /* display=off */
 	assert (SbTuiPresentationStatus (text, sizeof (text), "Ready", SB_LOOKUP_LOADING, 24));
 	assert (strcmp (text, "Ready    Art: Loading") == 0);
 	assert (SbTuiPresentationStatus (text, sizeof (text), "Ready", SB_LOOKUP_LOADING, 18));

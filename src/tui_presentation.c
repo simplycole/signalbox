@@ -53,6 +53,25 @@ bool SbTuiPresentationLyricsHeader (char *out, const size_t size,
 	return written >= 0 && (size_t) written < size;
 }
 
+const char *SbTuiPresentationLyricsState (const int status,
+		const bool hasPlainLyrics, const size_t syncedLineCount) {
+	if (status == SB_LOOKUP_INSTRUMENTAL) return "Instrumental";
+	if (status == SB_LOOKUP_NO_MATCH) return "No match";
+	if (status == SB_LOOKUP_ERROR || status == SB_LOOKUP_UNAVAILABLE)
+		return "Temporarily unavailable";
+	if (status == SB_LOOKUP_LOADING) return "Loading";
+	if (status == SB_LOOKUP_AVAILABLE) {
+		if (syncedLineCount > 0) return "Synced";
+		if (hasPlainLyrics) return "Plain";
+	}
+	return "Unavailable";
+}
+
+bool SbTuiPresentationInlineLyrics (const int displayMode,
+		const size_t syncedLineCount) {
+	return displayMode != 0 && syncedLineCount > 0;
+}
+
 bool SbTuiPresentationStatus (char *out, const size_t size, const char *status,
 		const int artState, const size_t availableWidth) {
 	if (out == NULL || size == 0) return false;

@@ -76,6 +76,8 @@ typedef enum {
 } BarStationSorting_t;
 
 typedef enum { SB_ALBUM_ART_AUTO = 0, SB_ALBUM_ART_PIXEL, SB_ALBUM_ART_OFF } SbAlbumArtMode;
+typedef enum { SB_LYRICS_DISPLAY_OFF = 0, SB_LYRICS_DISPLAY_LINE,
+	SB_LYRICS_DISPLAY_THREE_LINE } SbLyricsDisplay;
 
 typedef struct {
 	char *prefix;
@@ -111,6 +113,7 @@ typedef struct {
 	bool passwordFromConfig;
 	bool visualizerSpectrum;
 	SbAlbumArtMode albumArtMode;
+	SbLyricsDisplay lyricsDisplay;
 	char keys[BAR_KS_COUNT];
 	int sampleRate;
 	BarMsgFormatStr_t msgFormat[MSG_COUNT];

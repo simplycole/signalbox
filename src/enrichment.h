@@ -27,6 +27,9 @@ typedef enum {
 
 SbLookupStatus SbMusicBrainzHttpStatus (long, int);
 bool SbMusicBrainzShouldRetry (long, int, unsigned int);
+bool SbLrclibTransientFailure (long, int);
+bool SbLrclibShouldRetry (long, int, unsigned int);
+unsigned int SbLrclibRetryDelayMs (long);
 
 typedef struct {
 	SbLookupStatus status;
@@ -42,6 +45,7 @@ typedef struct {
 	SbLookupStatus status;
 	char provider[32], artist[SB_ENRICH_TEXT_MAX], title[SB_ENRICH_TEXT_MAX];
 	char album[SB_ENRICH_TEXT_MAX], recordId[SB_ENRICH_ID_MAX];
+	double duration;
 	bool instrumental;
 	char *plainLyrics, *syncedLyrics;
 	char error[SB_ENRICH_ERROR_MAX];
