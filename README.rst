@@ -42,6 +42,7 @@ Highlights
 - Responsive ``ncursesw`` interface with phosphor, amber, neutral, and
   monochrome themes
 - Real PCM-driven 8/12-band spectrum analyzer with smoothing and peak hold
+- Responsive cached album art using ANSI half blocks with truecolor/256-color fallback
 - Station filtering, A-Z/original/favorites-first sorting, local favorites,
   and numeric jump
 - Now-playing metadata, adaptive progress, signed-dB volume, upcoming queue,
@@ -118,7 +119,7 @@ Debian / Ubuntu
 .. code-block:: console
 
    sudo apt-get install build-essential libao-dev libavcodec-dev \
-     libavfilter-dev libavformat-dev libavutil-dev libcurl4-gnutls-dev \
+     libavfilter-dev libavformat-dev libavutil-dev libswscale-dev libcurl4-gnutls-dev \
      libgcrypt20-dev libjson-c-dev libncursesw5-dev libsecret-1-dev pkg-config
    make
 

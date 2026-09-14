@@ -200,6 +200,13 @@ Stream decoded, raw audio samples to a pipe instead of the default audio device.
 to enforce a fixed sample rate.
 
 .TP
+.B album_art = {auto, pixel, off}
+Display cached JPEG, PNG, or WebP cover art in the TUI with ANSI half blocks.
+The default is auto. Art is hidden when the terminal lacks color support or the
+Now Playing panel is too small; pixel requests the same renderer but still falls
+back safely. Native terminal image protocols are not used.
+
+.TP
 .B autoselect = {1,0}
 Auto-select last remaining item of filtered list. Currently enabled for station
 selection only.

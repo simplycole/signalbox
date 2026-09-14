@@ -64,6 +64,30 @@ THE SOFTWARE.
 /* default sample format */
 const enum AVSampleFormat avformat = AV_SAMPLE_FMT_S16;
 
+static bool avLogTui;
+
+static void BarPlayerAvLog (void *context, int level, const char *format,
+		va_list args) {
+	if (!avLogTui) {
+		av_log_default_callback (context, level, format, args);
+		return;
+	}
+	/* stderr is the curses terminal.  Debug diagnostics go only through the
+	 * dedicated TUI log; normal TUI runs discard libav chatter. */
+	if (tuiDebugEnable () && level <= AV_LOG_ERROR) {
+		char line[512]; int prefix = 1;
+		av_log_format_line (context, level, format, args, line, sizeof (line),
+				&prefix);
+		tuiDebugPrint ("libav level=%d %s", level, line);
+	}
+}
+
+void BarPlayerConfigureAvLogging (const bool useTui) {
+	avLogTui = useTui;
+	av_log_set_level (AV_LOG_ERROR);
+	av_log_set_callback (BarPlayerAvLog);
+}
+
 static void printError (const BarSettings_t * const settings,
 		const char * const msg, int ret) {
 	char avmsg[128];
@@ -75,7 +99,7 @@ static void printError (const BarSettings_t * const settings,
  */
 void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 	ao_initialize ();
-	av_log_set_level (AV_LOG_FATAL);
+	/* Configured once startup has selected classic or curses rendering. */
 #ifdef HAVE_AV_REGISTER_ALL
 	av_register_all ();
 #endif

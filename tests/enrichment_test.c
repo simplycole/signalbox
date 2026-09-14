@@ -172,6 +172,36 @@ static void testBestMatch (void) {
 	assert (result.confidence == 1.0);
 }
 
+static void testAlbumAwareArtRelease (void) {
+	const char json[] = "{\"recordings\":[{\"id\":\"rec-death-cab\","
+		"\"title\":\"Here to Forever\",\"artist-credit\":[{\"name\":\"Death Cab For Cutie\","
+		"\"artist\":{\"id\":\"artist-1\"}}],\"releases\":["
+		"{\"id\":\"compilation\",\"title\":\"100 From the 20's - Rock\","
+		"\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Various Artists\"}],"
+		"\"release-group\":{\"id\":\"group-comp\",\"primary-type\":\"Album\","
+		"\"secondary-types\":[\"Compilation\"]}},"
+		"{\"id\":\"asphalt\",\"title\":\"Asphalt Meadows\",\"status\":\"Official\","
+		"\"artist-credit\":[{\"name\":\"Death Cab for Cutie\"}],"
+		"\"release-group\":{\"id\":\"group-asphalt\",\"primary-type\":\"Album\"}}]}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "Death Cab For Cutie", "Here to Forever",
+			"Asphalt Meadows", NULL, 0);
+	assert (SbMusicBrainzParse (json, &id, &result));
+	assert (strcmp (result.recordingId, "rec-death-cab") == 0);
+	assert (strcmp (result.releaseId, "asphalt") == 0);
+	assert (strcmp (result.releaseGroupId, "group-asphalt") == 0);
+
+	const char deluxe[] = "{\"releases\":[{\"id\":\"deluxe\","
+		"\"title\":\"From Under the Cork Tree (20th Anniversary Deluxe)\","
+		"\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Fall Out Boy\"}],"
+		"\"release-group\":{\"id\":\"cork\",\"primary-type\":\"Album\"}}]}";
+	SbTrackIdentitySet (&id, "Fall Out Boy", "Dance, Dance",
+			"From Under the Cork Tree", NULL, 0);
+	SbMetadataResultInit (&result);
+	assert (SbMusicBrainzSelectArtRelease (deluxe, &id, &result));
+	assert (strcmp (result.releaseId, "deluxe") == 0);
+}
+
 static void testMusicBrainzDateFormatting (void) {
 	char display[16];
 	assert (SbMusicBrainzFormatDate ("2020-04-03", display, sizeof (display)));
@@ -459,7 +489,7 @@ int main (void) {
 	testNormalization (); testRetainedModalScroll (); testRetainedModalScrollBounds ();
 	testCursesWheelStateMapping (); testMouseBitNames (); testUpcomingHeight ();
 	testMusicBrainzHttpStates ();
-	testCacheKey (); testBestMatch ();
+	testCacheKey (); testBestMatch (); testAlbumAwareArtRelease ();
 	testMusicBrainzDateFormatting ();
 	testErrorsAndNoMatch (); testStaleResult (); testLrclibPlainAndSynced ();
 	testLrclibSyncedOnlyAndInstrumental (); testLrclibErrorsAndFallback ();

@@ -6,6 +6,14 @@ components named below are design boundaries, not implemented modules.
 
 ## Metadata enrichment
 
+Cached encoded album art flows through the renderer-neutral FFmpeg decoder,
+bounded RGBA image, aspect-preserving bilinear resize, terminal color conversion,
+and an in-memory prepared-art cache. The curses renderer remains authoritative
+for layout and input; after its atomic screen update, the prepared cells are
+painted into the reserved Now Playing rectangle with standard ANSI color and
+Unicode half blocks. Cache identity includes path, target geometry, and color
+mode, so normal progress redraws do not decode or resize artwork.
+
 `src/enrichment.c` implements a provider-neutral enrichment boundary. A Pandora
 song is copied into a `SbTrackIdentity`; original display strings are retained
 while separately normalized artist/title values form a provider-tagged cache

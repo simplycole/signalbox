@@ -88,6 +88,9 @@ typedef struct {
 
 enum {PLAYER_RET_OK = 0, PLAYER_RET_HARDFAIL = 1, PLAYER_RET_SOFTFAIL = 2};
 
+/* Install before curses takes ownership of the terminal. */
+void BarPlayerConfigureAvLogging (bool);
+
 void *BarPlayerThread (void *data);
 void *BarAoPlayThread (void *data);
 void BarPlayerSetVolume (player_t * const player);

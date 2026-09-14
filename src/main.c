@@ -67,6 +67,7 @@ THE SOFTWARE.
 #include "debug.h"
 #include "playlist_prefetch.h"
 #include "terminal.h"
+#include "tui_presentation.h"
 #include "ui.h"
 #include "ui_act.h"
 #include "ui_dispatch.h"
@@ -106,7 +107,7 @@ static char *BarMainTrackInfoText (BarApp_t *app) {
 	BarMainAppendField (text, sizeof (text), "Rating",
 			song->rating == PIANO_RATE_LOVE ? "Loved" : song->rating == PIANO_RATE_BAN ? "Banned" : NULL);
 	strncat (text, "\n\nENRICHMENT", sizeof (text) - strlen (text) - 1);
-	BarMainAppendField (text, sizeof (text), "State", BarMainLookupState (m->status));
+	BarMainAppendField (text, sizeof (text), "Metadata", BarMainLookupState (m->status));
 	BarMainAppendField (text, sizeof (text), "Provider", m->provider);
 	if (m->status == SB_LOOKUP_AVAILABLE) {
 		char confidence[32]; snprintf (confidence, sizeof (confidence), "%.0f%%", m->confidence * 100.0);
@@ -118,6 +119,15 @@ static char *BarMainTrackInfoText (BarApp_t *app) {
 			BarMainAppendField (text, sizeof (text), "Release Date", releaseDate);
 		BarMainAppendField (text, sizeof (text), "Confidence", confidence);
 	}
+	strncat (text, "\n\nLYRICS", sizeof (text) - strlen (text) - 1);
+	BarMainAppendField (text, sizeof (text), "State",
+			BarMainLookupState (app->lyrics.status));
+	BarMainAppendField (text, sizeof (text), "Provider", app->lyrics.provider);
+	strncat (text, "\n\nALBUM ART", sizeof (text) - strlen (text) - 1);
+	BarMainAppendField (text, sizeof (text), "State",
+			app->settings.albumArtMode == SB_ALBUM_ART_OFF ? "Disabled" :
+			BarMainLookupState (app->albumArt.status));
+	BarMainAppendField (text, sizeof (text), "Provider", app->albumArt.provider);
 	return strdup (text);
 }
 
@@ -134,10 +144,13 @@ static char *BarMainLyricsText (BarApp_t *app) {
 	const char *title = lyrics->title[0] ? lyrics->title : app->trackIdentity.title;
 	const char *album = lyrics->album[0] ? lyrics->album : app->trackIdentity.album;
 	size_t needed = strlen (artist) + strlen (title) + strlen (album) +
-			strlen (body != NULL ? body : message) + 16;
+			strlen (body != NULL ? body : message) + 24;
 	char *text = malloc (needed);
-	if (text != NULL) snprintf (text, needed, "%s — %s%s%s\n\n%s", artist, title,
-			album[0] ? "\n" : "", album, body != NULL ? body : message);
+	if (text != NULL) {
+		if (!SbTuiPresentationLyricsHeader (text, needed, artist, title, album))
+			text[0] = '\0';
+		strncat (text, body != NULL ? body : message, needed - strlen (text) - 1);
+	}
 	free (body);
 	return text != NULL ? text : strdup ("Lyrics unavailable\nProvider error");
 }
@@ -591,6 +604,9 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 	snprintf (app->lyrics.provider, sizeof (app->lyrics.provider), "LRCLIB");
 	SbAlbumArtResultInit(&app->albumArt); app->albumArt.status=SB_LOOKUP_LOADING;
 	app->uiModel.artState=SB_LOOKUP_LOADING; app->uiModel.artCachedPath[0]='\0';
+	tuiDebugPrint ("art state=loading generation=%llu artist=\"%s\" title=\"%s\" album=\"%s\"\n",
+			(unsigned long long) app->enrichmentGeneration, curSong->artist,
+			curSong->title, curSong->album);
 	if (app->metadataResolver.started) SbMetadataResolverRequest (
 			&app->metadataResolver, &app->trackIdentity, app->enrichmentGeneration);
 	else { app->metadata.status = SB_LOOKUP_ERROR; snprintf (app->metadata.error,
@@ -742,6 +758,8 @@ static void BarMainLoop (BarApp_t *app) {
 			snprintf(app->uiModel.artProvider,sizeof(app->uiModel.artProvider),"%s",art.provider);
 			snprintf(app->uiModel.artCachedPath,sizeof(app->uiModel.artCachedPath),"%s",art.cachedPath);
 			app->uiModel.artWidth=art.width; app->uiModel.artHeight=art.height;
+			tuiDebugPrint("art state=%s generation=%llu path=%s\n",art.reason,
+					(unsigned long long)app->enrichmentGeneration,art.cachedPath);
 			SbUiRendererRender(&app->uiRenderer,&app->uiModel,SB_UI_RENDER_STATE);
 		}
 		/* song finished playing, clean up things/scrobble song */
@@ -906,6 +924,7 @@ int main (int argc, char **argv) {
 			(mode == MODE_AUTO && terminalSupportsTui);
 	app.tuiTheme = tuiTheme;
 	(void) tuiDebugInit (app.useTui);
+	BarPlayerConfigureAvLogging (app.useTui);
 
 #if defined(SIGNALBOX_PDCURSES_WINCON)
 	if (app.useTui)

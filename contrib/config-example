@@ -3,6 +3,8 @@
 # See manpage for a description of the config keys
 # TUI-only real PCM spectrum analyzer (spectrum or off)
 #visualizer = spectrum
+# Cached art in Now Playing: auto, pixel, or off
+#album_art = auto
 #
 # User
 #user = your@user.name

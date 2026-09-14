@@ -79,6 +79,9 @@ typedef struct {
 	uint64_t artResultGeneration;
 	SbTrackIdentity pendingIdentity;
 	char pendingArtReleaseId[SB_ENRICH_ID_MAX];
+	char pendingArtReleaseGroupId[SB_ENRICH_ID_MAX];
+	char pendingArtRecordingId[SB_ENRICH_ID_MAX];
+	SbTrackIdentity pendingArtIdentity;
 	uint64_t pendingArtGeneration;
 	SbMetadataResult completed;
 	SbLyricsResult completedLyrics;
@@ -108,6 +111,8 @@ bool SbLyricsDisplayText (const SbLyricsResult *, char **);
 bool SbLyricsFallbackTitle (const char *, char *, size_t);
 bool SbLyricsFallbackArtist (const char *, char *, size_t);
 bool SbMusicBrainzParse (const char *, const SbTrackIdentity *,
+		SbMetadataResult *);
+bool SbMusicBrainzSelectArtRelease (const char *, const SbTrackIdentity *,
 		SbMetadataResult *);
 bool SbMusicBrainzFormatDate (const char *, char *, size_t);
 void SbMetadataResolverInit (SbMetadataResolver *);

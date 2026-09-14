@@ -248,6 +248,7 @@ void BarSettingsRead (BarSettings_t *settings) {
 	assert (settings->fifo != NULL);
 	settings->sampleRate = 0; /* default to stream sample rate */
 	settings->visualizerSpectrum = true;
+	settings->albumArtMode = SB_ALBUM_ART_AUTO;
 
 	settings->msgFormat[MSG_NONE].prefix = NULL;
 	settings->msgFormat[MSG_NONE].postfix = NULL;
@@ -478,6 +479,13 @@ void BarSettingsRead (BarSettings_t *settings) {
 				else if (streq (val, "off")) settings->visualizerSpectrum = false;
 				else BarUiMsg (settings, MSG_INFO,
 						"Unknown visualizer '%s' at %s:%zu; keeping current setting\n",
+						val, path, lineNum);
+			} else if (streq ("album_art", key)) {
+				if (streq (val, "auto")) settings->albumArtMode = SB_ALBUM_ART_AUTO;
+				else if (streq (val, "pixel")) settings->albumArtMode = SB_ALBUM_ART_PIXEL;
+				else if (streq (val, "off")) settings->albumArtMode = SB_ALBUM_ART_OFF;
+				else BarUiMsg (settings, MSG_INFO,
+						"Unknown album_art '%s' at %s:%zu; keeping current setting\n",
 						val, path, lineNum);
 			} else if (strncmp (formatMsgPrefix, key,
 					strlen (formatMsgPrefix)) == 0) {

@@ -25,6 +25,8 @@
 #endif
 
 #include "debug.h"
+#include "art_renderer.h"
+#include "enrichment.h"
 #include "modal_state.h"
 #include "mouse_state.h"
 #include "upcoming_layout.h"
@@ -32,6 +34,7 @@
 #include "ui_dispatch.h"
 #include "ui_renderer.h"
 #include "platform.h"
+#include "tui_presentation.h"
 #ifdef _WIN32
 #include "terminal_input.h"
 #endif
@@ -110,6 +113,13 @@ typedef struct {
 	void *textModalData;
 	char *textModalOwnedText;
 	SbUiModalScrollState textModalScroll;
+	SbPreparedArt preparedArt;
+	SbTuiArtStatus artStatus;
+	SbArtColorMode artColorMode;
+	int preparedArtSetting;
+	bool artOverlayVisible;
+	char artOverlayPath[1024];
+	unsigned int artOverlayColumns, artOverlayRows;
 } SbUiCursesData;
 
 static void SbUiCursesDrawTextModal (const SbUiRenderer *,
@@ -898,6 +908,23 @@ static void SbUiCursesLabelValue (const SbUiCursesData *data, const int y,
 	}
 }
 
+static SbTuiColorRole SbUiCursesTextRole (const SbTuiTextRole role) {
+	switch (role) {
+		case SB_TUI_TEXT_LABEL: return SB_TUI_COLOR_MUTED;
+		case SB_TUI_TEXT_SECTION: return SB_TUI_COLOR_SECTION;
+		case SB_TUI_TEXT_ARTIST: return SB_TUI_COLOR_ARTIST;
+		case SB_TUI_TEXT_TRACK: return SB_TUI_COLOR_TRACK;
+		case SB_TUI_TEXT_ALBUM: return SB_TUI_COLOR_ALBUM;
+		case SB_TUI_TEXT_STATION: return SB_TUI_COLOR_STATION_ACTIVE;
+		case SB_TUI_TEXT_TIME: case SB_TUI_TEXT_CONFIDENCE:
+			return SB_TUI_COLOR_WARNING;
+		case SB_TUI_TEXT_STATE: case SB_TUI_TEXT_LYRICS_BODY:
+			return SB_TUI_COLOR_PRIMARY;
+		case SB_TUI_TEXT_PROVIDER: return SB_TUI_COLOR_STATUS;
+		default: return SB_TUI_COLOR_PRIMARY;
+	}
+}
+
 static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 		const SbUiModel *model, const int y,
 		const int x, const int height, const int width) {
@@ -945,6 +972,55 @@ static void SbUiCursesNowPlaying (const SbUiCursesData *data,
 			SbUiCursesAttrOff (data, ratingRole, 0);
 		}
 	}
+}
+
+static SbArtLayout SbUiCursesArtLayout (const SbUiRenderer *renderer,
+		const SbUiModel *model, int *y, int *x) {
+	int rows, cols; getmaxyx (stdscr, rows, cols); *y = 6; *x = 0;
+	if (cols < 80 || rows < 24 || model->artState != SB_LOOKUP_AVAILABLE ||
+			renderer->settings->albumArtMode == SB_ALBUM_ART_OFF) return (SbArtLayout) {0};
+	const int split = cols / 3, rightWidth = cols - (split + 2) - 2; *x = split + 2;
+	const unsigned int nowPlayingHeight = rows >= 45 ? 11 : 8;
+	return SbArtChooseLayout ((unsigned int) rightWidth, nowPlayingHeight, true);
+}
+
+static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model) {
+	SbUiCursesData *data = renderer->data; int y, x;
+	const SbArtLayout layout = SbUiCursesArtLayout (renderer, model, &y, &x);
+	if (!layout.visible || data->artColorMode == SB_ART_COLOR_NONE ||
+			data->helpVisible || data->textModalWindow != NULL) return;
+	const unsigned int builds = data->preparedArt.builds;
+	const unsigned int hits = data->preparedArt.hits;
+	if (!SbPreparedArtGet (&data->preparedArt, model->artCachedPath,
+			layout.columns, layout.rows, data->artColorMode)) {
+		if (data->preparedArt.builds != builds)
+			tuiDebugPrint ("art decode=error reason=decode_error path=%s\n",
+					model->artCachedPath);
+		return;
+	}
+	if (data->preparedArt.builds != builds)
+		tuiDebugPrint ("art prepare cache=miss art decode=ok source=%ux%u requested=%ux%u prepared=%ux%u color=%s\n",
+				data->preparedArt.sourceWidth, data->preparedArt.sourceHeight,
+				data->preparedArt.requestedColumns, data->preparedArt.requestedRows,
+				data->preparedArt.columns, data->preparedArt.rows,
+				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" : "xterm-256");
+	else if (data->preparedArt.hits != hits && data->preparedArt.hits == 1)
+		tuiDebugPrint ("art prepare cache=hit path=%s requested=%ux%u color=%s\n",
+				data->preparedArt.path, data->preparedArt.requestedColumns,
+				data->preparedArt.requestedRows,
+				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" : "xterm-256");
+	int savedY, savedX; getsyx (savedY, savedX); char sequence[96];
+	for (unsigned int row = 0; row < data->preparedArt.rows; row++) {
+		fprintf (stdout, "\033[%u;%uH", (unsigned int) y + row + 1,
+				(unsigned int) x + 1);
+		for (unsigned int col = 0; col < data->preparedArt.columns; col++) {
+			const size_t length = SbArtCellAnsi (&data->preparedArt.cells[
+					(size_t) row * data->preparedArt.columns + col],
+					data->artColorMode, sequence, sizeof (sequence));
+			if (length > 0) fwrite (sequence, 1, length, stdout);
+		}
+	}
+	fprintf (stdout, "\033[0m\033[%d;%dH", savedY + 1, savedX + 1); fflush (stdout);
 }
 
 static void SbUiCursesSpectrum (const SbUiCursesData *data,
@@ -1287,8 +1363,13 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		SbUiCursesAttrOn (data, data->statusSeverity == SB_UI_NOTICE_ERROR ?
 				SB_TUI_COLOR_ERROR : SB_TUI_COLOR_WARNING, A_BOLD);
 	}
-	SbUiCursesPut (statusY, 32, cols - 34,
-			data->status[0] != '\0' ? data->status : "Ready");
+	char statusText[320];
+	const int artStatus = SbTuiArtStatusUpdate (&data->artStatus,
+			model->songGeneration, model->artState, SbPlatformMonotonicMs ());
+	SbTuiPresentationStatus (statusText, sizeof (statusText),
+			data->status[0] != '\0' ? data->status : "Ready",
+			artStatus, cols > 34 ? (size_t) (cols - 34) : 0);
+	SbUiCursesPut (statusY, 32, cols - 34, statusText);
 	if (data->statusSeverity >= SB_UI_NOTICE_WARNING &&
 			data->status[0] != '\0') {
 		SbUiCursesAttrOff (data, data->statusSeverity == SB_UI_NOTICE_ERROR ?
@@ -1300,7 +1381,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (cols >= 80 && rows >= 24) {
 		const int split = cols / 3;
 		SbUiCursesVLine (stdscr, 3, split, statusY - 4);
-		const int nowPlayingHeight = 8;
+		const int nowPlayingHeight = rows >= 45 ? 11 : 8;
 		const size_t upcomingCount = SbUiCursesUpcomingCount (model);
 		const int rightWidth = cols - (split + 2) - 2;
 		const int spectrumRows = model->visualizerEnabled && rightWidth >= 38 ?
@@ -1351,7 +1432,11 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 				data->focus == SB_TUI_FOCUS_RECENT ? A_BOLD : 0);
 		SbUiCursesStations (data, model, 6, 2, statusY - 7, split - 3);
 		const int rightX = split + 2;
-		SbUiCursesNowPlaying (data, model, 6, rightX, nowPlayingHeight, rightWidth);
+		int artY, artX;
+		const SbArtLayout artLayout = SbUiCursesArtLayout (renderer, model, &artY, &artX);
+		const int nowX = artLayout.visible ? rightX + (int) artLayout.columns + 2 : rightX;
+		SbUiCursesNowPlaying (data, model, 6, nowX, nowPlayingHeight,
+				rightWidth - (nowX - rightX));
 		if (spectrumRows > 0) SbUiCursesSpectrum (data, model, spectrumY + 2,
 				rightX, spectrumRows, rightWidth);
 		if (upcomingRows > 0) SbUiCursesUpcoming (data, model, upcomingY + 1,
@@ -2026,7 +2111,12 @@ static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 		size_t lineCount = 0;
 		char *cursor = copy;
 		while (*cursor != '\0' && lineCount < lineCapacity) {
-			while (*cursor == ' ' || *cursor == '\n') cursor++;
+			if (*cursor == '\n') {
+				lines[lineCount++] = cursor;
+				*cursor++ = '\0';
+				continue;
+			}
+			while (*cursor == ' ') cursor++;
 			if (*cursor == '\0') break;
 			lines[lineCount++] = cursor;
 			char *end = cursor;
@@ -2044,10 +2134,68 @@ static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 		}
 		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
 		SbUiModalScrollClamp (&data->textModalScroll, lineCount, visible);
+		size_t lyricsHeaderEnd = 0;
+		if (strcmp (data->textModalTitle, "LYRICS") == 0) {
+			while (lyricsHeaderEnd < lineCount && lines[lyricsHeaderEnd][0] != '\0')
+				lyricsHeaderEnd++;
+		}
 		for (size_t i = 0; i < visible &&
-				data->textModalScroll.offset + i < lineCount; i++)
-			SbUiCursesWPut (window, 5 + (int) i, 2, lineWidth,
-					lines[data->textModalScroll.offset + i]);
+				data->textModalScroll.offset + i < lineCount; i++) {
+			const size_t index = data->textModalScroll.offset + i;
+			char *line = (char *) lines[index];
+			const int y = 5 + (int) i;
+			if (strcmp (data->textModalTitle, "TRACK INFO") == 0) {
+				size_t labelLength = 0; const char *value = NULL;
+				SbTuiTextRole textRole = SB_TUI_TEXT_PRIMARY;
+				if (SbTuiPresentationSplitField (line, &labelLength, &value, &textRole)) {
+					const SbTuiColorRole valueRole = SbUiCursesTextRole (textRole);
+					const int labelWidth = (int) labelLength + 2;
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+					wmove (window, y, 2); waddnstr (window, line,
+							(int) labelLength);
+					waddch (window, ':'); waddch (window, ' ');
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+					SbUiCursesWAttrOn (window, data, valueRole, 0);
+					SbUiCursesWPut (window, y, 2 + labelWidth,
+							lineWidth - labelWidth, value);
+					SbUiCursesWAttrOff (window, data, valueRole, 0);
+				} else if (SbTuiPresentationIsSection (line)) {
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SECTION, A_BOLD);
+					SbUiCursesWPut (window, y, 2, lineWidth, line);
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SECTION, A_BOLD);
+				} else {
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
+					SbUiCursesWPut (window, y, 2, lineWidth, line);
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
+				}
+			} else if (strcmp (data->textModalTitle, "LYRICS") == 0 &&
+					index < lyricsHeaderEnd) {
+				char *separator = strstr (line, " — ");
+				if (separator != NULL) {
+					*separator = '\0'; const int artistWidth = SbUiCursesTextWidth (line);
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+					SbUiCursesWPut (window, y, 2, lineWidth, line);
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+					SbUiCursesWPut (window, y, 2 + artistWidth, 3, " — ");
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+					SbUiCursesWPut (window, y, 5 + artistWidth,
+							lineWidth - artistWidth - 3, separator + 5);
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+					*separator = ' ';
+				} else {
+					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
+					SbUiCursesWPut (window, y, 2, lineWidth, line);
+					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
+				}
+			} else {
+				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
+				SbUiCursesWPut (window, y, 2, lineWidth, line);
+				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
+			}
+			wattrset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+		}
 	free (lines); free (copy);
 }
 
@@ -2149,7 +2297,31 @@ static void SbUiCursesInit (SbUiRenderer *renderer) {
 static void SbUiCursesRender (SbUiRenderer *renderer,
 		const SbUiModel *model, const SbUiRenderEvent event) {
 	(void) event;
+	SbUiCursesData *data = renderer->data; int artY, artX;
+	if (data->preparedArtSetting != (int) renderer->settings->albumArtMode) {
+		SbPreparedArtDestroy (&data->preparedArt);
+		data->preparedArtSetting = (int) renderer->settings->albumArtMode;
+	}
+	const SbArtLayout desired = SbUiCursesArtLayout (renderer, model, &artY, &artX);
+	const bool visible = desired.visible && data->artColorMode != SB_ART_COLOR_NONE;
+	if (visible != data->artOverlayVisible || (visible &&
+			(strcmp (data->artOverlayPath, model->artCachedPath) != 0 ||
+			data->artOverlayColumns != desired.columns || data->artOverlayRows != desired.rows)))
+		clearok (stdscr, TRUE);
+	if (visible != data->artOverlayVisible)
+		tuiDebugPrint ("art render=%s reason=%s target=%ux%u color=%s\n",
+				visible ? "enabled" : "hidden",
+				visible ? "available" : renderer->settings->albumArtMode == SB_ALBUM_ART_OFF ?
+				"disabled" : model->artState == SB_LOOKUP_AVAILABLE ? "layout" : "no_art",
+				desired.columns, desired.rows,
+				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" :
+				data->artColorMode == SB_ART_COLOR_256 ? "xterm-256" : "disabled");
+	data->artOverlayVisible = visible;
+	data->artOverlayColumns = desired.columns; data->artOverlayRows = desired.rows;
+	snprintf (data->artOverlayPath, sizeof (data->artOverlayPath), "%s",
+			visible ? model->artCachedPath : "");
 	SbUiCursesFrame (renderer, model);
+	SbUiCursesRenderArt (renderer, model);
 }
 
 static void SbUiCursesLocalNotice (SbUiCursesData *data, const char *notice) {
@@ -2345,6 +2517,9 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 			SB_TUI_INPUT_MODAL : data->helpVisible ?
 			SB_TUI_INPUT_HELP : SB_TUI_INPUT_MAIN, false,
 			timeoutMs);
+	if (data->artStatus.completionDeadlineMs != 0 &&
+			SbPlatformMonotonicMs () >= data->artStatus.completionDeadlineMs)
+		SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 	int key = input.key;
 	const SbUiCursesWheel wheelEvent = SbUiCursesWheelEvent (input,
 			data->textModalContent != NULL || data->helpVisible);
@@ -2662,6 +2837,7 @@ static void SbUiCursesMessage (SbUiRenderer *renderer, const BarUiMsg_t type,
 static void SbUiCursesShutdown (SbUiRenderer *renderer) {
 	SbUiCursesData * const data = renderer->data;
 	if (data != NULL) {
+		SbPreparedArtDestroy (&data->preparedArt);
 		tuiDebugPrint ("renderer_shutdown\n");
 #ifdef SIGNALBOX_PDCURSESMOD
 		SbUiCursesCloseKeyLog ();
@@ -2845,6 +3021,14 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 	if (has_colors () && theme != SB_TUI_THEME_MONO && getenv ("NO_COLOR") == NULL) {
 		data->colors = SbUiCursesInitPalette (data, theme);
 	}
+	const char *colorTerm = getenv ("COLORTERM"), *term = getenv ("TERM");
+#if defined(SIGNALBOX_PDCURSES_WINCON)
+	data->artColorMode = SB_ART_COLOR_NONE;
+#else
+	data->artColorMode = SbArtDetectColorMode (term, colorTerm,
+			getenv ("TERM_PROGRAM"), COLORS);
+#endif
+	data->preparedArtSetting = (int) settings->albumArtMode;
 	renderer->ops = &cursesOps;
 	renderer->settings = settings;
 	renderer->data = data;
@@ -2855,7 +3039,11 @@ bool SbUiRendererInitCurses (SbUiRenderer *renderer,
 		SbTerminalInputDiagnostic (SbUiCursesKeyLog);
 #endif
 #endif
-	tuiDebugPrint ("renderer_init theme=%d colors=%s\n", (int) theme,
-			data->colors ? "yes" : "no");
+	tuiDebugPrint ("renderer_init theme=%d colors=%s art_color_mode=%s term=%s colorterm=%s term_program=%s\n",
+			(int) theme, data->colors ? "yes" : "no",
+			data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" :
+			data->artColorMode == SB_ART_COLOR_256 ? "xterm-256" : "disabled",
+			term ? term : "", colorTerm ? colorTerm : "",
+			getenv ("TERM_PROGRAM") ? getenv ("TERM_PROGRAM") : "");
 	return true;
 }

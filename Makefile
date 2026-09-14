@@ -41,6 +41,8 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/enrichment.c \
 		${PIANOBAR_DIR}/enrichment_cache.c \
 		${PIANOBAR_DIR}/album_art.c \
+		${PIANOBAR_DIR}/art_renderer.c \
+		${PIANOBAR_DIR}/tui_presentation.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
 		${PIANOBAR_DIR}/spectrum.c \
@@ -74,6 +76,8 @@ LIBPIANO_INCLUDE:=${LIBPIANO_DIR}
 
 LIBAV_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libavcodec libavformat libavutil libavfilter)
 LIBAV_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libavcodec libavformat libavutil libavfilter)
+LIBSWSCALE_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libswscale)
+LIBSWSCALE_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libswscale)
 
 LIBCURL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libcurl)
 LIBCURL_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libcurl)
@@ -124,14 +128,14 @@ endif
 
 # combine all flags
 ALL_CFLAGS:=${CFLAGS} -I ${LIBPIANO_INCLUDE} \
-			${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} \
+			${LIBAV_CFLAGS} ${LIBSWSCALE_CFLAGS} ${LIBCURL_CFLAGS} \
 			${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} \
 			${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} ${PDCURSESMOD_CFLAGS} ${CREDENTIAL_CFLAGS}
 ifeq (${WINDOWS},1)
 	ALL_CFLAGS+=-DSIGNALBOX_PDCURSESMOD ${PDCURSESMOD_BACKEND_CFLAGS}
 endif
 ALL_LDFLAGS:=${LDFLAGS} -lpthread -lm \
-			${LIBAV_LDFLAGS} ${LIBCURL_LDFLAGS} \
+			${LIBAV_LDFLAGS} ${LIBSWSCALE_LDFLAGS} ${LIBCURL_LDFLAGS} \
 			${LIBGCRYPT_LDFLAGS} ${LIBJSONC_LDFLAGS} \
 			${LIBAO_LDFLAGS} ${NCURSESW_LDFLAGS} ${PDCURSESMOD_LDFLAGS} ${CREDENTIAL_LDFLAGS}
 ifeq (${WINDOWS},1)
@@ -198,7 +202,7 @@ clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
 		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
-			libpiano.a $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
+		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
 
@@ -216,6 +220,14 @@ enrichment-cache-test: tests/enrichment_cache_test.c src/enrichment_cache.c src/
 
 album-art-test: tests/album_art_test.c src/album_art.c src/album_art.h src/platform.c src/platform.h
 	${CC} -std=c99 -O2 -I src ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/album_art_test.c src/album_art.c src/platform.c ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	./$@$(EXEEXT)
+
+art-renderer-test: tests/art_renderer_test.c src/art_renderer.c src/art_renderer.h
+	${CC} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBSWSCALE_CFLAGS} -o $@$(EXEEXT) tests/art_renderer_test.c src/art_renderer.c ${LIBAV_LDFLAGS} ${LIBSWSCALE_LDFLAGS}
+	./$@$(EXEEXT)
+
+tui-presentation-test: tests/tui_presentation_test.c src/tui_presentation.c src/tui_presentation.h
+	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/tui_presentation_test.c src/tui_presentation.c
 	./$@$(EXEEXT)
 
 playlist-prefetch-test: tests/playlist_prefetch_test.c src/playlist_prefetch.h ${LIBPIANO_SRC}

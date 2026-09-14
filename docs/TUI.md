@@ -27,6 +27,18 @@ without a busy loop. `visualizer = spectrum|off`, `--visualizer spectrum|off`,
 and collision-checked local `V` control the feature. Classic mode disables it,
 and modal input loops naturally suspend spectrum redraws.
 
+## Album artwork
+
+The Now Playing panel can display cached JPEG, PNG, or WebP cover art using
+portable ANSI color and Unicode half blocks. Each terminal cell carries an
+upper foreground pixel and lower background pixel, preserving useful image
+detail despite tall terminal cells. `album_art = auto|pixel|off` controls the
+feature and defaults to `auto`. Truecolor is selected when `COLORTERM` advertises
+`truecolor` or `24bit`; otherwise an xterm 256-color cube/grayscale conversion is
+used when available. Small layouts, monochrome terminals, legacy Windows WinCon,
+loading art, and decode failures quietly retain the complete text-only layout.
+Native Kitty, iTerm2, and Sixel image protocols are not currently used.
+
 The HELP overlay groups navigation, playback, volume, stations, history,
 upcoming, and visualizer controls with blank rows between sections and between
 each semantic heading and its controls. It
