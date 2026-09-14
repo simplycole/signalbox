@@ -7,3 +7,5 @@ signalbox
 libpiano.a
 libpiano.so*
 waitress-test
+
+signalbox-tui-debug.log
