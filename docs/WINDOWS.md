@@ -161,7 +161,7 @@ Manager, or Named Pipe control.
 W1 adds a small `src/platform.c` boundary for UTF-8 configuration paths,
 monotonic time, local time, and shutdown notification. Windows configuration
 paths come from `FOLDERID_RoamingAppData` and resolve to
-`%APPDATA%\Signalbox\config`, `account`, and `favorites`; conversion to UTF-8
+`%APPDATA%\Signalbox\config` and `account`; conversion to UTF-8
 happens inside the platform module. Unix continues to use
 `$XDG_CONFIG_HOME/signalbox`.
 
@@ -207,7 +207,7 @@ exited 1. MinGW links `-luuid` alongside `-lshell32` and `-lole32` for the
 ## Executive summary
 
 Signalbox can become a native `signalbox.exe` without giving up the TUI,
-spectrum, station browser, history/upcoming, credentials, or classic mode. The
+spectrum, station pane, history/upcoming, credentials, or classic mode. The
 protocol, HTTP, JSON, UI model, command dispatch, station model, and almost all
 PCM analysis are already portable. The portability work is concentrated in six
 boundaries: build/dependency selection, terminal/input, threads and process
@@ -281,7 +281,7 @@ UCRT64/MinGW packages. Prefer the UCRT runtime over the older MSVCRT target.
 | `src/terminal.c`, `.h` | termios raw mode and `SIGCONT` restoration | D | High | Unix implementation remains. Windows implementation saves/restores console modes; Signalbox owns input modes while the TUI is active. |
 | `src/credential.c`, `.h` | Existing narrow backend abstraction is clean; current fallback is unavailable outside Apple/libsecret | C | Medium | Add a Windows-only implementation using Credential Manager; no call-site changes. |
 | `src/spectrum.c`, `.h` | DSP and S16 ingest are platform-neutral; only `clock_gettime` and exposed pthread mutex are nonportable | B/C | Medium | Use monotonic-time and mutex wrappers. DSP should otherwise remain byte-for-byte unchanged. |
-| `src/station_browser.c`, `.h` | Model is portable; `strings.h`/`strcasecmp`, POSIX mkdir modes, slash trimming, and replace/unlink persistence are not | B/C | Medium | Reuse paths and durable-file helpers; case-fold remains ASCII-compatible initially. |
+| `src/station_browser.c`, `.h` | Borrowed-pointer view model and ASCII-compatible case-folding are portable | B/C | Low | Keep canonical station ownership outside the browser. |
 | `src/libpiano/*` | Standard C plus curl/json-c/libgcrypt. `strdup` declarations depend on compiler mode. | A/B | Medium | Keep logic. Supply compatibility declarations/helpers only if UCRT compilation proves necessary. |
 | `src/debug.*`, `src/config.h` | Standard I/O/environment and FFmpeg version macros | A | Low | Retain. |
 | `contrib/*` | Shell, Perl, Ruby, Python, dmenu, `mkfifo`, `/tmp`, chmod, XDG, `nc`, and Unix executable conventions | E | Low | Document as Unix-only. Do not block Windows core on ports. |
@@ -431,7 +431,7 @@ no implicit `cmd.exe /c`. This is separate from core playback.
 Use Windows Known Folders, not guessed environment-variable concatenation:
 
 - roaming user configuration and small user-authored state:
-  `%APPDATA%\Signalbox\config`, `account`, and `favorites`;
+  `%APPDATA%\Signalbox\config` and `account`;
 - machine-local cache, logs, and future runtime diagnostics:
   `%LOCALAPPDATA%\Signalbox\`;
 - the named pipe has no filesystem path.
@@ -448,7 +448,7 @@ The TUI can keep multibyte/wide conversions locally. `wcwidth` behavior must be
 tested because Windows CRT/PDCurses width rules are not identical to Unix.
 Wrap `localtime_r` as a boolean local-time helper using `localtime_s` on Windows.
 
-For `account`, favorites, and state writes, expose one durable replacement
+For `account` and state writes, expose one durable replacement
 helper:
 
 1. create a uniquely named temporary file in the destination directory;

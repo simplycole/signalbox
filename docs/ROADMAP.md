@@ -39,8 +39,8 @@ plans, not promises of a date or release.
 - [x] Add an opt-in `ncursesw` skeleton with alternate-screen lifecycle,
   resize handling, responsive/minimum-size layouts, model-driven playback
   content, status, and configured quit/help input.
-- [x] Add a responsive station browser with selection, scrolling, and active
-  station highlighting.
+- [x] Add responsive station-pane selection, scrolling, active-station
+  highlighting, and in-place filtering alongside Now Playing.
 - [x] Route TUI station activation and prompt-free pause/resume, next, love,
   ban, and quit controls through named commands.
 - [x] Add now-playing metadata, playback/rating state, volume, and low-frequency
@@ -64,9 +64,9 @@ plans, not promises of a date or release.
   metadata, progress, status, help, prompts, and footer hints with standard
   eight-color fallbacks and restrained 256-color refinements. A dedicated
   high-contrast theme remains future work.
-- [x] Add the C5 large-library station view: default A-Z, original and
-  favorites-first modes, local ID-based favorites, incremental filtering,
-  compact count/sort headers, and numeric jump with temporary row numbers.
+- [x] Add the C5 large-library station view with Pandora-order rows,
+  incremental case-insensitive filtering in the existing pane, and safe
+  activation through the existing switch path while Now Playing stays visible.
   Numeric jump uses `#` and isolates number-row/keypad input from normal command
   dispatch, and valid confirmation tunes immediately; `G` remains Genres.
   RECENT includes rating markers, album, and snapshotted duration in a compact

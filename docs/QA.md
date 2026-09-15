@@ -137,12 +137,19 @@ response bodies. Review the diagnostic log before sharing it anyway.
   still starts and behaves normally. **Account:** SAFE/read-only. **Real
   account:** Yes. **Cleanup:** Quit normally.
 
-## B. Station browser
+## B. Station pane filtering
 
-- **Action:** Use arrows or `j`/`k`, Home/End, and Page Up/Down; press `s` once.
-  **Expected:** selection and scrolling remain in bounds; `s` explains that
-  arrows plus Enter tune a station. **Account:** SAFE/read-only. **Real
+- **Action:** Focus Stations with `s` or Tab, then use `/` and type part of a
+  station name. Edit with Backspace; confirm with Enter and later clear with
+  `/`, Esc. **Expected:** filtering updates the existing station pane in place,
+  is case-insensitive, and leaves Now Playing, art, progress, and other panes
+  visible and updating. **Account:** SAFE/read-only. **Real
   account:** Yes. **Cleanup:** None.
+- **Action:** Use arrows or `j`/`k`, Home/End, and Page Up/Down on filtered and
+  unfiltered rows. **Expected:** selection and scrolling remain in bounds, the
+  current `*` marker remains accurate, and no matches displays `No matching
+  stations`. **Account:** SAFE/read-only. **Real account:** Yes. **Cleanup:**
+  Clear the filter.
 - **Action:** Press Enter on a different station. **Expected:** a switching
   notice appears, the active marker changes after retrieval, and the selected
   station plays. **Account:** SAFE/read-only. **Real account:** Yes. **Cleanup:**
@@ -192,7 +199,7 @@ response bodies. Review the diagnostic log before sharing it anyway.
   separation where visible, VOLUME remains reachable, content never crosses
   the border, scroll indicators track available content, and Esc closes HELP.
 
-- **Action:** With a filter and non-default sort active, press `#`, `4`, and
+- **Action:** With a station-pane filter active, press `#`, `4`, and
   Enter using the number row; repeat with the physical numeric keypad. Also try
   `0`, an out-of-range number, empty Enter, a long digit sequence, Backspace,
   Delete, and keypad navigation with Num Lock changed. **Expected:** valid input

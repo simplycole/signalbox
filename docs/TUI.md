@@ -1,7 +1,7 @@
 # Terminal UI architecture decision
 
 Status: architecture phases A and B and renderer Phase C4 are complete. The
-ncursesw shell is the default on supported interactive terminals, with a station browser, polished
+ncursesw shell is the default on supported interactive terminals, with a searchable station pane, polished
 now-playing view, native create/search/rename/delete prompts, volume controls,
 retry/recovery notices, fixed themes, and session history.
 
@@ -500,17 +500,15 @@ and output-free headless startup without a TTY.
     genre detail or cancels without mutation, and seed/feedback removal asks
     for confirmation defaulting to No. The upcoming modal reads the canonical
     queue and intentionally offers no mutation or invented queue semantics.
-12. **Large station libraries (C5 complete):** the TUI defaults to A-Z view
-    order and cycles through original, A-Z, and favorites-first A-Z with `z`.
-    The header reports count and sort mode. `f` toggles ID-based local
-    favorites, `/` edits an incremental substring filter, and `#` selects a
-    one-based row in the current sorted/filtered view. Jump mode alone adds a
-    temporary number overlay, accepts number-row and xterm application-keypad
-    digits, and safely ignores keypad navigation or unsupported sequences;
-    `G` remains Genres. `*` in the first marker column means active,
-    `*` in the second means favorite, and reverse video means selected, so
-    monochrome and `NO_COLOR` remain understandable. Recent-activation sorting
-    is deferred because no persistent usage history currently exists.
+12. **Searchable retained station pane:** the main layout keeps Stations beside
+    Now Playing; no separate full-screen station view is used. `s` focuses that
+    pane, and Tab switches between Stations and Recent where available.
+    Pandora's list order is preserved. Arrows, `j`/`k`, Home/End, and Page
+    Up/Page Down navigate; `/` edits a retained, incremental, case-insensitive
+    substring filter in the pane header while the main view keeps updating;
+    and Enter switches through the existing
+    station-change pipeline. `*` marks the current station independently of
+    reverse-video selection, so monochrome and `NO_COLOR` remain understandable.
 13. **Parity/default (complete):** classic, FIFO, eventcmd, and headless paths
     remain available while supported interactive terminals default to TUI.
 14. **Optional integrations:** platform media hooks, useful mouse behavior, and

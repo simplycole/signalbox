@@ -37,6 +37,7 @@ THE SOFTWARE.
 #include "ui_readline.h"
 #include "ui_dispatch.h"
 #include "ui_act.h"
+#include "debug.h"
 
 /*	standard eventcmd call
  */
@@ -678,9 +679,18 @@ BarUiActCallback(BarUiActSelectStation) {
 /* Activate a station already chosen by a non-blocking UI. */
 BarUiActCallback(BarUiActActivateStation) {
 	assert (selStation != NULL);
-	if (selStation != app->curStation || app->playlist == NULL) {
+	if (selStation != app->curStation) {
 		app->nextStation = selStation;
+		/* Reject every outstanding publication for the old track immediately;
+		 * the next track will advance this generation again when it starts. */
+		app->enrichmentGeneration++;
+		SbUiModelSetSyncedLyrics (&app->uiModel, NULL);
+		app->uiModel.artState = SB_LOOKUP_UNAVAILABLE;
+		app->uiModel.artCachedPath[0] = '\0';
 		drainPlaylist (app);
+		tuiDebugPrint ("station_pane switch station_id=%s name=\"%s\"\n",
+				selStation->id != NULL ? selStation->id : "",
+				selStation->name != NULL ? selStation->name : "");
 		BarUiMsg (&app->settings, MSG_INFO, "Switching to %s...\n",
 				selStation->name);
 	} else {

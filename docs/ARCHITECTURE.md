@@ -181,14 +181,16 @@ confirmation, and list prompt primitives own only local input/presentation;
 actions still own search, creation, rename, deletion, and canonical mutation.
 ncurses types remain private to `ui_renderer_curses.c`.
 
-The C5 station browser uses a lightweight view array of borrowed
+The retained station-pane model uses a lightweight view array of borrowed
 `PianoStation_t` pointers. `station_browser.c` rebuilds it only after a station
-refresh, sort change, favorite change, or filter edit; it never relinks or
-deep-copies the canonical Pandora list. Sort precedes filtering, and numeric
-jump addresses the resulting one-based visible view. A-Z comparison is
-case-insensitive, then uses exact name, stable station ID, and original
-position as deterministic tie-breakers. Renderer selection remains a view
-index while active station identity remains the canonical pointer.
+refresh or filter edit; it never relinks or deep-copies the canonical Pandora
+list and preserves Pandora order. Filtering produces visible rows by
+case-insensitive substring match. Renderer selection remains a view index,
+while active and duplicate-name station identities remain canonical pointers
+carrying their Pandora IDs. Enter emits a structured activation command that
+reuses `nextStation` → `drainPlaylist()` → playlist retrieval. That transition
+advances enrichment generation immediately, and prefetch publication also
+checks playlist generation, target/current station agreement, and station ID.
 
 In TUI mode the canonical `PianoSong_t` history is also retained for the full
 process lifetime so historical info, station creation, and bookmark actions
@@ -204,11 +206,8 @@ pauses that loop, and its action/details modal completes before playback can
 detach a node. Signalbox does not relink the playlist: libpiano has no
 queue-promotion request or ownership contract for client-side reordering.
 
-Favorites are keyed only by Pandora station ID and stored in
-`$XDG_CONFIG_HOME/signalbox/favorites` by writing a temporary file and renaming
-it. This local state contains no credentials or station metadata and does not
-follow the legacy pianobar configuration fallback. Browser-only operations do
-not issue Pandora requests.
+Focusing, navigating, and filtering the station pane issue no Pandora requests;
+the rest of the retained main view continues rendering from the same UI model.
 
 Phase C4 extends those synchronous primitives to advanced station operations.
 The action layer fetches genre, seed, feedback, and station-mode data and owns
@@ -308,7 +307,7 @@ the curses header and Unicode cell-width function. `terminal_win32.c` owns
 console-handle capability detection and save/enable/restore of VT modes and
 UTF-8 code pages; no Win32 console calls leak into layout or UI behavior.
 PDCurses supplies normalized keys and `KEY_RESIZE`, while the guarded xterm
-application-keypad fallback remains available only in numeric jump mode.
+application-keypad decoding remains isolated from ordinary command handling.
 
 ## Target state
 

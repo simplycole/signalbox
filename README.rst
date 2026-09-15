@@ -43,8 +43,8 @@ Highlights
   monochrome themes
 - Real PCM-driven 8/12-band spectrum analyzer with smoothing and peak hold
 - Responsive cached album art using ANSI half blocks with truecolor/256-color fallback
-- Station filtering, A-Z/original/favorites-first sorting, local favorites,
-  and numeric jump
+- Searchable retained station pane with instant name filtering and safe
+  switching through the existing playback pipeline while Now Playing remains visible
 - Now-playing metadata, adaptive progress, signed-dB volume, upcoming queue,
   and full in-memory session history
 - Synced LRCLIB lyrics with an adaptive previous/current/next strip and
@@ -75,14 +75,14 @@ are reflected there automatically.
      - Move by a page
    * - ``Home``/``End``
      - Jump to first/last item
+   * - ``s``
+     - Focus the existing Stations pane
    * - ``Enter``
-     - Tune station or open actions
+     - Switch the selected station or open focused actions
    * - ``Tab``/``Shift+Tab``
      - Switch between Stations and Recent
-   * - ``/`` / ``#``
-     - Filter stations / jump to a visible station number
-   * - ``f`` / ``z``
-     - Toggle favorite / cycle station sort
+   * - ``/``
+     - Edit the focused station pane's case-insensitive name filter
    * - ``p`` / ``n``
      - Pause or resume / next track
    * - ``+`` / ``-``

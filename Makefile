@@ -203,9 +203,13 @@ clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
 		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
-		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
+		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe station-browser-test station-browser-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
+
+station-browser-test: tests/station_browser_test.c src/station_browser.c src/station_browser.h
+	${CC} -std=c99 -O2 -I src ${ALL_CFLAGS} -UNDEBUG -o $@$(EXEEXT) tests/station_browser_test.c src/station_browser.c
+	./$@$(EXEEXT)
 
 spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h src/platform.c src/platform.h
 	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32 -luuid)
