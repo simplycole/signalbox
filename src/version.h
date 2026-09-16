@@ -1,4 +1,4 @@
 #pragma once
 
 #define PROGRAM_NAME "signalbox"
-#define VERSION "2024.12.21-dev"
+#define VERSION "0.1.0"
