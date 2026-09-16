@@ -46,6 +46,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/tui_presentation.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
+		${PIANOBAR_DIR}/settings_values.c \
 		${PIANOBAR_DIR}/spectrum.c \
 		${PIANOBAR_DIR}/station_browser.c \
 		${PIANOBAR_DIR}/ui_act.c \
@@ -199,13 +200,23 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 	${SILENTECHO} "    CC  $< (PIC)"
 	${SILENTCMD}${CC} -c -fPIC -o $@ ${ALL_CFLAGS} -MMD -MF $*.d -MP $<
 
+TEST_TARGETS:=spectrum-test enrichment-test enrichment-cache-test album-art-test \
+	art-renderer-test lyrics-sync-test tui-presentation-test \
+	playlist-prefetch-test station-browser-test settings-values-test
+
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
 		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
-		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe station-browser-test station-browser-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
+		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe station-browser-test station-browser-test.exe settings-values-test settings-values-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
+
+test: ${TEST_TARGETS}
+
+settings-values-test: tests/settings_values_test.c src/settings_values.c src/settings_values.h
+	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/settings_values_test.c src/settings_values.c
+	./$@$(EXEEXT)
 
 station-browser-test: tests/station_browser_test.c src/station_browser.c src/station_browser.h
 	${CC} -std=c99 -O2 -I src ${ALL_CFLAGS} -UNDEBUG -o $@$(EXEEXT) tests/station_browser_test.c src/station_browser.c
@@ -271,4 +282,4 @@ uninstall:
 	${DESTDIR}/${LIBDIR}/libpiano.a \
 	${DESTDIR}/${INCDIR}/piano.h
 
-.PHONY: install install-libpiano uninstall test debug all spectrum-test enrichment-test playlist-prefetch-test
+.PHONY: clean install install-libpiano uninstall test debug all ${TEST_TARGETS}

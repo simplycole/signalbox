@@ -29,8 +29,8 @@ THE SOFTWARE.
 #include <stdio.h>
 #include <stdlib.h>
 
-/* Metadata-only TUI diagnostics for supervised QA.  Keep this separate from
- * PIANOBAR_DEBUG: network debugging can include protocol response bodies. */
+/* Dedicated TUI diagnostics for supervised QA. Keep this separate from legacy
+ * PIANOBAR_DEBUG so curses never shares a diagnostic stream. */
 inline static bool tuiDebugEnable () {
 	const char * const value = getenv ("SIGNALBOX_DEBUG_TUI");
 	return value != NULL && value[0] != '\0' && value[0] != '0';

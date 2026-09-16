@@ -296,7 +296,8 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 #endif
 
 	req->responseData = buffer.data;
-	debugPrint (DEBUG_NETWORK, "→ %s\n", req->responseData);
+	debugPrint (DEBUG_NETWORK, "response_bytes=%zu\n",
+			req->responseData != NULL ? strlen (req->responseData) : 0);
 
 	if (!quiet) interrupted = prevint;
 
@@ -331,8 +332,14 @@ bool BarUiPianoCall (BarApp_t * const app, const PianoRequestType_t type,
 			BarUiMsg (&app->settings, MSG_NONE, "Interrupted.\n");
 			goto cleanup;
 		} else if (wRetLocal != CURLE_OK) {
-			BarUiMsg (&app->settings, MSG_NONE, "Network error: %s\n",
-					curl_easy_strerror (wRetLocal));
+			if (wRetLocal == CURLE_PEER_FAILED_VERIFICATION ||
+					wRetLocal == CURLE_SSL_CACERT_BADFILE) {
+				BarUiMsg (&app->settings, MSG_NONE,
+						"TLS certificate check failed. Check the system clock and ca_bundle setting.\n");
+			} else {
+				BarUiMsg (&app->settings, MSG_NONE, "Network error: %s\n",
+						curl_easy_strerror (wRetLocal));
+			}
 			goto cleanup;
 		}
 
@@ -998,7 +1005,7 @@ void BarUiStartEventCmd (const BarSettings_t *settings, const char *type,
 	(void) stations; (void) pRet; (void) wRet;
 	if (settings->eventCmd != NULL) {
 		BarUiMsg (settings, MSG_ERR,
-				"Event commands are unavailable on Windows W1.\n");
+				"Event commands are unavailable on Windows.\n");
 	}
 	return;
 	#else

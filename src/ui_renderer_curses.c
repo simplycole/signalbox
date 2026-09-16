@@ -213,7 +213,7 @@ static size_t SbUiCursesWideToUtf8 (char *dest, const size_t destSize,
 
 static void SbUiCursesBox (WINDOW *window) {
 #ifdef SIGNALBOX_PDCURSESMOD
-	/* Keep W2 structure ASCII.  Mixing WACS drawing and text APIs on the VT
+	/* Keep structure ASCII. Mixing WACS drawing and text APIs on the VT
 	 * backend produced UTF-8 bytes as individual screen cells. */
 	(void) wborder (window, '|', '|', '-', '-', '+', '+', '+', '+');
 #else

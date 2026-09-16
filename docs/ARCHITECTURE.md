@@ -1,8 +1,8 @@
 # Architecture
 
-This document describes two different things: the pianobar-derived code that
-exists today, and the architecture Signalbox intends to grow toward. Target
-components named below are design boundaries, not implemented modules.
+This document first describes the implemented pianobar-derived application and
+then records longer-term boundary goals. The final Target state section is
+directional; the preceding sections describe code present in this repository.
 
 ## Metadata enrichment
 
@@ -27,8 +27,9 @@ one uncached request per second. Conservative normalized artist/title scoring
 reports available, no-match, or non-fatal error state. Results use a generic
 model containing canonical names, release information, external IDs, provider,
 and confidence. A 32-entry provider-aware in-memory cache avoids duplicate
-requests during a run. Persistence is intentionally deferred until cache-file
-versioning, atomic writes, and an appropriate platform data path are defined.
+requests during a run, while the schema-versioned persistent cache reuses
+eligible results across launches through atomic writes in the platform data
+directory.
 
 Lyrics have their own provider-neutral result and provider interfaces rather
 than sharing the metadata provider shape. LRCLIB is the current community
@@ -45,10 +46,12 @@ or create an unbounded queue. Metadata and lyrics use separate provider-aware
 cached, while transient failures are not.
 
 The generic lyrics result retains LRCLIB's matched identity, record ID,
-instrumental flag, plain lyrics, and synchronized lyrics. The current UI renders
-plain text (or strips timestamps from synchronized lyrics when plain text is
-absent), while preserving the original synchronized value for a future
-time-synced display. Lowercase `i` opens the one unified Track Info view;
+instrumental flag, plain lyrics, and synchronized lyrics. `lyrics_sync.c`
+parses synchronized LRC lines once when a result is published; the renderer
+uses a cursor for sequential playback and binary-search recovery after a timing
+discontinuity. Inline one- or three-line display is configurable, and the full
+Lyrics view highlights the current synchronized line. Lowercase `i` opens the
+one unified Track Info view;
 uppercase `I` is a harmless alias. `L` opens Lyrics, with lowercase `l` also
 accepted. The aliases toggle retained modal state in the main TUI loop; async
 results refresh an open view without a nested input/render loop. Both lookups
@@ -128,8 +131,9 @@ no macOS DSP dependency and is intended to carry into Linux and future Windows.
 
 ### Current terminal interaction: `src/ui*`, `src/terminal*`
 
-The current interface is a line-oriented console UI rather than a full-screen
-TUI:
+The default interactive interface is a retained full-screen TUI. The inherited
+line-oriented interface remains available through `--classic` and for
+non-interactive/headless execution:
 
 - `ui.c` formats messages and lists, mediates protocol calls, and launches
   event commands.
@@ -141,8 +145,8 @@ TUI:
 - `terminal.c` establishes and restores terminal attributes.
 
 These files both present information and participate in application control, so
-the current UI boundary is not fully isolated from orchestration or service
-calls. Phase B adds a narrow implemented seam in `ui_renderer.h`: `BarApp_t`
+the UI boundary is not fully isolated from orchestration or service calls.
+`ui_renderer.h` provides the implemented seam: `BarApp_t`
 owns an `SbUiModel` and `SbUiRenderer`, and the current station, current song,
 and progress flow through that model to the classic renderer. `BarUiMsg()` now
 delegates its byte-for-byte-compatible formatting to the classic renderer
@@ -157,12 +161,12 @@ software volume. A dynamically grown, newest-first session-history array copies
 bounded artist, title, album, and station strings plus rating and transition
 time when the current song transitions away, avoiding dangling libpiano
 pointers. It has no small track cap and is freed at shutdown. A monotonically
-increasing generation records updates for a future invalidation-driven
-renderer. It does not own or copy Pandora lists or objects. The synchronous
+increasing generation records updates for the retained renderer. It does not
+own or copy Pandora lists or objects. The synchronous
 main loop serializes their lifetime; renderer-local selection and scrolling do
 not mutate the model.
 
-Phase C3 adds request activity (`requesting`, `waiting for playlist`, `error`,
+The model includes request activity (`requesting`, `waiting for playlist`, `error`,
 and recovered/ready) to that projection. It describes synchronous request
 activity rather than pretending Pandora maintains a continuous socket
 connection; existing curl retry policy is unchanged.
@@ -170,7 +174,7 @@ connection; existing curl retry policy is unchanged.
 The renderer has an `init`/`render`/input/notice/`shutdown` lifecycle. Its
 classic synchronous line backend preserves
 configured prefixes, postfixes, formats, ANSI erase-line behavior, flushing,
-and carriage-return progress. Phase C3's opt-in ncursesw backend
+and carriage-return progress. The ncursesw backend
 owns its `SCREEN`, maps ordinary keys through the shared command table, stores
 captures notices under a mutex for the status line, expires normal notices
 after four seconds and errors after eight, redraws on `KEY_RESIZE`, and calls
@@ -209,7 +213,7 @@ queue-promotion request or ownership contract for client-side reordering.
 Focusing, navigating, and filtering the station pane issue no Pandora requests;
 the rest of the retained main view continues rendering from the same UI model.
 
-Phase C4 extends those synchronous primitives to advanced station operations.
+The same synchronous primitives support advanced station operations.
 The action layer fetches genre, seed, feedback, and station-mode data and owns
 all Pandora requests. Labels are borrowed only during one blocking modal or
 copied into short-lived action-owned arrays. For QuickMix, the renderer toggles
@@ -277,37 +281,24 @@ headers to shared authentication code.
 
 ### Platform integration
 
-The credential adapter is the first narrow native macOS integration layer.
-Portable/POSIX facilities, libao, terminal handling, event commands, and FIFO
-control provide the current integration points. Scripts under `contrib/` offer
-examples outside the core executable.
+`platform.h`/`platform.c` owns configuration/data path construction, atomic
+replacement, monotonic time, safe local time, sleep, executable-sibling lookup,
+and shutdown notification. UTF-8 remains the internal encoding; the Windows
+implementation converts only at Win32 API boundaries, uses Known Folders, and
+maps console control events to a deferred shutdown request.
 
-The Windows W0 audit defines the next platform seams without changing current
-runtime behavior. Paths/durable files, monotonic/local time, terminal/shutdown,
-threads, audio output, and local command transport will receive narrow selected
-implementations; callers should not accumulate platform conditionals. UTF-8
-remains the internal string encoding, with UTF-16 conversion only at Win32 API
-boundaries. The established renderer and credential interfaces remain the TUI
-and secure-store seams. See [`WINDOWS.md`](WINDOWS.md) for the audited blocker
-matrix, UCRT64/PDCursesMod strategy, and W1–W7 sequence.
+macOS and Linux use ncursesw terminal/readline implementations. Windows builds
+the same `ui_renderer_curses.c` against PDCursesMod WinCon by default, with a
+diagnostic VT output alternate. `terminal_win32.c` saves/restores console modes,
+screen state, and code pages, while `terminal_input_win32.c` owns
+`ReadConsoleInputW` key and resize decoding. Layout and command code do not
+contain Win32 console calls.
 
-The W1 implementation adds `platform.h`/`platform.c` as the shared boundary
-for configuration-path construction, monotonic milliseconds, safe local-time
-conversion, and shutdown notification. Its Windows implementation owns Known
-Folder lookup and UTF-16/UTF-8 conversion and maps console control events to a
-deferred shutdown request. The Makefile substitutes small Windows terminal,
-readline, and no-TUI renderer files so POSIX terminal/curses code is not pulled
-into the native W1 build. These stubs are milestone boundaries, not supported
-Windows terminal or playback implementations.
-
-W2 removes the no-TUI renderer stub and compiles the same
-`ui_renderer_curses.c` used by ncursesw against MSYS2's wide, forced-UTF-8
-PDCursesMod VT library. The renderer-local compatibility surface is limited to
-the curses header and Unicode cell-width function. `terminal_win32.c` owns
-console-handle capability detection and save/enable/restore of VT modes and
-UTF-8 code pages; no Win32 console calls leak into layout or UI behavior.
-PDCurses supplies normalized keys and `KEY_RESIZE`, while the guarded xterm
-application-keypad decoding remains isolated from ordinary command handling.
+Playback remains FFmpeg plus libao on all three platforms; the Windows package
+uses libao's WMM output. Windows secure credential storage, subprocess helpers,
+FIFO/Named Pipe control, packaging, and CI remain explicit gaps. Scripts under
+`contrib/` are Unix-oriented helpers outside the core executable. See
+[`WINDOWS.md`](WINDOWS.md) for current setup, validation status, and limits.
 
 ## Target state
 

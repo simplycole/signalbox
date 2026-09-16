@@ -64,7 +64,7 @@ const char *SbTuiPresentationLyricsState (const int status,
 		if (syncedLineCount > 0) return "Synced";
 		if (hasPlainLyrics) return "Plain";
 	}
-	return "Unavailable";
+	return "Temporarily unavailable";
 }
 
 bool SbTuiPresentationInlineLyrics (const int displayMode,

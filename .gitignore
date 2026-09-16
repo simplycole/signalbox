@@ -6,6 +6,11 @@
 signalbox
 libpiano.a
 libpiano.so*
-waitress-test
+*-test
+*-test.exe
 
 signalbox-tui-debug.log
+signalbox-keys.log
+.DS_Store
+Thumbs.db
+*.stackdump

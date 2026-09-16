@@ -330,11 +330,9 @@ void BarSettingsRead (BarSettings_t *settings) {
 			++val;
 
 			/* drop spaces at the end */
-			char *keyend = &key[strlen (key)-1];
-			while (keyend >= key && isspace ((unsigned char) *keyend)) {
-				*keyend = '\0';
-				--keyend;
-			}
+			char *keyend = key + strlen (key);
+			while (keyend > key && isspace ((unsigned char) keyend[-1]))
+				*--keyend = '\0';
 
 			/* strip at most one space, legacy cruft, required for values with
 			 * leading spaces like love_icon */
@@ -342,11 +340,9 @@ void BarSettingsRead (BarSettings_t *settings) {
 				++val;
 			}
 			/* drop trailing cr/lf */
-			char *valend = &val[strlen (val)-1];
-			while (valend >= val && (*valend == '\r' || *valend == '\n')) {
-				*valend = '\0';
-				--valend;
-			}
+			char *valend = val + strlen (val);
+			while (valend > val && (valend[-1] == '\r' || valend[-1] == '\n'))
+				*--valend = '\0';
 
 			if (streq ("control_proxy", key)) {
 				settings->controlProxy = strdup (val);
@@ -476,23 +472,18 @@ void BarSettingsRead (BarSettings_t *settings) {
 			} else if (streq ("sample_rate", key)) {
 				settings->sampleRate = atoi (val);
 			} else if (streq ("visualizer", key)) {
-				if (streq (val, "spectrum")) settings->visualizerSpectrum = true;
-				else if (streq (val, "off")) settings->visualizerSpectrum = false;
-				else BarUiMsg (settings, MSG_INFO,
+				if (!SbSettingsParseVisualizer (val,
+						&settings->visualizerSpectrum)) BarUiMsg (settings, MSG_INFO,
 						"Unknown visualizer '%s' at %s:%zu; keeping current setting\n",
 						val, path, lineNum);
 			} else if (streq ("album_art", key)) {
-				if (streq (val, "auto")) settings->albumArtMode = SB_ALBUM_ART_AUTO;
-				else if (streq (val, "pixel")) settings->albumArtMode = SB_ALBUM_ART_PIXEL;
-				else if (streq (val, "off")) settings->albumArtMode = SB_ALBUM_ART_OFF;
-				else BarUiMsg (settings, MSG_INFO,
+				if (!SbSettingsParseAlbumArt (val,
+						&settings->albumArtMode)) BarUiMsg (settings, MSG_INFO,
 						"Unknown album_art '%s' at %s:%zu; keeping current setting\n",
 						val, path, lineNum);
 			} else if (streq ("lyrics_display", key)) {
-				if (streq (val, "off")) settings->lyricsDisplay = SB_LYRICS_DISPLAY_OFF;
-				else if (streq (val, "line")) settings->lyricsDisplay = SB_LYRICS_DISPLAY_LINE;
-				else if (streq (val, "three-line")) settings->lyricsDisplay = SB_LYRICS_DISPLAY_THREE_LINE;
-				else BarUiMsg (settings, MSG_INFO,
+				if (!SbSettingsParseLyricsDisplay (val,
+						&settings->lyricsDisplay)) BarUiMsg (settings, MSG_INFO,
 						"Unknown lyrics_display '%s' at %s:%zu; keeping current setting\n",
 						val, path, lineNum);
 			} else if (strncmp (formatMsgPrefix, key,

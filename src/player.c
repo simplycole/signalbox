@@ -375,7 +375,7 @@ static bool openDevice (player_t * const player) {
 	if (player->settings->audioPipe) {
 #ifdef _WIN32
 		BarUiMsg (player->settings, MSG_ERR,
-				"Audio pipes are unavailable on Windows W1.\n");
+				"Audio pipes are unavailable on Windows.\n");
 		return false;
 #else
 		// using audio pipe
@@ -397,8 +397,14 @@ static bool openDevice (player_t * const player) {
 	} else {
 		// use driver from libao configuration
 		driver = ao_default_driver_id ();
+		if (driver < 0) {
+			BarUiMsg (player->settings, MSG_ERR,
+					"No libao output driver is available; check your libao installation and configuration.\n");
+			return false;
+		}
 		if ((player->aoDev = ao_open_live (driver, &aoFmt, NULL)) == NULL) {
-			BarUiMsg (player->settings, MSG_ERR, "Cannot open audio device.\n");
+			BarUiMsg (player->settings, MSG_ERR,
+					"Unable to open the audio device; check libao configuration and device availability.\n");
 			return false;
 		}
 	}

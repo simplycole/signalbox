@@ -16,8 +16,8 @@ plans, not promises of a date or release.
 
 - [x] Establish the Signalbox project identity and initial documentation.
 - [x] Rename the executable in a dedicated, compatibility-aware change.
-- [ ] Clarify build dependencies and supported feature combinations.
-- [ ] Clean up compiler warnings without obscuring behavior changes.
+- [x] Clarify build dependencies and supported feature combinations.
+- [x] Keep supported-platform clean builds free of compiler warnings.
 - [x] Add repeatable build validation for supported macOS and Linux systems.
 - [ ] Add repeatable runtime compatibility tests for macOS and Linux systems.
 - [x] Define the transition policy for inherited configuration paths, with a
@@ -34,8 +34,8 @@ plans, not promises of a date or release.
   execution without changing inherited bindings.
 - [x] Establish a minimal read-only transient UI model over canonical current
   station, song, and playback progress state.
-- [x] Introduce the renderer lifecycle and classic backend; TUI and headless
-  mode selection remain future work.
+- [x] Introduce the renderer lifecycle, retained TUI, classic backend, and
+  automatic interactive/headless mode selection.
 - [x] Add an opt-in `ncursesw` skeleton with alternate-screen lifecycle,
   resize handling, responsive/minimum-size layouts, model-driven playback
   content, status, and configured quit/help input.
@@ -84,8 +84,9 @@ plans, not promises of a date or release.
   audio equalization; a future playback EQ would be a separate feature.
 - [x] Make the TUI the default on supported interactive terminals, retain
   explicit `--classic`, and preserve classic fallback for headless execution.
-- [ ] Evaluate optional mouse and terminal artwork only after the text TUI and
-  packaging are stable.
+- [x] Add bounded ANSI half-block album art with truecolor/256-color fallback,
+  prepared-cell caching, and safe text-only degradation; support mouse-wheel
+  navigation without making mouse input required.
 
 ## Phase 3 — macOS integration
 
@@ -113,9 +114,12 @@ plans, not promises of a date or release.
 
 ## Phase 6 — Extended features
 
-- [ ] Add optional terminal album artwork where capability and accessibility
+- [x] Add optional terminal album artwork where capability and accessibility
   permit it.
-- [ ] Present richer track, album, artist, and station metadata.
+- [x] Present richer MusicBrainz track/release metadata, Cover Art Archive art,
+  and LRCLIB synced/plain lyrics through generation-safe background enrichment
+  with a persistent cache.
+- [x] Add generation-safe queue prefetch and searchable in-pane stations.
 - [ ] Provide stable scripting and headless control interfaces.
 - [ ] Consider external integrations only where technically and legally
   appropriate.
@@ -128,11 +132,10 @@ plans, not promises of a date or release.
 - [x] W1: produce a native MSYS2 UCRT64 `signalbox.exe` and pass native spectrum,
   direct/redirected `--help`, conflicting-mode, and explicit W1 `--tui` stub
   smoke tests without requiring TUI/audio parity.
-- [ ] W2: PDCursesMod VT renderer + Windows Terminal TUI bring-up. The shared
-  renderer, VT/UTF-8 lifecycle, dependency wiring, and documentation are
-  implemented; Windows 11 runtime validation remains before completion.
-- [ ] W3: support stable native audio playback while preserving PCM-driven
-  spectrum analysis.
+- [x] W2: ship the shared renderer on Windows Terminal with PDCursesMod WinCon
+  output, native Win32 input/resize handling, and a diagnostic VT alternate.
+- [x] W3: support native libao/WMM playback while preserving PCM-driven
+  spectrum analysis; retain a physical-Windows RC playback check.
 - [ ] W4: add a Windows Credential Manager backend behind the existing
   `CredReadW`, `CredWriteW`, and `CredDeleteW` interface boundary.
 - [ ] W5: add per-user Windows Named Pipe command control.

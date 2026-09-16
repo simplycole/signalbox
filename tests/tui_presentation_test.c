@@ -36,6 +36,8 @@ int main (void) {
 			false, 0), "No match") == 0);
 	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_ERROR,
 			false, 0), "Temporarily unavailable") == 0);
+	assert (strcmp (SbTuiPresentationLyricsState (SB_LOOKUP_IDLE,
+			false, 0), "Temporarily unavailable") == 0);
 	assert (!SbTuiPresentationInlineLyrics (2, 0)); /* plain stays out of inline */
 	assert (SbTuiPresentationInlineLyrics (2, 22)); /* synced renders inline */
 	assert (!SbTuiPresentationInlineLyrics (0, 22)); /* display=off */

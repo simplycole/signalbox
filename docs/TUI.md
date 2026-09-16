@@ -1,582 +1,150 @@
-# Terminal UI architecture decision
+# Terminal UI
 
-Status: architecture phases A and B and renderer Phase C4 are complete. The
-ncursesw shell is the default on supported interactive terminals, with a searchable station pane, polished
-now-playing view, native create/search/rename/delete prompts, volume controls,
-retry/recovery notices, fixed themes, and session history.
+Signalbox's retained full-screen interface is the default on supported
+interactive terminals. macOS and Linux use ncursesw; Windows uses the same
+renderer with PDCursesMod WinCon and a native Win32 input adapter. `--classic`
+keeps the inherited line-oriented interface available for compatibility and
+headless use.
 
-Connection presentation reflects the request-based protocol: the status row
-shows requesting, waiting-for-playlist, and error activity, while transient
-notices identify retries and recovery. It does not claim a persistent socket
-connection, and it does not alter retry counts or backoff.
+## Mode selection and lifecycle
 
-The current TUI includes a real-audio spectrum display in the right column
-between Now Playing and Upcoming. Tall layouts use six vertical rows, medium
-layouts use two to four, and small/narrow layouts omit it. A right pane of at
-least 69 cells shows twelve canonical bands; panes from 38–68 cells aggregate
-those values into eight bands, and narrower panes hide the display. The display
-stays a compact rack-component shape rather than stretching across a wide pane.
-Safe single-cell Unicode full blocks are used when available; otherwise
-`#` bars and `---` peak caps retain meaning. Theme roles keep phosphor
-green-dominant with restrained accents, amber warm-dominant, and neutral/mono
-readable without color.
+With no mode flag, Signalbox selects the TUI only when stdin and stdout are
+interactive and terminal capabilities are usable. `--tui` forces the TUI and
+reports an error when those requirements are absent. `--classic` never
+initializes curses.
 
-Only normalized bands and peaks enter `SbUiModel`; the renderer has no decoder
-or PCM access. An 80 ms input timeout caps animation near 12.5 frames/second
-without a busy loop. `visualizer = spectrum|off`, `--visualizer spectrum|off`,
-and collision-checked local `V` control the feature. Classic mode disables it,
-and modal input loops naturally suspend spectrum redraws.
+The renderer owns its screen, cursor, colors, timed input, modal windows, and
+resize handling. Normal shutdown restores terminal state. Below 50x15 it shows
+a minimum-size message and accepts only the configured quit binding until the
+terminal is enlarged.
+
+## Current controls
+
+The in-app HELP overlay is authoritative because configured `act_*` bindings
+are reflected at runtime. Defaults relevant to the retained UI are:
+
+| Key | Action |
+| --- | --- |
+| Arrow keys or `j`/`k` | Navigate the focused list or scroll a modal |
+| Page Up/Down, Home/End | Page or jump to a boundary |
+| Tab / Shift+Tab | Switch Stations/Recent focus when both panes are visible |
+| `s` | Focus the existing Stations pane |
+| `/` | Edit the focused station pane's case-insensitive filter |
+| `#` | Jump to a visible station number |
+| Enter | Tune the selected station or open the focused row's actions |
+| `i` or `I` | Toggle Track Info |
+| `L` or `l` | Toggle Lyrics |
+| `p` or Space / `n` | Pause-resume / next track |
+| `+` / `-` | Love / ban |
+| `(` / `)` / `^` | Volume down / up / reset |
+| `h` / `u` | Session history / upcoming tracks |
+| `V` | Toggle the spectrum when it does not collide with a configured action |
+| `?` / `q` | HELP / quit |
+
+Escape closes retained views. While editing a station filter, Enter keeps the
+filter and Escape clears it. Filtering happens in the existing Stations pane;
+there is no separate full-screen station browser. The current station marker is
+independent of selection so it remains visible in monochrome themes.
+
+Track Info and Lyrics scroll with the navigation keys and update in place when
+background enrichment completes. Enter, Escape, or the opening key closes the
+view. Resize redraws the active view without starting a nested renderer loop.
+
+## Layout and accessibility
+
+Large layouts show Stations, Now Playing, Recent, Upcoming, status, and—when
+enabled and space permits—the spectrum and album art. Medium layouts reduce or
+hide secondary panes. Narrow layouts stack the essential station and playback
+content. Resizing preserves bounded selections and reconstructs modal windows.
+
+Themes are `phosphor`, `amber`, `mono`, and `neutral`. `NO_COLOR` disables color
+without removing selection, warning, rating, or active-station meaning. Unicode
+symbols degrade to ASCII where required. The interface does not blink.
+
+## Spectrum
+
+The visualizer observes the final packed signed-16-bit PCM immediately before
+libao output. The audio thread publishes a fixed snapshot; it never calls
+curses. A 1024-sample window, bounded transform cadence, smoothing, and peak
+hold produce twelve canonical bands. Medium panes aggregate these to eight;
+narrow or short layouts hide them.
+
+`visualizer = spectrum|off`, `--visualizer spectrum|off`, and the local `V`
+toggle control the feature. Classic mode does not analyze or draw the spectrum.
+The 80 ms TUI input cadence used while it is visible is bounded and is not a
+busy loop.
 
 ## Album artwork
 
-The Now Playing panel can display cached JPEG, PNG, or WebP cover art using
-portable ANSI color and Unicode half blocks. Each terminal cell carries an
-upper foreground pixel and lower background pixel, preserving useful image
-detail despite tall terminal cells. `album_art = auto|pixel|off` controls the
-feature and defaults to `auto`. Truecolor is selected when `COLORTERM` advertises
-`truecolor` or `24bit`; otherwise an xterm 256-color cube/grayscale conversion is
-used when available. Small layouts, monochrome terminals, legacy Windows WinCon,
-loading art, and decode failures quietly retain the complete text-only layout.
-Native Kitty, iTerm2, and Sixel image protocols are not currently used.
-
-The HELP overlay groups navigation, playback, volume, stations, history,
-upcoming, and visualizer controls with blank rows between sections and between
-each semantic heading and its controls. It
-reads remappable playback, volume, station-genre, history, and upcoming keys
-from the effective `act_*` map, omits unbound actions, and shows uppercase `V`
-only when that local spectrum toggle does not collide with a configured action.
-On shorter terminals the overlay scrolls with arrows or `j`/`k`, Page Up/Down,
-and Home/End; Esc closes it.
-
-## Enrichment cache
-
-Caching and background album-art resolution are enabled by default. macOS and
-Linux use `${XDG_CACHE_HOME}/signalbox`, falling back to `~/.cache/signalbox`;
-Windows uses `%LOCALAPPDATA%\\Signalbox`. `enrichment-v1.json` contains
-inspectable metadata and lyrics entries, while encoded cover files live in
-`art/`. Deleting the directory is safe and only causes data to be fetched again.
-
-Positive and instrumental entries expire after 60 days, metadata/lyrics misses
-after 7 days, and art misses after 3 days. Errors are never persisted. The
-4096-entry bound uses least-recently-used pruning. Writes occur on the
-enrichment worker using a flushed temporary file and atomic replacement.
-
-## Decision
-
-Use **ncursesw** for Signalbox's eventual full-screen interface. Keep the
-line-oriented interface during migration and preserve it as a classic mode. A
-headless mode must run the same application core without initializing a
-terminal renderer.
-
-The renderer boundary should be small and Signalbox-specific: lifecycle, input
-polling, size/capability reporting, and rendering a read-only UI model. It
-should enable classic, full-screen, and headless front ends without attempting
-to hide every ncurses concept. Album art can later be an optional capability
-beside the text renderer, not a reason to choose a heavier core library now.
-
-Notcurses is the runner-up. Raw ANSI/termios and termbox2 are not recommended
-as the primary renderer.
-
-## Existing architecture
-
-### Startup, loop, and state
-
-`main()` in `src/main.c` owns one static `BarApp_t`. It saves terminal
-attributes and disables `ECHO` and `ICANON`; installs signal handling;
-initializes player, settings, libpiano, curl, stdin, and the control FIFO; gets
-credentials; logs in; fetches stations; selects a station; enters
-`BarMainLoop()`; and finally writes state and restores termios.
-
-`BarApp_t` is both composition root and mutable application state. It contains
-Pandora and curl handles, player and settings, current playlist and history,
-current/next station, input descriptors, retry count, and quit flag. Station,
-song, playlist, and history state are direct libpiano objects. Player mode,
-pause/quit, position, and duration live in `player_t`; some are mutex-protected.
-Volume is a mutable setting.
-
-`BarMainLoop()` synchronously coordinates the application. Each iteration
-cleans up a finished player thread, moves a song to history, fetches a playlist,
-starts playback, waits for input for up to one second, and prints time. Network
-requests and prompts block this thread. Audio decode/output use worker threads.
-
-### Input and dispatch
-
-`BarReadline()` in `src/ui_readline.c` calls `select()` over stdin and the FIFO.
-Top-level input reads one byte, then `BarUiCommandFromKey()` maps it through the
-configured shortcut table to an `SbUiCommand`. `BarUiDispatchCommand()` routes
-that command to the existing action. The same reader implements blocking string,
-integer, yes/no, filtering, and selection prompts. It has UTF-8-aware deletion
-for simple code points, discards simple escape sequences, and does not produce
-structured special-key events. FIFO bytes therefore share the keyboard path.
-
-`src/terminal.c` globally disables canonical input and echo, but does not set a
-complete raw mode: signal generation and other flags remain active. `SIGCONT`
-reapplies this mode. There is no TTY/capability check, alternate screen, cursor
-lifecycle, or renderer-aware suspend handling.
-
-`src/ui_dispatch.c` binds shortcut IDs to default single-byte keys, named
-commands, contexts, help, and configuration keys. A separate command-handler
-table binds each command to a `BarUiAct*` function. Help remains generated from
-the binding metadata.
-
-In the curses interface, `i` opens the unified, scrollable Track Info modal
-containing available Pandora and MusicBrainz fields (`I` is an alias). `L`
-opens the scrollable LRCLIB Lyrics modal, and `l` is also accepted. Pressing
-either modal's opening key again closes it. Both enrichment modals refresh in
-place while provider work completes, and the normal main-loop cadence keeps
-elapsed time, progress, spectrum, status, and track transitions live behind
-the retained overlay. Lyrics use plain text when present or
-display timestamp-free lines derived from retained synchronized lyrics.
-Up/Down and j/k scroll; Escape or Enter also closes.
-
-### Output and events
-
-`BarUiMsg()` writes synchronously to stdout, emits ANSI erase-line for most
-message types, applies configured formats, and flushes. `BarReadline()` emits
-ANSI cursor-left and erase-to-end while editing. Now-playing, stations, lists,
-and time are synchronous output; time overwrites a carriage-return line about
-once per second.
-
-`src/ui.c` also owns blocking protocol calls/retries and starts event commands.
-`src/ui_act.c` combines prompts, rendering, Pandora requests, `BarApp_t`
-mutation, direct player locking/signalling, and event commands. Player error
-paths call `BarUiMsg()` directly and could write while a future renderer owns
-the screen. Event-command children are asynchronous; rendering itself is not.
-
-No code queries terminal rows/columns. There is no `SIGWINCH`, responsive
-layout, mouse input, frame model, dirty state, or redraw scheduler.
-
-### Implemented Phase B seam
-
-`BarApp_t` owns one `SbUiModel` and one `SbUiRenderer`. The model is a small
-renderer-facing projection containing borrowed current-station/current-song
-references, the optional real song station used by QuickMix formatting,
-elapsed/duration, playback state, signed-dB software volume, and a generation
-counter. Pandora and player structures remain canonical. The exception is a
-dynamically grown, newest-first session-history projection whose bounded
-artist, title, album, and station strings are copied when a song transitions
-away, avoiding pointers into objects with independent lifetimes. It lasts only
-for the process lifetime and is freed at shutdown.
-
-Phase C2 also borrows the canonical station-list head. The synchronous main
-loop owns and serializes that list's lifetime; the renderer only traverses it
-for display and returns a borrowed selected pointer in an activation command.
-Selection index and scroll offset are renderer-local and do not increment the
-canonical model generation.
-
-The renderer interface in `src/ui_renderer.h` has `init`, event-oriented
-`render`, and `shutdown` operations. The classic backend in
-`src/ui_renderer.c` is the sole implementation. Current station announcements,
-current-song announcements, and progress are now model updates followed by
-renderer calls. `BarUiMsg()` delegates to the same classic implementation and
-retains its inherited signature for incremental compatibility.
-
-There is no frame loop. Each model mutation increments `generation`, while the
-classic renderer continues printing synchronously at exactly the existing
-events. A future ncurses renderer can compare generations or introduce finer
-dirty categories when its snapshot and event queue exist. A null/headless
-renderer can use no-op lifecycle/render operations without changing canonical
-state ownership.
-
-Prompts, selection lists, and readline cursor editing stay classic/direct
-because they are blocking interactions rather than passive model rendering.
-Event-command pipe output is serialization, not terminal UI. Player/background
-messages copy text and severity under the renderer's notice mutex; they never
-call ncurses. The main/UI thread draws and expires them on its existing
-one-second cadence (four seconds normally, eight seconds for errors).
-
-## Coupling to remove incrementally
-
-- `BarMainLoop()` mixes state transitions, network work, playback lifecycle,
-  history, input timing, and rendering; its one-second timeout is the refresh
-  clock.
-- `BarMainStartPlayback()` renders and emits events while configuring the
-  player thread. `BarMainPlayerCleanup()` emits events, blocks in
-  `pthread_join()`, applies retry policy, and mutates player state.
-- `BarUiPianoCall()` is a UI function that owns curl/libpiano behavior,
-  login continuation, retries, and error presentation.
-- `BarUiAct*` callbacks receive all of `BarApp_t`, make service calls, conduct
-  nested prompts, mutate canonical objects/settings, and manipulate player
-  synchronization directly.
-- `BarUiMsg()` is callable from orchestration, services, actions, and the player.
-  Background output would corrupt curses.
-- `BarReadline()` merges terminal input, FIFO commands, prompt editing, and
-  refresh timing. Terminal key events must not become the scripting API.
-- `BarReadline()` still represents only bytes and simple escape filtering; it
-  cannot yet express structured special keys, focus, or overlays.
-- `BarSettings_t` combines core/network/audio settings with bindings and output
-  formats; consumers need narrower views even if parsing stays unified.
-- `BarUiStartEventCmd()` consumes broad internal state instead of a stable,
-  renderer-independent application event snapshot.
-
-These are extraction targets, not reasons to rewrite libpiano or the player.
-
-## Target boundaries and event flow
-
-| Boundary | Responsibility | Must not own |
-| --- | --- | --- |
-| Application core | Session state machine, stations, queue/history, retries, shutdown, canonical snapshots | Terminal cells or raw keys |
-| Pandora service | Adapt libpiano/curl requests and results | Rendering or prompts |
-| Player service | Playback commands and thread-safe state/events | UI messages |
-| UI model | Presentation snapshot plus selection/focus/overlay/status | Business policy |
-| TUI renderer | ncurses lifecycle, layout, cells, colors, resize | Pandora/player actions |
-| Input/keymap | Decode terminal events and map them by context | Business operations |
-| Command dispatcher | Validate and route named commands | Terminal key codes |
-| Platform hooks | Translate common state/commands for Now Playing/MPRIS | Playback policy |
-| Classic/headless | Compatibility output or no interactive output; automation adapters | Separate core logic |
-
-```text
-keyboard -> input/keymap ----\
-FIFO/platform/CLI -----------> command dispatcher -> application core
-                                                   -> Pandora/player services
-
-service results -> canonical state -> structured events
-                                  -> UI model -> renderer
-                                  -> eventcmd/platform hooks
-```
-
-Only the UI thread may call ncurses. Workers publish state changes/notices.
-
-### Commands and keymaps
-
-Introduce stable command IDs for playback, rating, volume, station operations,
-and quit, plus UI-only navigation, focus, overlay, and dismiss commands. Each
-binding should contain a terminal key, command ID, contexts, display label, and
-help. Resolve overlay/modal, then active-pane, then global bindings. Generate
-help from the effective map.
-
-FIFO and future IPC should submit named commands, or translate legacy key bytes
-for compatibility; they should not masquerade as terminal input.
-
-### Canonical state and UI model
-
-Canonical state owns connection/session phase, station collection and active
-station, queue/current song/history, playback snapshot, rating, volume, errors,
-and outstanding operations. It remains usable without a UI.
-
-The TUI model is a safe snapshot/projection with stable IDs and display strings
-for stations and tracks; elapsed/duration, playback, volume, and rating state;
-connection/activity and structured notices; session history/upcoming rows;
-selected station, scroll positions, focus, overlay and prompt state; terminal
-size, layout, capabilities and theme; and dirty categories or a generation.
-
-Selection, focus, scroll, notices, layout, and theme are transient UI state.
-Active station/song, lists, rating, playback, and connection are canonical.
-Renderer windows must not point into mutable libpiano lists.
-
-## Rendering, resize, and responsive layout
-
-Use an event-driven loop with a bounded progress timer:
-
-- wake for terminal/FIFO input, application/player events, resize, and the next
-  progress deadline;
-- coalesce changes and render at most once per loop turn;
-- update progress at most 4 Hz during playback, or once per second in reduced
-  motion and compact views; render only on events while paused/idle;
-- redraw whole dirty panes initially, then batch with `wnoutrefresh()` and
-  `doupdate()`; do not build a second cell-diff engine unless measured data
-  justifies it.
-
-This is responsive without a high-FPS loop and limits flicker, CPU use, and
-laptop wakeups. Reduced motion disables optional animation, not state updates.
-
-Handle `SIGWINCH` by setting a `sig_atomic_t` flag or notifying a self-pipe; do
-not draw or allocate in the handler. On the UI thread, update curses' size,
-rebuild geometry/windows, clamp selection/scroll, invalidate layout, and render
-once. Below a tested minimum, show compact playback plus required dimensions
-while keeping quit/playback controls usable.
-
-Suggested breakpoints, to tune after prototypes:
-
-- **Large (80+ columns, 24+ rows):** stations left; a usable eight-row
-  now-playing block right. At 30+ rows, UPCOMING uses the actual fetched queue
-  count and at most four compact display rows; RECENT receives the remaining right-column rows and
-  grows naturally as terminal height increases. RECENT and UPCOMING entries
-  reserve a compact marker area and a fixed right-aligned duration field. They
-  prefer one left-packed ``♥ Artist — Track · Album`` line, and move the album
-  plus duration to a complete second line when width requires. Tab moves
-  navigation focus between STATIONS and
-  RECENT; focused history has its own selection and scroll offset, a visible
-  ``›``/``>`` marker, and no full-row reverse video. The permanent upcoming
-  view is display-only; ``u`` opens its interactive browser and Enter opens
-  native details and existing safe song actions.
-- **Medium (80+ columns, 20–23 rows):** station/now-playing split; hide RECENT
-  when its complete entries would squeeze the eight-row now-playing minimum.
-- **Small:** one switchable station or now-playing pane; one-line progress and
-  status; remove decoration before information.
-
-Treat height independently. Truncation must be Unicode-cell-aware.
-
-## Visual language and accessibility
-
-Use restrained broadcast-console cues: clear hierarchy, rules and meters,
-monospaced alignment, and a small semantic palette. Avoid blinking, scan-line
-effects, large ASCII logos, and decorative continuous motion.
-
-Represent themes as semantic roles—background, primary, muted, border, focus,
-accent, playing, loved, warning, error, and filled/empty progress—mapped to
-colors and attributes after capability detection. Initial themes: phosphor
-green, amber, monochrome, modern neutral, and high contrast. Never communicate
-status by color alone.
-
-The curses renderer implements these as a compact semantic palette rather than
-call-site pair numbers. Phosphor is green-dominant, using cyan for artist,
-status, selection accents and keys; pink for track/loved state; purple for
-album; amber for paused/waiting/warnings; and red for errors or destructive
-state. Amber preserves warm chrome and station text with sparing cool accents;
-neutral uses gray/white chrome and editor-like semantic accents. Standard
-eight-color curses colors are the portable baseline. When at least 256 colors
-are reported, a small set of richer xterm-compatible indices refines shades;
-truecolor is neither required nor emitted. Pair allocation is deduplicated and
-degrades role-by-role on terminals with a small ``COLOR_PAIRS`` limit.
-
-Honor `NO_COLOR`, monochrome/high-contrast choices, reduced motion, and
-terminals without color. Disable blink. Provide ASCII-safe symbols and avoid
-ambiguous-width glyphs in aligned content. Classic/headless output remains the
-screen-reader-friendly alternative.
-
-The `mono` theme, `NO_COLOR`, and terminals without color skip decorative color
-pairs entirely. Bold, dim, reverse-video selection, labels, and textual status
-remain, so focus and severity never depend on hue alone. The terminal's default
-background is preferred when curses supports it.
-
-## Library evaluation
-
-### ncursesw — preferred
-
-The wide-character ncurses API is sufficient for full-screen/split layouts,
-Unicode, navigation, progress bars, themes, resize, optional mouse, alternate
-screen, terminal capabilities, and efficient batched refresh. It has a mature
-C API, broad documentation, and near-universal macOS/Linux packaging.
-
-Its portable baseline is not truecolor. Traditional color-pair APIs are
-awkward, and extended/direct color depends on build options and terminfo, so
-Signalbox must look good at 256 colors. Unicode grapheme/emoji width still
-needs care. Ncurses does not abstract Kitty/iTerm2/sixel images. macOS system
-curses can be older than Homebrew ncurses, so builds must use one coherent
-header/library pair and avoid untested extensions. Mouse and modified-key
-reporting varies and remains optional. None of these limits blocks the core UI.
-
-### notcurses — runner-up
-
-Notcurses offers native RGB, planes/compositing, rich capability detection,
-direct and alternate-screen modes, multimedia, and graphics. Its C API is
-capable, it supports current macOS/Linux, and it remains maintained.
-
-It is still a poor default fit. Full packages commonly bring libunistring,
-ncurses/terminfo, image/multimedia support, build tooling, and FFmpeg-related
-dependencies. A core-only link reduces runtime surface but also removes much of
-the album-art rationale, while distro versions/availability vary. Its smaller,
-faster-moving ecosystem raises packaging and debugging risk for features the
-first TUI does not need. Reconsider it only if a prototype proves truecolor or
-inline media is a core requirement.
-
-### Raw ANSI/termios — rejected as primary
-
-Raw control minimizes dependency weight, and Signalbox already emits a few
-ANSI sequences. A polished implementation would still need input escape
-decoding, terminfo negotiation, Unicode cell width, resize/mouse, alternate-
-screen and suspend/crash safety, screen differencing, and terminal quirks.
-Assuming ANSI without terminfo is not portable. Raw sequences remain reasonable
-only for carefully detected optional graphics or the existing classic UI.
-
-### termbox2 — not selected
-
-Termbox2 is a serious small C library with a cell buffer/event API, Unicode,
-resize, mouse, and 256/truecolor modes. It is preferable to hand-rolled ANSI.
-Its package reach, documentation depth, widget/layout ecosystem, and operational
-history are weaker than ncurses; Signalbox would own more pane, editing, key,
-and portability behavior for little gain. It is a lightweight fallback if a
-concrete ncurses blocker appears, not the present runner-up.
-
-## Album artwork
-
-Artwork is optional and deferred. Navigation, metadata, and status must never
-depend on it; support explicit off/auto/on policy. No protocol is universal:
-Kitty/WezTerm and some other modern terminals support Kitty graphics; iTerm2
-has its own inline protocol; sixel is present in selected terminals/builds;
-macOS Terminal should be treated as text-only; block mosaics are lossy and can
-harm readability and screen-reader use.
-
-Later, a small optional provider may report none, Kitty, iTerm2, sixel, or block
-fallback after conservative detection and user override. Direct protocol output
-must prove safe alongside curses redraw/cursor state. Prefer an external helper
-or separate backend over image decoding in the core renderer. Defer fetching,
-caching, and decoding policy too.
-
-## Classic/headless behavior and terminal safety
-
-Preserve three conceptual modes without fixing flag names yet:
-
-- interactive TUI only when stdin/stdout are suitable TTYs and capabilities
-  meet the minimum;
-- classic line-oriented output, prompts, inherited keys, FIFO, and eventcmd;
-- headless with no terminal mode, curses, prompts, carriage-return progress, or
-  decoration, controlled by configured startup/automation inputs.
-
-Ship TUI as the interactive default and keep classic as fallback. `TERM=dumb`,
-unsuitable capabilities, or
-non-interactive stdout must not initialize curses. Do not infer suitability
-from `TERM` alone. Always restore state on normal/handled fatal exit and make
-suspend/resume leave and re-enter full-screen mode cleanly.
-
-FIFO and `eventcmd` are compatibility contracts. Route FIFO through the common
-dispatcher and structured application events to the existing serializer.
-Preserve legacy byte commands during a documented transition while adding
-named commands/versioned machine output later. Services must not need a PTY.
-
-## Packaging and CI
-
-For ncursesw:
-
-- macOS ships curses; Homebrew's current `ncurses` is keg-only. A formula may
-  depend on it for predictable features but must use its flags consistently;
-- Debian/Ubuntu use `libncurses-dev` and link/detect `ncursesw`;
-- Fedora uses `ncurses-devel`; Arch uses `ncurses`;
-- source builds should prefer `pkg-config ncursesw`, with documented config-
-  script/platform fallback and an actual compile/link feature check.
-
-On the validated macOS 26 environment, Homebrew's `ncursesw.pc` compatibility
-metadata returns `-D_DARWIN_C_SOURCE` plus `-lncurses`. Compilation uses
-Apple's SDK `curses.h`, and the binary links `/usr/lib/libncurses.5.4.dylib`.
-A compile/link probe for `cchar_t` and `setcchar()` succeeds, so the system
-library supplies the wide-character API needed here. Signalbox accepts this
-portable pkg-config decision rather than hardcoding a Homebrew keg path; no
-Makefile or CI override is required.
-
-Dynamic binary-size impact should be modest. Static size depends on platform
-library/terminfo arrangements.
-
-Homebrew and Arch package Notcurses but expose its broader dependency graph.
-Debian stable availability has lagged while newer suites carry current
-releases; Fedora must be checked per supported release. Source builds require
-CMake/C17 plus terminfo/ncurses and libunistring, with optional graphics
-dependencies. Termbox2 may require vendoring or new distro packages. Raw ANSI
-has no package but transfers compatibility/test burden into Signalbox.
-
-When ncursesw is added, CI should install development packages, verify feature
-detection, and compile TUI-enabled and non-TUI/headless configurations if both
-are supported. Normal CI remains build/smoke only. Add PTY integration tests
-deliberately later; unit-test command maps, model projection, layout decisions,
-and output-free headless startup without a TTY.
-
-## Migration plan
-
-1. **Observation seam (partial):** current station/song/progress use the UI
-   model and classic renderer; player/background notices use thread-safe
-   capture, while a general event queue remains future work.
-2. **Command seam (complete):** command IDs separate legacy key/FIFO decoding
-   from action execution without changing bindings.
-3. **Application actions:** move service/player mutations and validation out of
-   `BarUiAct*`; represent nested prompts as explicit states.
-4. **UI model (C2 projection complete):** borrowed current state is augmented
-   by scalar playback/volume state and dynamically owned session-history rows.
-5. **Mode lifecycle (complete):** automatic interactive TUI selection, explicit
-   TUI/classic overrides, and non-interactive classic fallback.
-6. **ncursesw skeleton (complete):** alternate-screen lifecycle,
-   configured quit/help input, full redraw on resize, minimum-size behavior,
-   model-driven metadata/progress, and status. Explicit suspend/resume polish
-   remains alongside broader terminal recovery testing.
-7. **Station browser (complete):** selection, scrolling, active station,
-   responsive layout, and direct Enter activation.
-8. **Now playing (complete):** metadata, playback/rating, signed-dB volume,
-   wide-aware truncation, and timed adaptive progress.
-9. **History/notices/help (complete):** full-session in-memory history, a
-   height-responsive RECENT projection, timed status/error notices, configured
-   help, and request retry/recovery presentation are complete, including a
-   read-only upcoming-track modal over the existing queue. The newest-first
-   history modal supports arrows/j/k, Page Up/Page Down, Home/End, resize, and
-   Esc; Enter preserves the existing historical-song actions. No history is
-   persisted yet.
-10. **Prompts/themes/accessibility (C3 complete):** bounded wide-character text
-    entry, destructive confirmation, search-result selection, phosphor/amber/
-    mono/neutral palettes, and `NO_COLOR`. Selection and severity retain text
-    or reverse-video cues; there is no blink or animation. Startup credentials,
-    account settings, and a dedicated high-contrast palette remain deferred.
-11. **Advanced station management (C4 complete):** QuickMix uses a local
-    checkbox snapshot with explicit `[x]`/`[ ]` markers; genre creation uses
-    category then genre lists; shared IDs, create-from-song, bookmarks,
-    history actions, and seed/feedback/mode lists are native. Esc backs out of
-    genre detail or cancels without mutation, and seed/feedback removal asks
-    for confirmation defaulting to No. The upcoming modal reads the canonical
-    queue and intentionally offers no mutation or invented queue semantics.
-12. **Searchable retained station pane:** the main layout keeps Stations beside
-    Now Playing; no separate full-screen station view is used. `s` focuses that
-    pane, and Tab switches between Stations and Recent where available.
-    Pandora's list order is preserved. Arrows, `j`/`k`, Home/End, and Page
-    Up/Page Down navigate; `/` edits a retained, incremental, case-insensitive
-    substring filter in the pane header while the main view keeps updating;
-    and Enter switches through the existing
-    station-change pipeline. `*` marks the current station independently of
-    reverse-video selection, so monochrome and `NO_COLOR` remain understandable.
-13. **Parity/default (complete):** classic, FIFO, eventcmd, and headless paths
-    remain available while supported interactive terminals default to TUI.
-14. **Optional integrations:** platform media hooks, useful mouse behavior, and
-    artwork only after a separate capability/packaging decision.
-
-### Remaining prompt inventory after C4
-
-- **Native in C4:** QuickMix, genre category/genre browsing, shared station ID,
-  create from the current or a historical song, song/artist bookmark choice,
-  add-music search, seed and feedback removal, station mode selection, history
-  actions, and read-only upcoming-track browsing.
-- **Classic for now:** account settings, because that flow includes username
-  and password replacement and requires a dedicated secure-input design.
-- **Not relevant to the TUI:** FIFO byte commands and event-command output;
-  neither is an interactive terminal prompt.
-- **Native startup:** the login form edits email and masked password fields and
-  a secure-remember checkbox inside curses. Tab/Shift-Tab or arrows move fields,
-  Space toggles remembering, Enter submits, and Esc cancels with terminal state
-  restored. While it is open, the login modal owns input, so global bindings
-  such as Help are intentionally not dispatched. A rejected stored secret offers
-  one explicit retry, editing,
-  forgetting that exact service/account entry, or cancellation.
-- **Credential availability:** macOS uses Keychain. Other platforms currently
-  explain that secure storage is unavailable and continue session-only; there
-  is no plaintext fallback. Classic mode retains inherited prompts.
-
-Automated C4 validation does not confirm any account-changing request. Native
-modal navigation, cancellation, resizing, themes, and checkbox state can be
-tested safely; QuickMix save, station creation, bookmarks, seed/feedback
-deletion, mode changes, and love/ban require an explicitly supervised manual
-account test.
-
-C4 keeps the established configured direct bindings instead of adding a
-station action menu. The compact help overlay groups the advanced bindings;
-the footer remains limited to navigation, tune, playback, volume, help, and
-quit.
+Cover Art Archive files are decoded through FFmpeg into bounded RGBA data,
+resized with aspect preservation, and converted to ANSI half-block cells.
+`album_art = auto|pixel|off` defaults to `auto`. Truecolor is preferred when
+advertised; otherwise a 256-color conversion is used. Monochrome, unsupported,
+small, loading, and failed-art states retain the complete text layout.
+
+The prepared-cell cache is keyed by source path, geometry, and color mode.
+Normal progress redraws therefore do not decode or resize the image. Native
+Kitty, iTerm2, and Sixel protocols are intentionally not used.
+
+## Lyrics and enrichment
+
+MusicBrainz metadata, LRCLIB lyrics, and album-art resolution run away from the
+audio thread. Track generations prevent a late result from replacing the
+current track. User-facing metadata states are `Available`, `No match`, and
+`Temporarily unavailable`; lyrics use `Synced`, `Plain`, `Instrumental`, `No
+match`, and `Temporarily unavailable`; art uses transient `Loading`, then
+`Ready`, `None`, or `Unavailable`.
+
+Synchronized lyrics are parsed once on publication. Sequential redraws advance
+a cursor, while playback discontinuities recover with binary search.
+`lyrics_display = three-line|line|off` controls only the inline strip; the full
+Lyrics view remains available for plain text and when inline display is off.
+
+The schema-versioned persistent cache lives under the platform cache/data path.
+Successful results and genuine misses are reusable; transient provider failures
+are never persisted as permanent misses. Encoded art is stored separately from
+the JSON metadata/lyrics cache.
+
+## Station model and queue prefetch
+
+The station browser stores a lightweight array of borrowed canonical station
+pointers. It rebuilds only after station-list generation changes or filter
+edits, never on ordinary redraws. Filtering does not relink or deep-copy the
+Pandora list. Activation resolves the selected canonical pointer and reuses the
+normal station-switch pipeline.
+
+Near playlist exhaustion, one bounded worker may fetch the next playlist.
+Publication checks playlist generation, station pointer/ID, and current target;
+station changes discard stale results. Prefetch does not reorder tracks or
+change Pandora queue semantics.
+
+## Renderer and ownership boundaries
+
+`SbUiModel` is a projection rather than a second application model. Current
+Pandora station/song/playlist pointers are borrowed under the serialized main
+loop. Session history copies bounded display fields so it does not retain freed
+libpiano strings. Renderer-local focus, selection, scrolling, modal, lyric
+cursor, and prepared-art state are owned and destroyed by the renderer.
+
+Provider parsing, cache writes, image downloads, image decode/resize, and
+station-filter allocation are event-driven. The normal redraw path only reads
+snapshots, advances lyric lookup, formats bounded text, and emits cells.
+
+## Classic/headless compatibility
+
+Classic mode retains byte keybindings, FIFO control on Unix, event commands,
+audio pipes, configured formats, and line prompts. It remains the automatic
+fallback for redirected or unsuitable terminals. TUI-only renderer state is not
+part of the FIFO protocol, and services do not need a pseudo-terminal.
 
 ## Diagnostics
 
-Set `SIGNALBOX_DEBUG_TUI=1` for input and modal diagnostics. In TUI mode these
-messages are written to `signalbox-tui-debug.log` in the directory where
-Signalbox was started; they are never written onto the curses terminal. The
-file is replaced once per run, line-buffered for useful crash evidence, and
-closed during normal process shutdown. Normal runs do not create it.
+`SIGNALBOX_DEBUG_TUI=1` writes `signalbox-tui-debug.log` instead of writing over
+the curses screen. It records lifecycle, input routing, generation decisions,
+provider outcomes, and cache/render transitions without credentials, tokens, or
+raw API bodies. It may contain track metadata, station-filter text, provider
+IDs/URLs, and local paths; review it before sharing.
 
-The Apple-supplied ncurses ABI v1 exposes Terminal's wheel-toward-top gesture
-as `BUTTON4_PRESSED`. It has no `BUTTON5_*` API. Captured `BUTTON1_CLICKED`
-records are ambiguous with real primary-button clicks and are deliberately not
-treated as wheel-toward-bottom. Keyboard scrolling remains available in both
-directions. The broad mouse mask is currently required to capture the ABI's
-complete compatibility event stream for diagnostics; decoding remains limited
-to unambiguous wheel bits, so click and position noise cannot scroll a pane.
-
-## Research sources
-
-- [ncurses upstream](https://invisible-island.net/ncurses/)
-- [Homebrew ncurses](https://formulae.brew.sh/formula/ncurses)
-- [Debian ncurses](https://packages.debian.org/source/testing/ncurses)
-- [Fedora ncurses](https://packages.fedoraproject.org/pkgs/ncurses/)
-- [Notcurses upstream](https://github.com/dankamongmen/notcurses)
-- [Notcurses manual](https://man.archlinux.org/man/notcurses.3.en)
-- [Homebrew Notcurses](https://formulae.brew.sh/formula/notcurses)
-- [Debian Notcurses](https://packages.debian.org/src:notcurses)
-- [Arch Notcurses](https://archlinux.org/packages/extra/x86_64/notcurses/)
-- [Termbox2 upstream](https://github.com/termbox/termbox2)
-- [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
-- [iTerm2 images](https://iterm2.com/documentation-images.html)
-- [Sixel notes](https://vt100.net/docs/vt3xx-gp/chapter14.html)
-
-Package facts are a research-date snapshot and must be rechecked when a
-dependency is introduced.
+On Windows, `SIGNALBOX_DEBUG_KEYS=1` additionally writes
+`signalbox-keys.log`. Password keystrokes are redacted. Neither diagnostic is
+enabled during normal operation.

@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <stdbool.h>
 
 #include <piano.h>
+#include "settings_values.h"
 
 /* update structure in ui_dispatch.h if you add shortcuts here */
 typedef enum {
@@ -74,10 +75,6 @@ typedef enum {
 	BAR_SORT_QUICKMIX_10_NAME_ZA = 5,
 	BAR_SORT_COUNT = 6,
 } BarStationSorting_t;
-
-typedef enum { SB_ALBUM_ART_AUTO = 0, SB_ALBUM_ART_PIXEL, SB_ALBUM_ART_OFF } SbAlbumArtMode;
-typedef enum { SB_LYRICS_DISPLAY_OFF = 0, SB_LYRICS_DISPLAY_LINE,
-	SB_LYRICS_DISPLAY_THREE_LINE } SbLyricsDisplay;
 
 typedef struct {
 	char *prefix;

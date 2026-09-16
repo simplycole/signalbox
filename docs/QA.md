@@ -1,39 +1,22 @@
 # TUI supervised authenticated QA
 
-## Windows W1 compile and CLI smoke — passed
+## Windows implementation status and smoke test
 
-W1 passed on Windows 11 with MSYS2 UCRT64 and MinGW-w64 GCC 16.2.0. The build
-produced an x86-64 PE32+ `signalbox.exe`, and the following native checks passed:
+The native Windows 11 build, shared TUI renderer, Win32 input/resize adapter,
+portable CA fallback, and libao/WMM playback path are implemented. Prior
+bring-up verified a native x64 build and clean captured-audio playback on
+physical Windows hardware. The complete physical-host release-candidate matrix
+remains pending; Parallels guest audio is not the quality reference.
 
-From an MSYS2 UCRT64 shell with the packages listed in `WINDOWS.md`:
-
-```sh
-make clean all
-make spectrum-test
-./signalbox.exe --help
-./signalbox.exe --help > help.txt
-./signalbox.exe --tui --classic
-./signalbox.exe --classic --tui
-./signalbox.exe --tui
-```
-
-The spectrum test and both help calls exited 0. Each conflicting-mode call
-printed `signalbox: --tui and --classic cannot be used together` and exited 2.
-Explicit `--tui` printed
-`signalbox: TUI is not available in this Windows W1 build` and exited 1. Help
-output also succeeded when redirected. Playback, credentials, event/password
-commands, audio/FIFO paths, and local command transport remain outside W1.
-
-## Windows W2 TUI validation — pending
-
-The W2 shared-renderer implementation is present. From an MSYS2 UCRT64 shell
-hosted in Windows Terminal, run:
+From an MSYS2 UCRT64 shell hosted in Windows Terminal, with the packages in
+`WINDOWS.md`, run:
 
 ```sh
 make clean
-make spectrum-test
 make
+make test
 ./signalbox.exe --help
+./signalbox.exe --version
 ./signalbox.exe --tui
 ./signalbox.exe
 ./signalbox.exe --classic
@@ -41,15 +24,17 @@ make
 ./signalbox.exe --classic --tui
 ```
 
-For both TUI launches, verify large/small/maximized/restored resize cycles,
-`q`, `?`, Tab, Shift+Tab, arrows, j/k, PgUp/PgDn, Home/End, Enter, `/`, `#`,
-`z`, `f`, `G`, `h`, `u`, `V`, `(`, `)`, and `^`. Exercise phosphor, amber,
-neutral, mono, and `NO_COLOR`; inspect hearts, ban markers, blocks, ACS borders,
-and ASCII fallbacks. After `q`, verify prompt, echo, cursor, colors, console
-modes, and input/output code pages are restored. Run redirected no-flag and
-explicit-TUI cases to confirm classic selection and the interactive-terminal
-diagnostic respectively. This pass must not claim or exercise Windows audio,
-Credential Manager, or Named Pipe control.
+Verify clean output from all tests, large/small/maximized/restored resize
+cycles, station filtering and switching, normal playback, art fallback,
+synced/plain lyrics, Track Info, and quit/relaunch cache reuse. Exercise
+phosphor, amber, neutral, mono, and `NO_COLOR`; inspect Unicode and ASCII
+fallbacks. After `q`, verify prompt, echo, cursor, colors, console modes, and
+input/output code pages are restored. Run redirected no-flag and explicit-TUI
+cases to confirm classic selection and the interactive-terminal diagnostic.
+Also verify an explicit `ca_bundle` and `cert.pem` beside the executable.
+
+Credential Manager, event/password subprocesses, audio pipes, and Named Pipe
+control are not implemented and must report that limitation clearly.
 
 This checklist prepares a manual session against a real Pandora account. It
 does not authorize automated account changes. Perform the read-only sections
@@ -89,18 +74,17 @@ remaps them.
 
 ## Diagnostic capture
 
-Use the metadata-only trace for a supervised run:
+Use the TUI support trace for a supervised run:
 
 ```sh
-SIGNALBOX_DEBUG_TUI=1 ./signalbox --tui 2>signalbox-tui.log
+SIGNALBOX_DEBUG_TUI=1 ./signalbox --tui
 ```
 
-It records renderer lifecycle, modal titles, command names, selection
-indices/counts, model generations, activity transitions, and station-list
-counts. It does not record credentials, tokens, station names/IDs, track
-metadata, config contents, or request/response bodies. Do not enable
-`PIANOBAR_DEBUG` for authenticated QA: its network mode can print protocol
-response bodies. Review the diagnostic log before sharing it anyway.
+Diagnostics go to `signalbox-tui-debug.log`, never curses stderr. The log does
+not contain credentials, tokens, config contents, or raw API responses, but it
+can contain track metadata, station-filter text, provider IDs/URLs, and local
+cache paths. Review it before sharing. Do not enable legacy `PIANOBAR_DEBUG`
+for authenticated QA.
 
 ## Recommended order
 
@@ -265,6 +249,32 @@ running the signed build. This migration is intentionally manual: the build
 never deletes credentials or broadens Keychain access. Never use an ACL that
 allows every application.
 
+## G3. Enrichment, art, lyrics, and prefetch
+
+- **Action:** Let several tracks start normally, including a transition near
+  the end of a fetched playlist. **Expected:** playback begins without waiting
+  for enrichment; the next playlist is prefetched once near exhaustion and is
+  used only for the same station/generation. A station switch must discard stale
+  prefetched or enrichment results.
+- **Action:** Press `i` (or `I`) before, during, and after enrichment completes.
+  **Expected:** Track Info updates in place and uses `Available`, `No match`, or
+  `Temporarily unavailable` for metadata; album art uses `Loading`, `Ready`,
+  `None`, or `Unavailable`. Provider errors do not interrupt playback.
+- **Action:** Observe a track with cover art, one with no match, and a narrow or
+  low-color terminal. **Expected:** art loads once, remains stable during
+  progress redraws, resizes only when its source/layout/color key changes, and
+  falls back to text without corrupting the screen.
+- **Action:** Press `L` (or `l`) for synced, plain-only, instrumental, no-match,
+  and temporarily unavailable results when available. **Expected:** state text
+  is `Synced`, `Plain`, `Instrumental`, `No match`, or `Temporarily unavailable`;
+  synced highlighting follows playback and recovers after pause/seek-like
+  discontinuities. `lyrics_display = off|line|three-line` affects only inline
+  lyrics, not the full Lyrics view.
+- **Action:** Quit after enrichment, relaunch, and revisit the same track if
+  practical. **Expected:** valid metadata/lyrics/art cache entries are reused;
+  corrupt or incompatible cache files are ignored; transient failures are not
+  persisted as permanent misses.
+
 ## H. History/upcoming
 
 - **Action:** Accumulate more history than fits in RECENT, including tracks with
@@ -399,3 +409,30 @@ delete. It does not make mutations safe: QuickMix affects a global mix,
 bookmarks live outside the station, and seed/feedback removal can erase server
 personalization. Record names and original membership/mode before changes,
 restore reversible global state, and delete the temporary station last.
+
+## Release-candidate checklist
+
+### macOS
+
+- [ ] `make clean && make` (or `gmake`) completes without warnings.
+- [ ] Fresh launch/login, playback, station filtering/switching, art, synced and
+  plain lyrics, Track Info, queue prefetch, resize/narrow layout, and quit pass.
+- [ ] Relaunch reuses valid enrichment/art cache data without stale publication.
+
+### Windows
+
+- [ ] Clean UCRT64 build and `make test` pass with the WinCon backend.
+- [ ] Explicit `ca_bundle` and portable sibling `cert.pem` both validate TLS.
+- [ ] Physical-Windows playback, TUI, station switch, resize, lyrics, and
+  album-art color/text fallback pass without terminal corruption.
+- [ ] Quit restores the console; relaunch reuses cache data. Parallels audio is
+  recorded separately and is not treated as the physical-hardware verdict.
+
+### General
+
+- [ ] `./signalbox --help`, `./signalbox --version`, and the installed manpage
+  agree with the executable and `contrib/config-example`.
+- [ ] All test targets pass; expected provider/parser diagnostics are recorded.
+- [ ] `git diff --check` passes and `git status` contains only intentional
+  source/documentation changes, with no generated binaries, logs, caches, or
+  editor/platform junk staged for release.

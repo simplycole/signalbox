@@ -24,8 +24,8 @@ station-management foundation inherited from pianobar.
 .. |License| image:: https://img.shields.io/badge/license-MIT-39ff88.svg
    :target: COPYING
    :alt: MIT License
-.. |Platforms| image:: https://img.shields.io/badge/platform-macOS%20%7C%20Linux-58d6ff.svg
-   :alt: macOS and Linux
+.. |Platforms| image:: https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-58d6ff.svg
+   :alt: macOS, Linux, and Windows
 
 Why Signalbox?
 --------------
@@ -49,6 +49,8 @@ Highlights
   and full in-memory session history
 - Synced LRCLIB lyrics with an adaptive previous/current/next strip and
   current-line highlighting in the full Lyrics view
+- Background MusicBrainz enrichment, Cover Art Archive resolution, queue
+  prefetch, and a schema-versioned persistent enrichment cache
 - Native TUI flows for station creation, rename/delete, QuickMix, genres,
   seeds, feedback, bookmarks, and station modes
 - Configurable bindings with an in-app, responsive, scrollable HELP overlay
@@ -93,6 +95,8 @@ are reflected there automatically.
      - Session history / upcoming tracks
    * - ``V``
      - Toggle the spectrum analyzer
+   * - ``i`` / ``L``
+     - Open Track Info / Lyrics; arrows or ``j``/``k`` scroll, Esc closes
    * - ``?`` / ``q``
      - HELP / quit
 
@@ -107,9 +111,10 @@ available when the inline display is off or only plain lyrics are available.
 Build and run
 -------------
 
-Signalbox currently targets macOS and Linux. You need a C99 compiler,
+Signalbox targets macOS, Linux, and native Windows x64. On Unix you need a C99 compiler,
 ``pkg-config``, FFmpeg (``libavcodec``, ``libavformat``, ``libavutil``, and
-``libavfilter``), libcurl, libgcrypt, json-c, libao, pthreads, and ``ncursesw``.
+``libavfilter`` plus ``libswscale``), libcurl, libgcrypt, json-c, libao,
+pthreads, and ``ncursesw``.
 
 macOS (Homebrew)
 ~~~~~~~~~~~~~~~~
@@ -145,12 +150,16 @@ Useful options:
    ./signalbox --tui
    ./signalbox --classic
    ./signalbox --forget-credentials
+   ./signalbox --version
 
 Install under ``/usr/local`` with ``sudo make install`` (or ``gmake install``
-on macOS). Override ``PREFIX`` or use ``DESTDIR`` for packaging. See the
-`annotated configuration`_ for settings and key remapping.
+on macOS). Override ``PREFIX`` or use ``DESTDIR`` for packaging. Windows uses
+MSYS2 UCRT64, PDCursesMod WinCon, and the packaged libao/WMM backend; see
+`Windows build and runtime notes`_. See the `annotated configuration`_ for
+settings and key remapping.
 
 .. _annotated configuration: contrib/config-example
+.. _Windows build and runtime notes: docs/WINDOWS.md
 
 Configuration and credentials
 -----------------------------
@@ -184,20 +193,21 @@ Pandora is a third-party service and trademark.
 Roadmap
 -------
 
-Near-term work is deliberately platform-first:
+Near-term work is deliberately release-focused:
 
 1. Linux Secret Service runtime validation across selected desktops
-2. Windows portability boundaries and a Credential Manager backend
+2. Complete physical-Windows RC validation and add a Credential Manager backend
 3. Continue classic/FIFO/headless compatibility validation with the TUI as the
    interactive default
 4. Persistent listening history with explicit retention and privacy behavior
-5. Richer visualizer modes and optional terminal artwork
+5. Richer visualizer modes and broader terminal-art compatibility
 6. Homebrew/Linux packaging and reproducible releases
 
-Native Windows x64 builds are in active development. The development branch
-contains a shared-renderer Windows Terminal TUI using PDCursesMod; Windows 11
-runtime validation, audio playback, credential storage, packaging, and release
-support are still in progress. See the detailed `roadmap`_, `TUI design`_, `architecture`_,
+Native Windows x64 builds use the shared TUI renderer with PDCursesMod WinCon,
+native Win32 input, FFmpeg, and libao/WMM. Build/TUI/audio work has been exercised
+on Windows 11, including clean audio capture playback on physical Windows; the
+complete release-candidate matrix, Credential Manager integration, packaging,
+and CI remain pending. See the detailed `roadmap`_, `TUI design`_, `architecture`_,
 `upstream record`_, and `QA checklist`_.
 
 .. _roadmap: docs/ROADMAP.md

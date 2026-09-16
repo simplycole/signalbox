@@ -73,14 +73,24 @@ THE SOFTWARE.
 #include "ui_dispatch.h"
 #include "ui_readline.h"
 
-static const char *BarMainLookupState (const SbLookupStatus status) {
+static const char *BarMainMetadataState (const SbLookupStatus status) {
 	switch (status) {
 		case SB_LOOKUP_LOADING: return "Loading";
 		case SB_LOOKUP_AVAILABLE: return "Available";
-		case SB_LOOKUP_INSTRUMENTAL: return "Instrumental";
 		case SB_LOOKUP_NO_MATCH: return "No match";
 		case SB_LOOKUP_UNAVAILABLE: return "Temporarily unavailable";
-		case SB_LOOKUP_ERROR: return "Error";
+		case SB_LOOKUP_ERROR: return "Temporarily unavailable";
+		default: return "Not requested";
+	}
+}
+
+static const char *BarMainAlbumArtState (const SbLookupStatus status) {
+	switch (status) {
+		case SB_LOOKUP_LOADING: return "Loading";
+		case SB_LOOKUP_AVAILABLE: return "Ready";
+		case SB_LOOKUP_NO_MATCH: return "None";
+		case SB_LOOKUP_UNAVAILABLE:
+		case SB_LOOKUP_ERROR: return "Unavailable";
 		default: return "Not requested";
 	}
 }
@@ -107,7 +117,7 @@ static char *BarMainTrackInfoText (BarApp_t *app) {
 	BarMainAppendField (text, sizeof (text), "Rating",
 			song->rating == PIANO_RATE_LOVE ? "Loved" : song->rating == PIANO_RATE_BAN ? "Banned" : NULL);
 	strncat (text, "\n\nENRICHMENT", sizeof (text) - strlen (text) - 1);
-	BarMainAppendField (text, sizeof (text), "Metadata", BarMainLookupState (m->status));
+	BarMainAppendField (text, sizeof (text), "Metadata", BarMainMetadataState (m->status));
 	BarMainAppendField (text, sizeof (text), "Provider", m->provider);
 	if (m->status == SB_LOOKUP_AVAILABLE) {
 		char confidence[32]; snprintf (confidence, sizeof (confidence), "%.0f%%", m->confidence * 100.0);
@@ -128,7 +138,7 @@ static char *BarMainTrackInfoText (BarApp_t *app) {
 	strncat (text, "\n\nALBUM ART", sizeof (text) - strlen (text) - 1);
 	BarMainAppendField (text, sizeof (text), "State",
 			app->settings.albumArtMode == SB_ALBUM_ART_OFF ? "Disabled" :
-			BarMainLookupState (app->albumArt.status));
+			BarMainAlbumArtState (app->albumArt.status));
 	BarMainAppendField (text, sizeof (text), "Provider", app->albumArt.provider);
 	return strdup (text);
 }
@@ -140,7 +150,9 @@ static char *BarMainLyricsText (BarApp_t *app) {
 	if (lyrics->status == SB_LOOKUP_LOADING) message = "Looking up lyrics...";
 	else if (lyrics->status == SB_LOOKUP_INSTRUMENTAL) message = "Instrumental track\nNo lyrics";
 	else if (lyrics->status == SB_LOOKUP_NO_MATCH) message = "Lyrics unavailable\nNo match found";
-	else if (lyrics->status == SB_LOOKUP_ERROR) message = "Lyrics unavailable\nProvider error";
+	else if (lyrics->status == SB_LOOKUP_ERROR ||
+			lyrics->status == SB_LOOKUP_UNAVAILABLE)
+		message = "Lyrics unavailable\nTemporarily unavailable";
 	else if (body == NULL) message = "Lyrics unavailable\nNo match found";
 	const char *artist = lyrics->artist[0] ? lyrics->artist : app->trackIdentity.artist;
 	const char *title = lyrics->title[0] ? lyrics->title : app->trackIdentity.title;
@@ -154,7 +166,7 @@ static char *BarMainLyricsText (BarApp_t *app) {
 		strncat (text, body != NULL ? body : message, needed - strlen (text) - 1);
 	}
 	free (body);
-	return text != NULL ? text : strdup ("Lyrics unavailable\nProvider error");
+	return text != NULL ? text : strdup ("Lyrics unavailable\nTemporarily unavailable");
 }
 
 typedef struct { BarApp_t *app; bool lyrics; } BarEnrichmentModal;
@@ -325,7 +337,7 @@ static bool BarMainGetLoginCredentials (BarSettings_t *settings,
 		} else {
 #ifdef _WIN32
 			BarUiMsg (settings, MSG_NONE,
-					"Error: password_command is unavailable on Windows W1.\n");
+					"Error: password_command is unavailable on Windows.\n");
 			return false;
 #else
 			pid_t chld;
@@ -604,15 +616,23 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 	app->metadata.status = SB_LOOKUP_LOADING;
 	SbLyricsResultDestroy (&app->lyrics); app->lyrics.status = SB_LOOKUP_LOADING;
 	snprintf (app->lyrics.provider, sizeof (app->lyrics.provider), "LRCLIB");
-	SbAlbumArtResultInit(&app->albumArt); app->albumArt.status=SB_LOOKUP_LOADING;
-	app->uiModel.artState=SB_LOOKUP_LOADING; app->uiModel.artCachedPath[0]='\0';
-	tuiDebugPrint ("art state=loading generation=%llu artist=\"%s\" title=\"%s\" album=\"%s\"\n",
+	SbAlbumArtResultInit(&app->albumArt);
+	app->albumArt.status = app->metadataResolver.artStarted ?
+			SB_LOOKUP_LOADING : SB_LOOKUP_UNAVAILABLE;
+	app->uiModel.artState=app->albumArt.status; app->uiModel.artCachedPath[0]='\0';
+	tuiDebugPrint ("art state=%s generation=%llu artist=\"%s\" title=\"%s\" album=\"%s\"\n",
+			app->albumArt.status == SB_LOOKUP_LOADING ? "loading" : "unavailable",
 			(unsigned long long) app->enrichmentGeneration, curSong->artist,
 			curSong->title, curSong->album);
 	if (app->metadataResolver.started) SbMetadataResolverRequest (
 			&app->metadataResolver, &app->trackIdentity, app->enrichmentGeneration);
-	else { app->metadata.status = SB_LOOKUP_ERROR; snprintf (app->metadata.error,
-			sizeof (app->metadata.error), "Metadata worker unavailable"); }
+	else {
+		app->metadata.status = SB_LOOKUP_ERROR;
+		app->lyrics.status = SB_LOOKUP_UNAVAILABLE;
+		app->albumArt.status = app->uiModel.artState = SB_LOOKUP_UNAVAILABLE;
+		snprintf (app->metadata.error, sizeof (app->metadata.error),
+				"Metadata worker unavailable");
+	}
 	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_SONG);
 
 	static const char httpPrefix[] = "http://";
@@ -891,11 +911,18 @@ int main (int argc, char **argv) {
 			}
 			mode = MODE_CLASSIC;
 		} else if (strcmp (argv[i], "--help") == 0) {
-			printf ("Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--visualizer spectrum|off] [--forget-credentials]\n"
-					"  --tui       force curses TUI\n"
-					"  --classic   force classic terminal UI\n"
+			printf ("Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--visualizer spectrum|off] [--forget-credentials] [--version]\n"
+					"  --tui                    force curses TUI\n"
+					"  --classic                force classic terminal UI\n"
+					"  --theme NAME             select a TUI color theme\n"
+					"  --visualizer MODE        select spectrum or off\n"
+					"  --forget-credentials     remove the saved account password\n"
+					"  --version                print version information\n"
 					"TUI is selected automatically on supported interactive terminals.\n",
 					argv[0]);
+			return 0;
+		} else if (strcmp (argv[i], "--version") == 0) {
+			printf ("%s %s\n", PROGRAM_NAME, VERSION);
 			return 0;
 		} else if (strcmp (argv[i], "--forget-credentials") == 0) {
 			forgetCredentials = true;
@@ -918,7 +945,7 @@ int main (int argc, char **argv) {
 				return 2;
 			}
 		} else {
-			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--visualizer spectrum|off] [--forget-credentials]\n", argv[0]);
+			fprintf (stderr, "Usage: %s [--tui|--classic] [--theme phosphor|amber|mono|neutral] [--visualizer spectrum|off] [--forget-credentials] [--version]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -948,10 +975,10 @@ int main (int argc, char **argv) {
 
 #if defined(SIGNALBOX_PDCURSES_WINCON)
 	if (app.useTui)
-		fputs ("[signalbox:windows] renderer=wincon input=win32_event\n", stderr);
+		tuiDebugPrint ("windows renderer=wincon input=win32_event\n");
 #elif defined(SIGNALBOX_PDCURSES_VT)
 	if (app.useTui)
-		fputs ("[signalbox:windows] renderer=vt input=win32_event\n", stderr);
+		tuiDebugPrint ("windows renderer=vt input=win32_event\n");
 #endif
 
 	/* save terminal attributes, before disabling echoing */

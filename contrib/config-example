@@ -5,6 +5,8 @@
 #visualizer = spectrum
 # Cached art in Now Playing: auto, pixel, or off
 #album_art = auto
+# Inline synced lyrics: three-line, line, or off
+#lyrics_display = three-line
 #
 # User
 #user = your@user.name
@@ -25,8 +27,11 @@
 #act_stationdelete = d
 #act_songexplain = e
 #act_stationaddbygenre = g
+#act_history = h
 #act_songinfo = i
 #act_addshared = j
+#act_bookmark = b
+#act_managestation = =
 #act_songnext = n
 #act_songpause = S
 #act_songpausetoggle = p
@@ -42,17 +47,24 @@
 #act_voldown = (
 #act_volup = )
 #act_volreset = ^
+#act_settings = !
 
 # Misc
-#audio_quality = low
+#audio_quality = high
 #autostart_station = 123456
+#buffer_seconds = 5
 #event_command = /home/user/.config/signalbox/eventcmd
 #fifo = /tmp/signalbox
-#sort = quickmix_10_name_az
+#history = 5
+#max_retry = 5
+#sort = name_az
+#timeout = 30
 #volume = 0
+# Optional CA bundle override. On Windows, cert.pem beside signalbox.exe is
+# used automatically when this is unset.
 #ca_bundle = /etc/ssl/certs/ca-certificates.crt
 #gain_mul = 1.0
-#sample_rate = 44100
+#sample_rate = 0
 #audio_pipe = /tmp/mypipe
 
 # Format strings
@@ -65,9 +77,9 @@
 #format_list_song = %i) %a - %t%r (%d)%@%s
 #format_time = %e/%t
 
-#rpc_host = internal-tuner.pandora.com
-#partner_user = pandora one
-#partner_password = TVCKIBGS9AO9TSYLNNFUML0743LH82D
-#device = D01
-#encrypt_password = 2%3WCL*JU$MP]4
-#decrypt_password = U#IO$RZPAB%VX2
+#rpc_host = tuner.pandora.com
+#partner_user = android
+#partner_password = AC7IBG09A3DTSYM4R41UJWL07VLN8JI7
+#device = android-generic
+#encrypt_password = 6#26FRL$ZWD
+#decrypt_password = R=U!LH$O2B#
