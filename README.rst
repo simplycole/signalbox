@@ -36,6 +36,46 @@ an early-stage project: the TUI is the default on supported interactive
 terminals, while classic pianobar-compatible mode remains available for
 compatibility and headless use.
 
+Downloads
+---------
+
+The latest release is `Signalbox 0.1.1`_. Matching ``.sha256`` checksum files
+are available on the release page.
+
+macOS
+~~~~~
+
+- **Apple Silicon / arm64**
+- Download `signalbox-0.1.1-macos-arm64.tar.gz`_.
+- Install the required Homebrew runtime dependencies with
+  ``brew install ffmpeg libgcrypt json-c libao``.
+- See the included ``README.txt`` for package-specific setup and usage.
+
+Linux
+~~~~~
+
+- **x86_64**
+- Download `signalbox-0.1.1-linux-x86_64.tar.gz`_.
+- This package is dynamically linked for the tested Linux environment.
+- See the included ``README.txt`` for dependencies, setup, and usage.
+
+Windows
+~~~~~~~
+
+Native Windows support is implemented and has been exercised on Windows 11,
+but v0.1.1 does not include a downloadable Windows binary. Portable Windows
+packaging remains future work.
+
+Source
+~~~~~~
+
+GitHub automatically provides source-code ZIP and tar.gz archives on the
+release page. Building from source remains fully supported.
+
+.. _Signalbox 0.1.1: https://github.com/simplycole/signalbox/releases/tag/v0.1.1
+.. _signalbox-0.1.1-macos-arm64.tar.gz: https://github.com/simplycole/signalbox/releases/download/v0.1.1/signalbox-0.1.1-macos-arm64.tar.gz
+.. _signalbox-0.1.1-linux-x86_64.tar.gz: https://github.com/simplycole/signalbox/releases/download/v0.1.1/signalbox-0.1.1-linux-x86_64.tar.gz
+
 Highlights
 ----------
 
@@ -118,22 +158,8 @@ available when the inline display is off or only plain lyrics are available.
 Build and run
 -------------
 
-Downloads / binary releases
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Binary release packages are provided for macOS arm64 and Linux x86_64. They
-are produced with ``make package-macos`` on an Apple Silicon Mac and
-``make package-linux`` on x86_64 Linux. Building from source remains fully
-supported.
-
-The macOS arm64 archive uses Homebrew's ``ffmpeg``, ``libgcrypt``, ``json-c``,
-and ``libao`` shared libraries rather than bundling them. The Linux x86_64
-archive is dynamically linked and targets the Ubuntu environment exercised by
-GitHub Actions, not every Linux distribution. Each archive includes its exact
-set of support files, documents its runtime prerequisites, and has a SHA-256
-checksum. Native Windows support is implemented and has been exercised on
-Windows 11, including TUI, TLS/CA handling, and captured audio playback on
-physical hardware, but no Windows binary package is included in 0.1.1.
+Use one of the packaged releases above, or build Signalbox from source using
+the platform instructions below.
 
 Build from source
 ~~~~~~~~~~~~~~~~~
@@ -223,11 +249,12 @@ Roadmap
 Near-term work is deliberately release-focused:
 
 1. Linux Secret Service runtime validation across selected desktops
-2. Complete physical-Windows RC validation and add a Credential Manager backend
+2. Complete physical-Windows RC validation, Credential Manager integration,
+   and portable Windows packaging
 3. Continue classic/FIFO/headless compatibility validation with the TUI as the
    interactive default
 4. Persistent listening history with explicit retention and privacy behavior
-5. Richer visualizer modes and broader terminal-art compatibility
+5. Richer visualizer modes and evaluation of optional terminal-image protocols
 6. Homebrew and native Linux package-manager integration
 
 Native Windows x64 builds use the shared TUI renderer with PDCursesMod WinCon,
