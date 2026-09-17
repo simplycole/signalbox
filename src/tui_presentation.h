@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ui_types.h"
+
 enum { SB_TUI_ART_COMPLETION_MS = 2000 };
 
 typedef struct {
@@ -39,3 +41,7 @@ bool SbTuiPresentationStatus (char *out, size_t size, const char *status,
 		int artState, size_t availableWidth);
 int SbTuiArtStatusUpdate (SbTuiArtStatus *, uint64_t generation, int state,
 		uint64_t nowMs);
+SbUiCommand SbTuiPresentationResolveKey (int key, SbUiCommand configuredCommand);
+const char *SbTuiPresentationStationSortHelp (void);
+const char *SbTuiPresentationCreateStationHelp (void);
+const char *SbTuiPresentationVisualizerHelp (void);

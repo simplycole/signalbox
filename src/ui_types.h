@@ -73,6 +73,8 @@ typedef enum {
 	SB_UI_CMD_ACTIVATE_STATION,
 	/* TUI-local; main updates analyzer/model state without network dispatch. */
 	SB_UI_CMD_TOGGLE_VISUALIZER,
+	/* TUI-local presentation state; consumed by the retained renderer. */
+	SB_UI_CMD_CYCLE_STATION_SORT,
 	/* TUI-local provider-neutral surfaces. */
 	SB_UI_CMD_TRACK_INFO,
 	SB_UI_CMD_LYRICS,

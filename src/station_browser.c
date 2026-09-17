@@ -6,6 +6,43 @@
 #include <string.h>
 #include "station_browser.h"
 
+typedef struct {
+	const PianoStation_t *station;
+	size_t originalIndex;
+} SbStationSortItem;
+
+static int SbStationFoldedCompare (const char *left, const char *right) {
+	if (left == NULL) left = "";
+	if (right == NULL) right = "";
+	while (*left != '\0' && *right != '\0') {
+		const int a = tolower ((unsigned char) *left);
+		const int b = tolower ((unsigned char) *right);
+		if (a != b) return a - b;
+		left++;
+		right++;
+	}
+	return tolower ((unsigned char) *left) -
+			tolower ((unsigned char) *right);
+}
+
+static int SbStationSortCompare (const void *left, const void *right) {
+	const SbStationSortItem * const a = left;
+	const SbStationSortItem * const b = right;
+	const int folded = SbStationFoldedCompare (a->station->name,
+			b->station->name);
+	if (folded != 0) return folded;
+	const char * const an = a->station->name != NULL ? a->station->name : "";
+	const char * const bn = b->station->name != NULL ? b->station->name : "";
+	const int exact = strcmp (an, bn);
+	if (exact != 0) return exact;
+	const char * const ai = a->station->id != NULL ? a->station->id : "";
+	const char * const bi = b->station->id != NULL ? b->station->id : "";
+	const int id = strcmp (ai, bi);
+	if (id != 0) return id;
+	return a->originalIndex < b->originalIndex ? -1 :
+			(a->originalIndex > b->originalIndex ? 1 : 0);
+}
+
 static bool SbStationContainsFolded (const char *text, const char *needle) {
 	if (needle[0] == '\0') return true;
 	if (text == NULL) return false;
@@ -32,23 +69,29 @@ bool SbStationBrowserRebuild (SbStationBrowser *browser,
 		browser->sourceGeneration = generation;
 		return true;
 	}
-	browser->visibleStations = malloc (browser->totalCount *
-			sizeof (*browser->visibleStations));
-	if (browser->visibleStations == NULL) return false;
+	SbStationSortItem * const items = calloc (browser->totalCount,
+			sizeof (*items));
+	if (items == NULL) return false;
 	station = stations;
 	size_t count = 0;
-	for (; station != NULL; station = PianoListNextP (station)) {
+	for (size_t original = 0; station != NULL;
+			original++, station = PianoListNextP (station)) {
 		if (!SbStationContainsFolded (station->name, browser->filter)) continue;
-		browser->visibleStations[count++] = station;
+		items[count++] = (SbStationSortItem) {station, original};
 	}
-	if (count == 0) {
-		free (browser->visibleStations);
-		browser->visibleStations = NULL;
-	} else {
-		const PianoStation_t **resized = realloc (browser->visibleStations,
-				count * sizeof (*browser->visibleStations));
-		if (resized != NULL) browser->visibleStations = resized;
+	if (browser->sort == SB_STATION_SORT_A_Z && count > 1)
+		qsort (items, count, sizeof (*items), SbStationSortCompare);
+	if (count > 0) {
+		browser->visibleStations = malloc (count *
+				sizeof (*browser->visibleStations));
+		if (browser->visibleStations == NULL) {
+			free (items);
+			return false;
+		}
+		for (size_t i = 0; i < count; i++)
+			browser->visibleStations[i] = items[i].station;
 	}
+	free (items);
 	browser->visibleCount = count;
 	browser->sourceGeneration = generation;
 	return true;
@@ -61,9 +104,21 @@ bool SbStationBrowserSetFilter (SbStationBrowser *browser, const char *filter) {
 	return true;
 }
 
+SbStationSort SbStationBrowserCycleSort (SbStationBrowser *browser) {
+	assert (browser != NULL);
+	browser->sort = (SbStationSort) ((browser->sort + 1) %
+			SB_STATION_SORT_COUNT);
+	return browser->sort;
+}
+
+const char *SbStationBrowserSortName (const SbStationSort sort) {
+	return sort == SB_STATION_SORT_ORIGINAL ? "ORIGINAL" : "A-Z";
+}
+
 bool SbStationBrowserInit (SbStationBrowser *browser) {
 	assert (browser != NULL);
 	memset (browser, 0, sizeof (*browser));
+	browser->sort = SB_STATION_SORT_A_Z;
 	return true;
 }
 

@@ -4,8 +4,27 @@
 
 #include "tui_presentation.h"
 #include "enrichment.h"
+#include "settings.h"
+#include "ui_dispatch.h"
 
 int main (void) {
+	BarSettings_t settings = {0};
+	for (size_t i = 0; i < BAR_KS_COUNT; i++)
+		settings.keys[i] = dispatchActions[i].defaultKey;
+	assert (BarUiCommandFromKey (&settings, 'v') ==
+			SB_UI_CMD_CREATE_STATION_FROM_SONG);
+	assert (BarUiCommandFromKey (&settings, 'V') == SB_UI_CMD_NONE);
+	assert (SbTuiPresentationResolveKey ('v', BarUiCommandFromKey (&settings, 'v')) ==
+			SB_UI_CMD_CREATE_STATION_FROM_SONG);
+	assert (SbTuiPresentationResolveKey ('V', BarUiCommandFromKey (&settings, 'V')) ==
+			SB_UI_CMD_TOGGLE_VISUALIZER);
+	assert (SbTuiPresentationResolveKey ('z', SB_UI_CMD_NONE) ==
+			SB_UI_CMD_CYCLE_STATION_SORT);
+	assert (SbTuiPresentationResolveKey ('V', SB_UI_CMD_HELP) == SB_UI_CMD_HELP);
+	assert (strstr (SbTuiPresentationStationSortHelp (), "A-Z / Original") != NULL);
+	assert (strstr (SbTuiPresentationCreateStationHelp (), "Create station") != NULL);
+	assert (strcmp (SbTuiPresentationVisualizerHelp (), "Toggle visualizer") == 0);
+
 	assert (SbTuiPresentationFieldRole ("Artist") == SB_TUI_TEXT_ARTIST);
 	assert (SbTuiPresentationFieldRole ("Canonical Track") == SB_TUI_TEXT_TRACK);
 	assert (SbTuiPresentationFieldRole ("Release") == SB_TUI_TEXT_ALBUM);

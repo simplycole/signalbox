@@ -114,3 +114,23 @@ int SbTuiArtStatusUpdate (SbTuiArtStatus *tracker, const uint64_t generation,
 	}
 	return tracker->displayState;
 }
+
+SbUiCommand SbTuiPresentationResolveKey (const int key,
+		const SbUiCommand configuredCommand) {
+	if (key == 'z') return SB_UI_CMD_CYCLE_STATION_SORT;
+	if (key == 'V' && configuredCommand == SB_UI_CMD_NONE)
+		return SB_UI_CMD_TOGGLE_VISUALIZER;
+	return configuredCommand;
+}
+
+const char *SbTuiPresentationStationSortHelp (void) {
+	return "Station sort: A-Z / Original";
+}
+
+const char *SbTuiPresentationCreateStationHelp (void) {
+	return "Create station from song / artist";
+}
+
+const char *SbTuiPresentationVisualizerHelp (void) {
+	return "Toggle visualizer";
+}

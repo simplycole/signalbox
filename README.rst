@@ -85,6 +85,10 @@ are reflected there automatically.
      - Switch between Stations and Recent
    * - ``/``
      - Edit the focused station pane's case-insensitive name filter
+   * - ``z``
+     - Cycle the station view between A-Z and original Pandora order
+   * - ``v``
+     - Create a station from the current song or artist
    * - ``p`` / ``n``
      - Pause or resume / next track
    * - ``+`` / ``-``
@@ -94,15 +98,16 @@ are reflected there automatically.
    * - ``h`` / ``u``
      - Session history / upcoming tracks
    * - ``V``
-     - Toggle the spectrum analyzer
+     - Toggle the visualizer
    * - ``i`` / ``L``
      - Open Track Info / Lyrics; arrows or ``j``/``k`` scroll, Esc closes
    * - ``?`` / ``q``
      - HELP / quit
 
-The inherited action keys can be remapped in the config. ``V`` is available
-for the visualizer only when it does not conflict with a configured action;
-lowercase ``v`` retains its pianobar action.
+The inherited action keys can be remapped in the config. Lowercase ``v`` opens
+Create Station From for the current song or artist. Uppercase ``V`` is
+available for the visualizer only when it does not conflict with a configured
+action.
 
 Set ``lyrics_display = three-line`` (the default), ``line``, or ``off`` in
 the config to control inline synced lyrics. The full Lyrics view remains

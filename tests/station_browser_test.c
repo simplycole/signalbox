@@ -12,6 +12,8 @@ static void Link (PianoStation_t *stations, const size_t count) {
 int main (void) {
 	SbStationBrowser browser;
 	assert (SbStationBrowserInit (&browser));
+	assert (browser.sort == SB_STATION_SORT_A_Z);
+	assert (strcmp (SbStationBrowserSortName (browser.sort), "A-Z") == 0);
 	assert (SbStationBrowserRebuild (&browser, NULL, 1));
 	assert (browser.totalCount == 0 && browser.visibleCount == 0);
 	assert (strcmp (SbStationBrowserEmptyText (&browser),
@@ -27,15 +29,24 @@ int main (void) {
 	memset (longName, 'x', sizeof (longName) - 1); longName[299] = '\0';
 	PianoStation_t stations[] = {
 		{.name = "Rock One", .id = "id-1"},
-		{.name = "Duplicate", .id = "id-2"},
-		{.name = "duplicate", .id = "id-3"},
+		{.name = "duplicate", .id = "id-2"},
+		{.name = "Duplicate", .id = "id-3"},
 		{.name = "Jazz", .id = "id-4"},
 		{.name = longName, .id = "id-5"},
 	};
 	Link (stations, 5);
+	PianoStation_t *originalNext[5];
+	for (size_t i = 0; i < 5; i++)
+		originalNext[i] = (PianoStation_t *) PianoListNextP (&stations[i]);
 	assert (SbStationBrowserRebuild (&browser, stations, 2));
 	assert (browser.totalCount == 5 && browser.visibleCount == 5);
-	for (size_t i = 0; i < 5; i++) assert (SbStationBrowserAt (&browser, i) == &stations[i]);
+	const PianoStation_t *alphabetical[] = {
+		&stations[2], &stations[1], &stations[3], &stations[0], &stations[4],
+	};
+	for (size_t i = 0; i < 5; i++) {
+		assert (SbStationBrowserAt (&browser, i) == alphabetical[i]);
+		assert (PianoListNextP (&stations[i]) == originalNext[i]);
+	}
 	assert (SbStationBrowserIsCurrent (&stations[3], &stations[3]));
 	assert (!SbStationBrowserIsCurrent (&stations[2], &stations[3]));
 	assert (SbStationBrowserMove (&browser, 0, -1) == 0);
@@ -46,14 +57,29 @@ int main (void) {
 	assert (SbStationBrowserScroll (&browser, 3, 0, 2) == 2);
 	assert (SbStationBrowserScroll (&browser, 4, 2, 2) == 3);
 
-	const PianoStation_t *selected = &stations[2];
+	const PianoStation_t *selected = &stations[1];
+	assert (SbStationBrowserFind (&browser, selected) == 1);
 	assert (SbStationBrowserSetFilter (&browser, "DUP"));
 	assert (SbStationBrowserRebuild (&browser, stations, 2));
 	assert (browser.visibleCount == 2);
+	assert (SbStationBrowserAt (&browser, 0) == &stations[2]);
+	assert (SbStationBrowserAt (&browser, 1) == &stations[1]);
+	assert (SbStationBrowserFind (&browser, selected) == 1);
+	assert (strcmp (SbStationBrowserAt (&browser, 1)->id, "id-2") == 0);
+
+	assert (SbStationBrowserCycleSort (&browser) == SB_STATION_SORT_ORIGINAL);
+	assert (strcmp (SbStationBrowserSortName (browser.sort), "ORIGINAL") == 0);
+	assert (SbStationBrowserRebuild (&browser, stations, 2));
 	assert (SbStationBrowserAt (&browser, 0) == &stations[1]);
 	assert (SbStationBrowserAt (&browser, 1) == &stations[2]);
+	assert (SbStationBrowserFind (&browser, selected) == 0);
+	assert (SbStationBrowserCycleSort (&browser) == SB_STATION_SORT_A_Z);
+	assert (SbStationBrowserRebuild (&browser, stations, 2));
+	assert (SbStationBrowserAt (&browser, 0) == &stations[2]);
 	assert (SbStationBrowserFind (&browser, selected) == 1);
-	assert (strcmp (SbStationBrowserAt (&browser, 1)->id, "id-3") == 0);
+	for (size_t i = 0; i < 5; i++)
+		assert (PianoListNextP (&stations[i]) == originalNext[i]);
+
 	assert (SbStationBrowserSetFilter (&browser, "DU"));
 	assert (SbStationBrowserRebuild (&browser, stations, 2));
 	assert (SbStationBrowserFind (&browser, selected) == 1);

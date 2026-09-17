@@ -187,14 +187,16 @@ ncurses types remain private to `ui_renderer_curses.c`.
 
 The retained station-pane model uses a lightweight view array of borrowed
 `PianoStation_t` pointers. `station_browser.c` rebuilds it only after a station
-refresh or filter edit; it never relinks or deep-copies the canonical Pandora
-list and preserves Pandora order. Filtering produces visible rows by
-case-insensitive substring match. Renderer selection remains a view index,
-while active and duplicate-name station identities remain canonical pointers
-carrying their Pandora IDs. Enter emits a structured activation command that
-reuses `nextStation` → `drainPlaylist()` → playlist retrieval. That transition
-advances enrichment generation immediately, and prefetch publication also
-checks playlist generation, target/current station agreement, and station ID.
+refresh, filter edit, or view-sort change; it never relinks or deep-copies the
+canonical Pandora list. Filtering first produces canonical pointer matches;
+the view then uses its current A-Z or original-Pandora ordering. A-Z is the TUI
+default, and `z` cycles the presentation-only mode. Renderer selection remains
+a view index re-anchored by canonical pointer, while active and duplicate-name
+station identities remain canonical pointers carrying their Pandora IDs. Enter
+emits a structured activation command that reuses `nextStation` →
+`drainPlaylist()` → playlist retrieval. That transition advances enrichment
+generation immediately, and prefetch publication also checks playlist
+generation, target/current station agreement, and station ID.
 
 In TUI mode the canonical `PianoSong_t` history is also retained for the full
 process lifetime so historical info, station creation, and bookmark actions
@@ -210,8 +212,9 @@ pauses that loop, and its action/details modal completes before playback can
 detach a node. Signalbox does not relink the playlist: libpiano has no
 queue-promotion request or ownership contract for client-side reordering.
 
-Focusing, navigating, and filtering the station pane issue no Pandora requests;
-the rest of the retained main view continues rendering from the same UI model.
+Focusing, navigating, filtering, and sorting the station pane issue no Pandora
+requests; the rest of the retained main view continues rendering from the same
+UI model.
 
 The same synchronous primitives support advanced station operations.
 The action layer fetches genre, seed, feedback, and station-mode data and owns

@@ -577,6 +577,7 @@ static char SbUiCursesKey (const SbUiRenderer *renderer,
 
 typedef enum { SB_HELP_BLANK = 0, SB_HELP_HEADING, SB_HELP_COMMAND } SbHelpRowKind;
 typedef struct { SbHelpRowKind kind; char key[12]; const char *text; } SbHelpRow;
+enum { SB_TUI_HELP_MAX_ROWS = 64 };
 
 static void SbUiCursesHelpAddCommand (SbHelpRow *rows, size_t *count,
 		const char *key, const char *text) {
@@ -619,9 +620,12 @@ static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows)
 	HELP_CONFIG (SB_UI_CMD_VOLUME_RESET, "reset to 0 dB");
 	HELP_BLANK (); HELP_SECTION ("STATIONS");
 	HELP_CONFIG (SB_UI_CMD_SELECT_STATION, "focus station pane");
+	SB_TUI_HELP_COMMAND ("z", SbTuiPresentationStationSortHelp ());
 	SB_TUI_HELP_COMMAND ("/", "filter focused station pane");
 	SB_TUI_HELP_COMMAND ("#", "jump to visible station number");
 	HELP_CONFIG (SB_UI_CMD_GENRE_STATION, "genres");
+	HELP_CONFIG (SB_UI_CMD_CREATE_STATION_FROM_SONG,
+			SbTuiPresentationCreateStationHelp ());
 	HELP_BLANK (); HELP_SECTION ("HISTORY");
 	HELP_CONFIG (SB_UI_CMD_HISTORY, "full session history");
 	SB_TUI_HELP_COMMAND ("Tab", "focus RECENT"); SB_TUI_HELP_COMMAND ("Enter", "history action");
@@ -633,7 +637,7 @@ static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows)
 	SB_TUI_HELP_COMMAND ("L", "lyrics");
 	if (SbUiCursesVisualizerKeyAvailable (renderer)) {
 		HELP_BLANK (); HELP_SECTION ("VISUALIZER");
-		SB_TUI_HELP_COMMAND ("V", "toggle spectrum");
+		SB_TUI_HELP_COMMAND ("V", SbTuiPresentationVisualizerHelp ());
 	}
 #undef HELP_BLANK
 #undef HELP_HEADING
@@ -812,15 +816,17 @@ static void SbUiCursesStationHeader (SbUiCursesData *data,
 		const int y, const int x, const int width) {
 	char header[256];
 	if (data->stationFilterEditing) {
-		snprintf (header, sizeof (header), "STATIONS %zu/%zu  FILTER: %s_",
+		snprintf (header, sizeof (header), "STATIONS %zu/%zu %s  FILTER: %s_",
 				data->browser.visibleCount, data->browser.totalCount,
-				data->browser.filter);
+				SbStationBrowserSortName (data->browser.sort), data->browser.filter);
 	} else if (data->browser.filter[0] != '\0') {
-		snprintf (header, sizeof (header), "STATIONS %zu/%zu",
-				data->browser.visibleCount, data->browser.totalCount);
+		snprintf (header, sizeof (header), "STATIONS %zu/%zu %s",
+				data->browser.visibleCount, data->browser.totalCount,
+				SbStationBrowserSortName (data->browser.sort));
 	} else {
-		snprintf (header, sizeof (header), "STATIONS %zu",
-				data->browser.totalCount);
+		snprintf (header, sizeof (header), "STATIONS %zu %s",
+				data->browser.totalCount,
+				SbStationBrowserSortName (data->browser.sort));
 	}
 	SbUiCursesPut (y, x, width, header);
 }
@@ -1510,7 +1516,7 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 
 	if (data->helpVisible && data->textModalContent == NULL) {
-		SbHelpRow helpRows[48];
+		SbHelpRow helpRows[SB_TUI_HELP_MAX_ROWS];
 		const size_t helpRowCount = SbUiCursesHelpRows (renderer, helpRows);
 		const int wantedHeight = (int) helpRowCount + 5;
 		const int height = wantedHeight < rows - 4 ? wantedHeight : rows - 4;
@@ -2659,7 +2665,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	if (data->helpVisible && (key == KEY_UP || key == 'k' ||
 			key == KEY_DOWN || key == 'j' || key == KEY_HOME ||
 			key == KEY_END || key == KEY_PPAGE || key == KEY_NPAGE)) {
-		SbHelpRow helpRows[48];
+		SbHelpRow helpRows[SB_TUI_HELP_MAX_ROWS];
 		const size_t count = SbUiCursesHelpRows (renderer, helpRows);
 		int rows, cols;
 		getmaxyx (stdscr, rows, cols);
@@ -2769,8 +2775,19 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		return (SbUiCommandEvent) {station != NULL ?
 				SB_UI_CMD_ACTIVATE_STATION : SB_UI_CMD_NONE, station};
 	}
-	if (!data->helpVisible && key == 'V' &&
-			SbUiCursesVisualizerKeyAvailable (renderer)) {
+	const SbUiCommand configuredCommand = key >= 0 && key <= UCHAR_MAX ?
+			BarUiCommandFromKey (renderer->settings, (char) key) : SB_UI_CMD_NONE;
+	const SbUiCommand command = SbTuiPresentationResolveKey (key,
+			configuredCommand);
+	if (!data->helpVisible && command == SB_UI_CMD_CYCLE_STATION_SORT) {
+		SbStationBrowserCycleSort (&data->browser);
+		SbUiCursesRebuildStations (data, model, true);
+		SbUiCursesLocalNotice (data,
+				SbStationBrowserSortName (data->browser.sort));
+		SbUiCursesFrame (renderer, model);
+		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
+	}
+	if (!data->helpVisible && command == SB_UI_CMD_TOGGLE_VISUALIZER) {
 		SbUiCursesLocalNotice (data, model->visualizerEnabled ?
 				"Spectrum analyzer off" : "Spectrum analyzer on");
 		wtimeout (stdscr, model->visualizerEnabled ? 1000 : 80);
@@ -2781,8 +2798,6 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	if (!data->helpVisible && (key == 'l' || key == 'L'))
 		return (SbUiCommandEvent) {SB_UI_CMD_LYRICS, NULL};
 	if (key >= 0 && key <= UCHAR_MAX) {
-		const SbUiCommand command = BarUiCommandFromKey (renderer->settings,
-				(char) key);
 		if (command == SB_UI_CMD_HELP) {
 			data->helpVisible = !data->helpVisible;
 			data->helpOffset = 0;

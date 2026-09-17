@@ -31,6 +31,7 @@ are reflected at runtime. Defaults relevant to the retained UI are:
 | `s` | Focus the existing Stations pane |
 | `/` | Edit the focused station pane's case-insensitive filter |
 | `#` | Jump to a visible station number |
+| `z` | Cycle station view order between A-Z and original Pandora order |
 | Enter | Tune the selected station or open the focused row's actions |
 | `i` or `I` | Toggle Track Info |
 | `L` or `l` | Toggle Lyrics |
@@ -38,13 +39,16 @@ are reflected at runtime. Defaults relevant to the retained UI are:
 | `+` / `-` | Love / ban |
 | `(` / `)` / `^` | Volume down / up / reset |
 | `h` / `u` | Session history / upcoming tracks |
+| `v` | Create a station from the current song or artist |
 | `V` | Toggle the spectrum when it does not collide with a configured action |
 | `?` / `q` | HELP / quit |
 
 Escape closes retained views. While editing a station filter, Enter keeps the
 filter and Escape clears it. Filtering happens in the existing Stations pane;
-there is no separate full-screen station browser. The current station marker is
-independent of selection so it remains visible in monochrome themes.
+the resulting borrowed-pointer view is then sorted using the current A-Z or
+original-order mode. There is no separate full-screen station browser. The
+current station marker is independent of selection so it remains visible in
+monochrome themes.
 
 Track Info and Lyrics scroll with the navigation keys and update in place when
 background enrichment completes. Enter, Escape, or the opening key closes the

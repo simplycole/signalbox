@@ -121,7 +121,13 @@ for authenticated QA.
   still starts and behaves normally. **Account:** SAFE/read-only. **Real
   account:** Yes. **Cleanup:** Quit normally.
 
-## B. Station pane filtering
+## B. Station pane sorting and filtering
+
+- **Action:** With and without an active filter, press `z` twice. **Expected:**
+  the header and rows cycle A-Z → ORIGINAL → A-Z, the same station remains
+  selected where it is still visible, and Pandora's underlying station order
+  is unchanged. **Account:** SAFE/local. **Real account:** Yes. **Cleanup:**
+  Leave the preferred view mode active.
 
 - **Action:** Focus Stations with `s` or Tab, then use `/` and type part of a
   station name. Edit with Backspace; confirm with Enter and later clear with
@@ -208,7 +214,8 @@ for authenticated QA.
   audible stutter. This is display analysis, not audio EQ.
 - **Action:** Press `V` unless it is configured for an inherited action; launch
   with `--visualizer off` and `visualizer = off`. **Expected:** controls agree,
-  classic mode never analyzes/renders it, and lowercase `v` retains its action.
+  classic mode never analyzes/renders it, and lowercase `v` still opens Create
+  Station From for the current song or artist.
 - **Action:** Resize while playing through 80x24, 80x30, 90x40, 143x55,
   169x55, 219x55, narrow/stacked, and below 50x15. **Expected:** spectrum hides
   at 80x24, is compact at medium sizes, grows on tall layouts, stays bounded
