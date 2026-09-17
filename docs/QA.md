@@ -57,9 +57,11 @@ first, and stop before any mutation you do not explicitly want on the account.
   difficult or impossible to reconstruct exactly.
 
 The TUI uses configured key bindings. The keys named below are defaults (`?`,
-`+`, `-`, `a`, `c`, `d`, `g`, `h`, `j`, `n`, `p`, `r`, `u`, `x`, `b`, `=`,
-`v`, `(`, `)`, and `^`); use the help overlay as the authority if the config
-remaps them.
+`+`, `-`, `a`, `c`, `d`, `e`, `g`, `h`, `n`, `p`, `P`, `S`, `r`, `u`, `x`,
+`b`, `=`, `v`, Space, `(`, `)`, and `^`); use the help overlay as the authority
+if the config remaps them. The inherited `j` Add Shared and `i` information
+defaults are shadowed by retained-TUI navigation and Track Info; remap them to
+unreserved keys to expose those actions in the TUI and Help.
 
 ## Startup mode selection
 
@@ -186,8 +188,14 @@ for authenticated QA.
 
 - **Action:** In HELP, scroll with arrows/`j`/`k`, Page Up/Down, and Home/End
   at tall, medium, and 50x15 sizes. **Expected:** sections retain blank-row
-  separation where visible, VOLUME remains reachable, content never crosses
-  the border, scroll indicators track available content, and Esc closes HELP.
+  separation where visible; Global, Navigation, Playback, Rating, Volume,
+  Stations, Filter Editing, History, Upcoming, Track, Display, Text Input, and
+  Modals are reachable; content never crosses the border; scroll indicators
+  track available content; and Esc, Enter, or `?` closes HELP.
+- **Action:** Remap one configurable action and one alias, then reopen HELP.
+  **Expected:** HELP shows the active keys rather than their defaults, groups
+  aliases on one row, keeps lowercase `v` distinct from uppercase `V`, and
+  does not advertise shadowed or retained-TUI-disabled commands.
 
 - **Action:** With a station-pane filter active, press `#`, `4`, and
   Enter using the number row; repeat with the physical numeric keypad. Also try
@@ -271,6 +279,11 @@ allows every application.
   low-color terminal. **Expected:** art loads once, remains stable during
   progress redraws, resizes only when its source/layout/color key changes, and
   falls back to text without corrupting the screen.
+- **Action:** Open Help, Track Info, Lyrics, and a confirmation or text prompt
+  over visible art; repeat while art changes from Loading to Ready, while the
+  spectrum/progress redraws, and across a resize. **Expected:** every modal
+  remains topmost with no art pixels inside it. Closing the modal immediately
+  restores correctly sized art without requiring another resize.
 - **Action:** Press `L` (or `l`) for synced, plain-only, instrumental, no-match,
   and temporarily unavailable results when available. **Expected:** state text
   is `Synced`, `Plain`, `Instrumental`, `No match`, or `Temporarily unavailable`;

@@ -46,13 +46,23 @@ typedef struct {
 	const char * const configKey;
 } BarUiDispatchAction_t;
 
+typedef struct {
+	SbUiCommand command;
+	SbTuiHelpSection section;
+	const char *description;
+} BarUiTuiCommandHelp;
+
 /* see settings.h */
 extern const BarUiDispatchAction_t dispatchActions[BAR_KS_COUNT];
+extern const BarUiTuiCommandHelp tuiCommandHelp[];
+extern const size_t tuiCommandHelpCount;
 
 #include <piano.h>
 #include <stdbool.h>
 #include <stdio.h>
 
 SbUiCommand BarUiCommandFromKey (const BarSettings_t *, char);
+const BarUiTuiCommandHelp *BarUiTuiCommandHelpFor (SbUiCommand);
+bool BarUiCommandTuiEnabled (SbUiCommand);
 bool BarUiDispatchCommand (BarApp_t *, SbUiCommand, PianoStation_t *, PianoSong_t *,
 		bool, BarUiDispatchContext_t);

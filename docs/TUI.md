@@ -21,27 +21,48 @@ terminal is enlarged.
 ## Current controls
 
 The in-app HELP overlay is authoritative because configured `act_*` bindings
-are reflected at runtime. Defaults relevant to the retained UI are:
+are reflected at runtime. It is scrollable and includes the following default
+retained-TUI surface.
 
-| Key | Action |
-| --- | --- |
-| Arrow keys or `j`/`k` | Navigate the focused list or scroll a modal |
-| Page Up/Down, Home/End | Page or jump to a boundary |
-| Tab / Shift+Tab | Switch Stations/Recent focus when both panes are visible |
-| `s` | Focus the existing Stations pane |
-| `/` | Edit the focused station pane's case-insensitive filter |
-| `#` | Jump to a visible station number |
-| `z` | Cycle station view order between A-Z and original Pandora order |
-| Enter | Tune the selected station or open the focused row's actions |
-| `i` or `I` | Toggle Track Info |
-| `L` or `l` | Toggle Lyrics |
-| `p` or Space / `n` | Pause-resume / next track |
-| `+` / `-` | Love / ban |
-| `(` / `)` / `^` | Volume down / up / reset |
-| `h` / `u` | Session history / upcoming tracks |
-| `v` | Create a station from the current song or artist |
-| `V` | Toggle the spectrum when it does not collide with a configured action |
-| `?` / `q` | HELP / quit |
+| Area | Key | Action and context |
+| --- | --- | --- |
+| Global | `?`, `q` | Open/close Help; quit Signalbox |
+| Navigation | Arrow keys or `j`/`k` | Navigate the focused list or scroll text |
+| Navigation | Page Up/Down, Home/End | Page or jump to a boundary |
+| Navigation | Tab / Shift+Tab | Switch Stations/Recent focus when both panes are visible |
+| Navigation | Enter, Escape, mouse wheel | Activate; back/close/cancel; navigate/scroll |
+| Playback | `p` or Space, `n` | Pause/resume; next track |
+| Playback | `P`, `S` | Explicitly resume; explicitly pause |
+| Rating | `+`, `-` | Love; ban the current track |
+| Volume | `(`, `)`, `^` | Down; up; reset to 0 dB |
+| Stations | `s` | Focus the Stations pane |
+| Stations | `a`, `c`, `d`, `g` | Add music; create; delete; create by genre |
+| Stations | `r`, `x`, `=` | Rename; edit QuickMix; manage station |
+| Stations | `v` | Create a station from the current song or artist |
+| Stations | `z` | Cycle A-Z/original Pandora display order |
+| Stations | `/`, `#` | Filter or start a visible-number jump while Stations is focused |
+| Station jump | digits/keypad, Backspace/Delete, Enter, Escape | Edit, tune, or cancel a station-number jump |
+| Filter editing | printable text, Backspace, Enter, Escape | Edit, keep, or clear the station filter |
+| History | `h`, Tab, Enter | Full history; focus Recent; selected-track actions |
+| Upcoming | `u`, Enter | Browse upcoming tracks; selected-track action |
+| Track | `i` or `I`, `l` or `L` | Toggle Track Info; toggle Lyrics |
+| Track | `e`, `b` | Explain why the track is playing; bookmark song/artist |
+| Display | `V` | Toggle the spectrum when it does not collide with a configured action |
+
+Text prompts accept printable text, Left/Right, Home/End, Backspace/Delete,
+Enter, and Escape. Choice/list modals use the navigation keys; QuickMix uses
+Space to toggle an item, and confirmations also accept `y`/`n` or change choice
+with Left/Right/Tab. Help, Track Info, Lyrics, and other long text views accept
+arrows, `j`/`k`, Page Up/Down, Home/End, and the mouse wheel. Enter, Escape, or
+the opening key closes a retained text view where applicable.
+
+Configured action keys are shown using their active runtime values, including
+multiple aliases. A configured binding shadowed by a fixed retained-TUI key is
+not advertised. Consequently the inherited defaults `j` (Add Shared) and `i`
+(song/station information) are navigation and Track Info in the retained TUI;
+those inherited actions become available and appear in Help when remapped to
+unreserved keys. Tired/shelf, debug, and account-settings actions are not in
+Help because the retained TUI does not dispatch them.
 
 Escape closes retained views. While editing a station filter, Enter keeps the
 filter and Escape clears it. Filtering happens in the existing Stations pane;

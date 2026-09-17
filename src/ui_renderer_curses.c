@@ -117,6 +117,7 @@ typedef struct {
 	SbPreparedArt preparedArt;
 	SbTuiArtStatus artStatus;
 	SbArtColorMode artColorMode;
+	SbTuiArtCompositor artCompositor;
 	int preparedArtSetting;
 	bool artOverlayVisible;
 	char artOverlayPath[1024];
@@ -128,10 +129,8 @@ typedef struct {
 
 static void SbUiCursesDrawTextModal (const SbUiRenderer *,
 		const SbUiModel *);
-
-static bool SbUiCursesVisualizerKeyAvailable (const SbUiRenderer *renderer) {
-	return BarUiCommandFromKey (renderer->settings, 'V') == SB_UI_CMD_NONE;
-}
+static void SbUiCursesRender (SbUiRenderer *, const SbUiModel *,
+		SbUiRenderEvent);
 
 static attr_t SbUiCursesRole (const SbUiCursesData *data,
 		const SbTuiColorRole role) {
@@ -576,8 +575,8 @@ static char SbUiCursesKey (const SbUiRenderer *renderer,
 }
 
 typedef enum { SB_HELP_BLANK = 0, SB_HELP_HEADING, SB_HELP_COMMAND } SbHelpRowKind;
-typedef struct { SbHelpRowKind kind; char key[12]; const char *text; } SbHelpRow;
-enum { SB_TUI_HELP_MAX_ROWS = 64 };
+typedef struct { SbHelpRowKind kind; char key[20]; const char *text; } SbHelpRow;
+enum { SB_TUI_HELP_MAX_ROWS = 160 };
 
 static void SbUiCursesHelpAddCommand (SbHelpRow *rows, size_t *count,
 		const char *key, const char *text) {
@@ -587,63 +586,23 @@ static void SbUiCursesHelpAddCommand (SbHelpRow *rows, size_t *count,
 	row->text = text;
 }
 
-static void SbUiCursesHelpAddConfigured (const SbUiRenderer *renderer,
-		SbHelpRow *rows, size_t *count, const SbUiCommand command,
-		const char *text) {
-	const char key = SbUiCursesKey (renderer, command);
-	if (key == '-') return;
-	char label[2] = {key, '\0'};
-	SbUiCursesHelpAddCommand (rows, count, key == ' ' ? "Space" : label, text);
-}
-
 static size_t SbUiCursesHelpRows (const SbUiRenderer *renderer, SbHelpRow *rows) {
-	const SbUiCursesData * const data = renderer->data;
+	SbTuiHelpEntry entries[SB_TUI_HELP_ENTRY_CAPACITY];
+	const size_t entryCount = SbTuiPresentationHelpEntries (renderer->settings,
+			entries, sizeof (entries) / sizeof (*entries));
 	size_t count = 0;
-#define HELP_BLANK() rows[count++] = (SbHelpRow) {SB_HELP_BLANK, "", NULL}
-#define HELP_HEADING(value) rows[count++] = (SbHelpRow) {SB_HELP_HEADING, "", value}
-#define HELP_SECTION(value) HELP_HEADING (value); HELP_BLANK ()
-#define SB_TUI_HELP_COMMAND(key, value) SbUiCursesHelpAddCommand (rows, &count, key, value)
-#define HELP_CONFIG(command, value) SbUiCursesHelpAddConfigured (renderer, rows, &count, command, value)
-	HELP_SECTION ("NAVIGATION");
-	SB_TUI_HELP_COMMAND ("Tab", "switch pane"); SB_TUI_HELP_COMMAND ("Shift+Tab", "switch pane backward");
-	SB_TUI_HELP_COMMAND ("Up/Down", "navigate"); SB_TUI_HELP_COMMAND ("j/k", "navigate");
-	SB_TUI_HELP_COMMAND ("PgUp/PgDn", "page"); SB_TUI_HELP_COMMAND ("Home/End", "first / last");
-	SB_TUI_HELP_COMMAND ("Enter", "select / action"); SB_TUI_HELP_COMMAND ("Esc", "back / close");
-	HELP_BLANK (); HELP_SECTION ("PLAYBACK");
-	HELP_CONFIG (SB_UI_CMD_TOGGLE_PAUSE, "pause / resume");
-	HELP_CONFIG (SB_UI_CMD_SKIP, "next track");
-	HELP_CONFIG (SB_UI_CMD_LOVE, data->unicodeSymbols ? "♥ love" : "<3 love");
-	HELP_CONFIG (SB_UI_CMD_BAN, "</3 ban");
-	HELP_BLANK (); HELP_SECTION ("VOLUME");
-	HELP_CONFIG (SB_UI_CMD_VOLUME_DOWN, "volume down");
-	HELP_CONFIG (SB_UI_CMD_VOLUME_UP, "volume up");
-	HELP_CONFIG (SB_UI_CMD_VOLUME_RESET, "reset to 0 dB");
-	HELP_BLANK (); HELP_SECTION ("STATIONS");
-	HELP_CONFIG (SB_UI_CMD_SELECT_STATION, "focus station pane");
-	SB_TUI_HELP_COMMAND ("z", SbTuiPresentationStationSortHelp ());
-	SB_TUI_HELP_COMMAND ("/", "filter focused station pane");
-	SB_TUI_HELP_COMMAND ("#", "jump to visible station number");
-	HELP_CONFIG (SB_UI_CMD_GENRE_STATION, "genres");
-	HELP_CONFIG (SB_UI_CMD_CREATE_STATION_FROM_SONG,
-			SbTuiPresentationCreateStationHelp ());
-	HELP_BLANK (); HELP_SECTION ("HISTORY");
-	HELP_CONFIG (SB_UI_CMD_HISTORY, "full session history");
-	SB_TUI_HELP_COMMAND ("Tab", "focus RECENT"); SB_TUI_HELP_COMMAND ("Enter", "history action");
-	HELP_BLANK (); HELP_SECTION ("UPCOMING");
-	HELP_CONFIG (SB_UI_CMD_UPCOMING, "browse upcoming");
-	SB_TUI_HELP_COMMAND ("Enter", "selected-track actions");
-	HELP_BLANK (); HELP_SECTION ("TRACK");
-	SB_TUI_HELP_COMMAND ("i", "track info");
-	SB_TUI_HELP_COMMAND ("L", "lyrics");
-	if (SbUiCursesVisualizerKeyAvailable (renderer)) {
-		HELP_BLANK (); HELP_SECTION ("VISUALIZER");
-		SB_TUI_HELP_COMMAND ("V", SbTuiPresentationVisualizerHelp ());
+	SbTuiHelpSection section = SB_TUI_HELP_SECTION_COUNT;
+	for (size_t i = 0; i < entryCount; i++) {
+		if (entries[i].section != section) {
+			if (count > 0) rows[count++] = (SbHelpRow) {SB_HELP_BLANK, "", NULL};
+			section = entries[i].section;
+			rows[count++] = (SbHelpRow) {SB_HELP_HEADING, "",
+					SbTuiPresentationHelpSectionName (section)};
+			rows[count++] = (SbHelpRow) {SB_HELP_BLANK, "", NULL};
+		}
+		SbUiCursesHelpAddCommand (rows, &count, entries[i].keys,
+				entries[i].description);
 	}
-#undef HELP_BLANK
-#undef HELP_HEADING
-#undef HELP_SECTION
-#undef SB_TUI_HELP_COMMAND
-#undef HELP_CONFIG
 	return count;
 }
 
@@ -1031,7 +990,8 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 	SbUiCursesData *data = renderer->data; int y, x;
 	const SbArtLayout layout = SbUiCursesArtLayout (renderer, model, &y, &x);
 	if (!layout.visible || data->artColorMode == SB_ART_COLOR_NONE ||
-			data->helpVisible || data->textModalWindow != NULL) return;
+			!SbTuiPresentationArtMayPaint (data->helpVisible,
+					data->textModalContent != NULL, false)) return;
 	const unsigned int builds = data->preparedArt.builds;
 	const unsigned int hits = data->preparedArt.hits;
 	if (!SbPreparedArtGet (&data->preparedArt, model->artCachedPath,
@@ -1064,6 +1024,7 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 		}
 	}
 	fprintf (stdout, "\033[0m\033[%d;%dH", savedY + 1, savedX + 1); fflush (stdout);
+	SbTuiPresentationArtDidPaint (&data->artCompositor);
 }
 
 static void SbUiCursesSpectrum (const SbUiCursesData *data,
@@ -1345,6 +1306,9 @@ static void SbUiCursesUpcoming (const SbUiCursesData *data,
 static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
+	if (SbTuiPresentationArtOcclude (&data->artCompositor,
+			data->helpVisible || data->textModalContent != NULL))
+		clearok (stdscr, TRUE);
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
@@ -1546,14 +1510,14 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 					SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_SECTION, A_BOLD);
 				} else if (row->kind == SB_HELP_COMMAND) {
 					SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_KEY, A_BOLD);
-					mvwaddnstr (help, y, 2, row->key, 11);
+					mvwaddnstr (help, y, 2, row->key, 17);
 					SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_KEY, A_BOLD);
-					SbUiCursesWPut (help, y, 14, width - 16, row->text);
+					SbUiCursesWPut (help, y, 21, width - 23, row->text);
 				}
 			}
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_MUTED, 0);
 			mvwaddnstr (help, height - 2, 2,
-					"Up/Down scroll  PgUp/PgDn page  Esc close", width - 6);
+					"Arrows/j/k scroll  PgUp/PgDn page  Enter/Esc/? close", width - 6);
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_MUTED, 0);
 			if (data->helpOffset > 0) mvwaddch (help, 1, width - 6, '^');
 			if (data->helpOffset < maxOffset) mvwaddch (help, 1, width - 4, 'v');
@@ -1584,12 +1548,17 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	}
 }
 
-static WINDOW *SbUiCursesModal (const SbUiCursesData *data,
+static WINDOW *SbUiCursesModal (SbUiCursesData *data,
 		const char *title, const char *prompt,
 		const int wantedHeight) {
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	if (rows < 15 || cols < 50) return NULL;
+	/* Direct ANSI art is invisible to curses' physical-screen cache.  Force the
+	 * background through curses once before any popup so blank modal cells are
+	 * real occluding cells rather than optimized-away assumptions. */
+	if (SbTuiPresentationArtOcclude (&data->artCompositor, true))
+		clearok (stdscr, TRUE);
 	const int width = cols < 72 ? cols - 4 : 68;
 	const int height = wantedHeight < rows - 2 ? wantedHeight : rows - 2;
 	WINDOW *window = newwin (height, width, (rows - height) / 2,
@@ -1611,6 +1580,14 @@ static WINDOW *SbUiCursesModal (const SbUiCursesData *data,
 		wnoutrefresh (stdscr);
 	}
 	return window;
+}
+
+static void SbUiCursesPopupClosed (SbUiRenderer *renderer,
+		const SbUiModel *model) {
+	/* Recompose immediately: remove the popup through curses, then repaint the
+	 * direct ANSI art at the current geometry. */
+	clearok (stdscr, TRUE);
+	SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 }
 
 bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
@@ -1665,7 +1642,7 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 		if (key == 27) {
 			delwin (window);
 			(void) curs_set (0);
-			SbUiCursesFrame (renderer, model);
+			SbUiCursesPopupClosed (renderer, model);
 			return false;
 		}
 		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
@@ -1674,7 +1651,7 @@ bool SbUiRendererPromptText (SbUiRenderer *renderer, const SbUiModel *model,
 			else buffer[converted] = '\0';
 			delwin (window);
 			(void) curs_set (0);
-			SbUiCursesFrame (renderer, model);
+			SbUiCursesPopupClosed (renderer, model);
 			return buffer[0] != '\0';
 		}
 		if (key == KEY_LEFT && cursor > 0) cursor--;
@@ -1820,7 +1797,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 		if (key == 27) {
 			SbCredentialClear (password, passwordSize);
 			delwin (window);
-			(void) curs_set (0); SbUiCursesFrame (renderer, model); return false;
+			(void) curs_set (0); SbUiCursesPopupClosed (renderer, model); return false;
 		}
 		if (key == '\t' || key == KEY_DOWN) { field = (field + 1) % 3; continue; }
 		if (key == KEY_BTAB || key == KEY_UP) { field = (field + 2) % 3; continue; }
@@ -1829,7 +1806,7 @@ bool SbUiRendererPromptLogin (SbUiRenderer *renderer, const SbUiModel *model,
 			if (field < 2) { field++; continue; }
 			if (userLen > 0 && passLen > 0) {
 				delwin (window);
-				(void) curs_set (0); SbUiCursesFrame (renderer, model); return true;
+				(void) curs_set (0); SbUiCursesPopupClosed (renderer, model); return true;
 			}
 			continue;
 		}
@@ -1868,10 +1845,16 @@ bool SbUiRendererConfirm (SbUiRenderer *renderer, const SbUiModel *model,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
-		if (key == 27 || key == 'n' || key == 'N') return false;
-		if (key == 'y' || key == 'Y') return true;
+		if (key == 27 || key == 'n' || key == 'N') {
+			SbUiCursesPopupClosed (renderer, model); return false;
+		}
+		if (key == 'y' || key == 'Y') {
+			SbUiCursesPopupClosed (renderer, model); return true;
+		}
 		if (key == KEY_LEFT || key == KEY_RIGHT || key == '\t') yes = !yes;
-		if (key == '\n' || key == '\r' || key == KEY_ENTER) return yes;
+		if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			SbUiCursesPopupClosed (renderer, model); return yes;
+		}
 	}
 }
 
@@ -1906,7 +1889,9 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
-		if (key == 27) return -1;
+		if (key == 27) {
+			SbUiCursesPopupClosed (renderer, model); return -1;
+		}
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
 		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
 		else if (key == KEY_HOME) selected = 0;
@@ -1915,7 +1900,9 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 				selected - visible : 0;
 		else if (key == KEY_NPAGE) selected = selected + visible < count ?
 				selected + visible : count - 1;
-		else if (key == '\n' || key == '\r' || key == KEY_ENTER) return (int) selected;
+		else if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			SbUiCursesPopupClosed (renderer, model); return (int) selected;
+		}
 	}
 }
 
@@ -1977,7 +1964,9 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
-		if (key == 27) return -1;
+		if (key == 27) {
+			SbUiCursesPopupClosed (renderer, model); return -1;
+		}
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
 		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
 		else if (key == KEY_HOME) selected = 0;
@@ -1986,8 +1975,9 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 				selected - visible : 0;
 		else if (key == KEY_NPAGE) selected = selected + visible < count ?
 				selected + visible : count - 1;
-		else if (key == '\n' || key == '\r' || key == KEY_ENTER)
-			return (int) selected;
+		else if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			SbUiCursesPopupClosed (renderer, model); return (int) selected;
+		}
 	}
 }
 
@@ -2119,7 +2109,7 @@ void SbUiRendererDynamicTextModal (SbUiRenderer *renderer,
 		SbUiModalScrollOpen (&data->textModalScroll, model->songGeneration);
 		data->helpVisible = false;
 	}
-	SbUiCursesFrame (renderer, model);
+	SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 }
 
 static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
@@ -2332,13 +2322,17 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
-		if (key == 27) return false;
+		if (key == 27) {
+			SbUiCursesPopupClosed (renderer, model); return false;
+		}
 		if ((key == KEY_UP || key == 'k') && selected > 0) selected--;
 		else if ((key == KEY_DOWN || key == 'j') && selected + 1 < count) selected++;
 		else if (key == KEY_HOME) selected = 0;
 		else if (key == KEY_END) selected = count - 1;
 		else if (key == ' ') checked[selected] = !checked[selected];
-		else if (key == '\n' || key == '\r' || key == KEY_ENTER) return true;
+		else if (key == '\n' || key == '\r' || key == KEY_ENTER) {
+			SbUiCursesPopupClosed (renderer, model); return true;
+		}
 	}
 }
 
@@ -2356,10 +2350,14 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 	}
 	const SbArtLayout desired = SbUiCursesArtLayout (renderer, model, &artY, &artX);
 	const bool visible = desired.visible && data->artColorMode != SB_ART_COLOR_NONE;
-	if (visible != data->artOverlayVisible || (visible &&
+	const bool artChanged = visible != data->artOverlayVisible || (visible &&
 			(strcmp (data->artOverlayPath, model->artCachedPath) != 0 ||
-			data->artOverlayColumns != desired.columns || data->artOverlayRows != desired.rows)))
+			data->artOverlayColumns != desired.columns ||
+			data->artOverlayRows != desired.rows));
+	if (artChanged) {
+		(void) SbTuiPresentationArtOcclude (&data->artCompositor, true);
 		clearok (stdscr, TRUE);
+	}
 	if (visible != data->artOverlayVisible)
 		tuiDebugPrint ("art render=%s reason=%s target=%ux%u color=%s\n",
 				visible ? "enabled" : "hidden",
@@ -2570,7 +2568,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 				SB_UI_CMD_QUIT) {
 			return (SbUiCommandEvent) {SB_UI_CMD_QUIT, NULL};
 		}
-		SbUiCursesFrame (renderer, model);
+		SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (data->stationFilterEditing) {
@@ -2657,7 +2655,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 						data->textModalScroll.maximum,
 						wheel != 0 ? "consumed-by-modal" : "ignored-by-modal");
 		}
-		SbUiCursesFrame (renderer, model);
+		SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (wheel < 0) key = KEY_UP;
@@ -2688,7 +2686,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	if (data->helpVisible && key == 27) {
 		data->helpVisible = false;
 		data->helpOffset = 0;
-		SbUiCursesFrame (renderer, model);
+		SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
 	if (!data->helpVisible && (key == KEY_UP || key == 'k' ||
@@ -2793,20 +2791,20 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		wtimeout (stdscr, model->visualizerEnabled ? 1000 : 80);
 		return (SbUiCommandEvent) {SB_UI_CMD_TOGGLE_VISUALIZER, NULL};
 	}
-	if (!data->helpVisible && (key == 'i' || key == 'I'))
+	if (!data->helpVisible && command == SB_UI_CMD_TRACK_INFO)
 		return (SbUiCommandEvent) {SB_UI_CMD_TRACK_INFO, NULL};
-	if (!data->helpVisible && (key == 'l' || key == 'L'))
+	if (!data->helpVisible && command == SB_UI_CMD_LYRICS)
 		return (SbUiCommandEvent) {SB_UI_CMD_LYRICS, NULL};
 	if (key >= 0 && key <= UCHAR_MAX) {
 		if (command == SB_UI_CMD_HELP) {
 			data->helpVisible = !data->helpVisible;
 			data->helpOffset = 0;
-			SbUiCursesFrame (renderer, model);
+			SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
 		if (data->helpVisible) {
 			data->helpVisible = false;
-			SbUiCursesFrame (renderer, model);
+			SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
 		/* The classic selector key focuses the retained station pane instead of
@@ -2819,25 +2817,7 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 			SbUiCursesFrame (renderer, model);
 			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
-		if (command == SB_UI_CMD_QUIT || command == SB_UI_CMD_TOGGLE_PAUSE ||
-				command == SB_UI_CMD_PLAY || command == SB_UI_CMD_PAUSE ||
-				command == SB_UI_CMD_SKIP || command == SB_UI_CMD_LOVE ||
-				command == SB_UI_CMD_BAN || command == SB_UI_CMD_INFO ||
-				command == SB_UI_CMD_EXPLAIN || command == SB_UI_CMD_VOLUME_DOWN ||
-				command == SB_UI_CMD_VOLUME_UP ||
-				command == SB_UI_CMD_VOLUME_RESET ||
-				command == SB_UI_CMD_ADD_MUSIC ||
-				command == SB_UI_CMD_CREATE_STATION ||
-				command == SB_UI_CMD_GENRE_STATION ||
-				command == SB_UI_CMD_HISTORY ||
-				command == SB_UI_CMD_ADD_SHARED ||
-				command == SB_UI_CMD_UPCOMING ||
-				command == SB_UI_CMD_SELECT_QUICKMIX ||
-				command == SB_UI_CMD_BOOKMARK ||
-				command == SB_UI_CMD_MANAGE_STATION ||
-				command == SB_UI_CMD_CREATE_STATION_FROM_SONG ||
-				command == SB_UI_CMD_RENAME_STATION ||
-				command == SB_UI_CMD_DELETE_STATION) {
+		if (BarUiCommandTuiEnabled (command)) {
 			const PianoStation_t *station = NULL;
 			if (command == SB_UI_CMD_ADD_MUSIC ||
 					command == SB_UI_CMD_RENAME_STATION ||

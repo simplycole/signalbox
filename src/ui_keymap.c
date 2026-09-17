@@ -35,6 +35,39 @@ const BarUiDispatchAction_t dispatchActions[BAR_KS_COUNT] = {
 	{'!', SB_UI_CMD_SETTINGS, BAR_DC_GLOBAL, "change settings", "act_settings"},
 };
 
+const BarUiTuiCommandHelp tuiCommandHelp[] = {
+	{SB_UI_CMD_HELP, SB_TUI_HELP_GLOBAL, "Show / close Help"},
+	{SB_UI_CMD_QUIT, SB_TUI_HELP_GLOBAL, "Quit Signalbox"},
+	{SB_UI_CMD_TOGGLE_PAUSE, SB_TUI_HELP_PLAYBACK, "Pause / resume"},
+	{SB_UI_CMD_SKIP, SB_TUI_HELP_PLAYBACK, "Next track"},
+	{SB_UI_CMD_PLAY, SB_TUI_HELP_PLAYBACK, "Resume playback"},
+	{SB_UI_CMD_PAUSE, SB_TUI_HELP_PLAYBACK, "Pause playback"},
+	{SB_UI_CMD_LOVE, SB_TUI_HELP_RATING, "Love current track"},
+	{SB_UI_CMD_BAN, SB_TUI_HELP_RATING, "Ban current track"},
+	{SB_UI_CMD_VOLUME_DOWN, SB_TUI_HELP_VOLUME, "Volume down"},
+	{SB_UI_CMD_VOLUME_UP, SB_TUI_HELP_VOLUME, "Volume up"},
+	{SB_UI_CMD_VOLUME_RESET, SB_TUI_HELP_VOLUME, "Reset volume to 0 dB"},
+	{SB_UI_CMD_SELECT_STATION, SB_TUI_HELP_STATIONS, "Focus Stations pane"},
+	{SB_UI_CMD_ADD_MUSIC, SB_TUI_HELP_STATIONS, "Add music to selected station"},
+	{SB_UI_CMD_CREATE_STATION, SB_TUI_HELP_STATIONS, "Create station by search"},
+	{SB_UI_CMD_DELETE_STATION, SB_TUI_HELP_STATIONS, "Delete selected station"},
+	{SB_UI_CMD_GENRE_STATION, SB_TUI_HELP_STATIONS, "Create genre station"},
+	{SB_UI_CMD_ADD_SHARED, SB_TUI_HELP_STATIONS, "Add shared station by ID"},
+	{SB_UI_CMD_RENAME_STATION, SB_TUI_HELP_STATIONS, "Rename selected station"},
+	{SB_UI_CMD_SELECT_QUICKMIX, SB_TUI_HELP_STATIONS, "Edit selected QuickMix"},
+	{SB_UI_CMD_MANAGE_STATION, SB_TUI_HELP_STATIONS, "Manage selected station"},
+	{SB_UI_CMD_CREATE_STATION_FROM_SONG, SB_TUI_HELP_STATIONS,
+			"Create station from song / artist"},
+	{SB_UI_CMD_HISTORY, SB_TUI_HELP_HISTORY, "Browse full session history"},
+	{SB_UI_CMD_UPCOMING, SB_TUI_HELP_UPCOMING, "Browse upcoming tracks"},
+	{SB_UI_CMD_INFO, SB_TUI_HELP_TRACK, "Song / station information"},
+	{SB_UI_CMD_EXPLAIN, SB_TUI_HELP_TRACK, "Why current track is playing"},
+	{SB_UI_CMD_BOOKMARK, SB_TUI_HELP_TRACK, "Bookmark current song / artist"},
+};
+
+const size_t tuiCommandHelpCount = sizeof (tuiCommandHelp) /
+		sizeof (*tuiCommandHelp);
+
 SbUiCommand BarUiCommandFromKey (const BarSettings_t *settings, const char key) {
 	assert (settings != NULL);
 	for (size_t i = 0; i < BAR_KS_COUNT; i++) {
@@ -43,4 +76,16 @@ SbUiCommand BarUiCommandFromKey (const BarSettings_t *settings, const char key) 
 		}
 	}
 	return SB_UI_CMD_NONE;
+}
+
+const BarUiTuiCommandHelp *BarUiTuiCommandHelpFor (
+		const SbUiCommand command) {
+	for (size_t i = 0; i < tuiCommandHelpCount; i++) {
+		if (tuiCommandHelp[i].command == command) return &tuiCommandHelp[i];
+	}
+	return NULL;
+}
+
+bool BarUiCommandTuiEnabled (const SbUiCommand command) {
+	return BarUiTuiCommandHelpFor (command) != NULL;
 }

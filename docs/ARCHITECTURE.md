@@ -12,7 +12,11 @@ and an in-memory prepared-art cache. The curses renderer remains authoritative
 for layout and input; after its atomic screen update, the prepared cells are
 painted into the reserved Now Playing rectangle with standard ANSI color and
 Unicode half blocks. Cache identity includes path, target geometry, and color
-mode, so normal progress redraws do not decode or resize artwork.
+mode, so normal progress redraws do not decode or resize artwork. Because the
+ANSI cells bypass curses' physical-screen cache, opening any modal invalidates
+and repaints the curses screen without art; retained-overlay redraws suppress
+art until the modal closes, when the normal compositor restores it at the
+current geometry.
 
 `src/enrichment.c` implements a provider-neutral enrichment boundary. A Pandora
 song is copied into a `SbTrackIdentity`; original display strings are retained
@@ -139,8 +143,9 @@ non-interactive/headless execution:
   event commands.
 - `ui_act.c` implements user actions such as station selection, love, ban,
   history, pause, and volume changes.
-- `ui_dispatch.c` maps configured keys to named `SbUiCommand` values, then
-  dispatches commands to the inherited actions.
+- `ui_keymap.c` maps configured keys to named `SbUiCommand` values and keeps
+  the retained-TUI command/help metadata beside that map. `ui_dispatch.c`
+  dispatches those commands to the inherited actions.
 - `ui_readline.c` provides terminal input and filtered selection.
 - `terminal.c` establishes and restores terminal attributes.
 
@@ -184,6 +189,15 @@ playback actions through named commands. Its small synchronous text,
 confirmation, and list prompt primitives own only local input/presentation;
 actions still own search, creation, rename, deletion, and canonical mutation.
 ncurses types remain private to `ui_renderer_curses.c`.
+
+The scrollable Help view is assembled by `tui_presentation.c`. Configurable
+rows take their active runtime keys, descriptions, sections, and retained-TUI
+allowlist from the canonical metadata in `ui_keymap.c`; fixed navigation,
+editing, pane, and modal controls are recorded as presentation metadata beside
+the local-key resolver. Bindings shadowed by fixed TUI controls are omitted.
+This keeps the renderer's advertised commands and its dispatch allowlist in
+lockstep without moving context-specific curses input into the shared classic
+keymap.
 
 The retained station-pane model uses a lightweight view array of borrowed
 `PianoStation_t` pointers. `station_browser.c` rebuilds it only after a station
