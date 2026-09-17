@@ -7,6 +7,9 @@ ifneq ($(filter Windows_NT MINGW% MSYS%,$(OS) $(HOST_OS)),)
 	WINDOWS:=1
 	EXEEXT:=.exe
 endif
+ifneq (${WINDOWS},1)
+	CPPFLAGS+=-D_POSIX_C_SOURCE=200809L
+endif
 PROGRAM:=$(PROGRAM_BASE)$(EXEEXT)
 PREFIX:=/usr/local
 BINDIR:=${PREFIX}/bin
@@ -52,7 +55,8 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/ui_act.c \
 		${PIANOBAR_DIR}/ui.c \
 		${PIANOBAR_DIR}/ui_renderer.c \
-		${PIANOBAR_DIR}/ui_dispatch.c
+		${PIANOBAR_DIR}/ui_dispatch.c \
+		${PIANOBAR_DIR}/ui_keymap.c
 ifeq (${WINDOWS},1)
 	PIANOBAR_SRC+=${PIANOBAR_DIR}/terminal_win32.c \
 		${PIANOBAR_DIR}/terminal_input_win32.c \
@@ -193,12 +197,12 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 # build standard object files
 %.o: %.c
 	${SILENTECHO} "    CC  $<"
-	${SILENTCMD}${CC} -c -o $@ ${ALL_CFLAGS} -MMD -MF $*.d -MP $<
+	${SILENTCMD}${CC} ${CPPFLAGS} -c -o $@ ${ALL_CFLAGS} -MMD -MF $*.d -MP $<
 
 # create position independent code (for shared libraries)
 %.lo: %.c
 	${SILENTECHO} "    CC  $< (PIC)"
-	${SILENTCMD}${CC} -c -fPIC -o $@ ${ALL_CFLAGS} -MMD -MF $*.d -MP $<
+	${SILENTCMD}${CC} ${CPPFLAGS} -c -fPIC -o $@ ${ALL_CFLAGS} -MMD -MF $*.d -MP $<
 
 TEST_TARGETS:=spectrum-test enrichment-test enrichment-cache-test album-art-test \
 	art-renderer-test lyrics-sync-test tui-presentation-test \
@@ -215,43 +219,43 @@ all: ${PROGRAM}
 test: ${TEST_TARGETS}
 
 settings-values-test: tests/settings_values_test.c src/settings_values.c src/settings_values.h
-	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/settings_values_test.c src/settings_values.c
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/settings_values_test.c src/settings_values.c
 	./$@$(EXEEXT)
 
 station-browser-test: tests/station_browser_test.c src/station_browser.c src/station_browser.h
-	${CC} -std=c99 -O2 -I src ${ALL_CFLAGS} -UNDEBUG -o $@$(EXEEXT) tests/station_browser_test.c src/station_browser.c
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${ALL_CFLAGS} -UNDEBUG -o $@$(EXEEXT) tests/station_browser_test.c src/station_browser.c
 	./$@$(EXEEXT)
 
 spectrum-test: tests/spectrum_test.c src/spectrum.c src/spectrum.h src/platform.c src/platform.h
-	${CC} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	${CC} ${CPPFLAGS} -O2 -I src ${LIBAV_CFLAGS} -o $@$(EXEEXT) tests/spectrum_test.c src/spectrum.c src/platform.c -lpthread -lm $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 enrichment-test: tests/enrichment_test.c src/enrichment.c src/enrichment.h src/enrichment_cache.c src/album_art.c src/debug.c src/debug.h src/modal_state.h src/mouse_state.h src/platform.c src/platform.h
-	${CC} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_test.c src/enrichment.c src/enrichment_cache.c src/album_art.c src/debug.c src/platform.c -lpthread ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_test.c src/enrichment.c src/enrichment_cache.c src/album_art.c src/debug.c src/platform.c -lpthread ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 enrichment-cache-test: tests/enrichment_cache_test.c src/enrichment_cache.c src/enrichment_cache.h src/platform.c src/platform.h
-	${CC} -std=c99 -O2 -I src ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_cache_test.c src/enrichment_cache.c src/platform.c ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/enrichment_cache_test.c src/enrichment_cache.c src/platform.c ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 album-art-test: tests/album_art_test.c src/album_art.c src/album_art.h src/platform.c src/platform.h
-	${CC} -std=c99 -O2 -I src ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/album_art_test.c src/album_art.c src/platform.c ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/album_art_test.c src/album_art.c src/platform.c ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 art-renderer-test: tests/art_renderer_test.c src/art_renderer.c src/art_renderer.h
-	${CC} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBSWSCALE_CFLAGS} -o $@$(EXEEXT) tests/art_renderer_test.c src/art_renderer.c ${LIBAV_LDFLAGS} ${LIBSWSCALE_LDFLAGS}
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBSWSCALE_CFLAGS} -o $@$(EXEEXT) tests/art_renderer_test.c src/art_renderer.c ${LIBAV_LDFLAGS} ${LIBSWSCALE_LDFLAGS}
 	./$@$(EXEEXT)
 
-tui-presentation-test: tests/tui_presentation_test.c src/tui_presentation.c src/tui_presentation.h
-	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/tui_presentation_test.c src/tui_presentation.c
+tui-presentation-test: tests/tui_presentation_test.c src/tui_presentation.c src/tui_presentation.h src/ui_keymap.c src/ui_dispatch.h
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -I ${LIBPIANO_INCLUDE} ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} ${LIBAO_CFLAGS} -o $@$(EXEEXT) tests/tui_presentation_test.c src/tui_presentation.c src/ui_keymap.c
 	./$@$(EXEEXT)
 
 lyrics-sync-test: tests/lyrics_sync_test.c src/lyrics_sync.c src/lyrics_sync.h
-	${CC} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/lyrics_sync_test.c src/lyrics_sync.c
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/lyrics_sync_test.c src/lyrics_sync.c
 	./$@$(EXEEXT)
 
 playlist-prefetch-test: tests/playlist_prefetch_test.c src/playlist_prefetch.h ${LIBPIANO_SRC}
-	${CC} -std=c99 -O2 -I src -I ${LIBPIANO_INCLUDE} ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} ${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} -o $@$(EXEEXT) tests/playlist_prefetch_test.c ${LIBPIANO_SRC} ${ALL_LDFLAGS}
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -I ${LIBPIANO_INCLUDE} ${LIBAV_CFLAGS} ${LIBCURL_CFLAGS} ${LIBGCRYPT_CFLAGS} ${LIBJSONC_CFLAGS} ${LIBAO_CFLAGS} ${NCURSESW_CFLAGS} -o $@$(EXEEXT) tests/playlist_prefetch_test.c ${LIBPIANO_SRC} ${ALL_LDFLAGS}
 	./$@$(EXEEXT)
 
 ifeq (${DYNLINK},1)

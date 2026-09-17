@@ -4,9 +4,6 @@
 #define PACKAGE "pianobar"
 #include "version.h"
 
-/* glibc feature test macros, define _before_ including other files */
-#define _POSIX_C_SOURCE 200809L
-
 /* ffmpeg/libav quirks detection
  * ffmpeg’s micro versions always start at 100, that’s how we can distinguish
  * ffmpeg and libav */
