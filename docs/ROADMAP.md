@@ -109,6 +109,7 @@ plans, not promises of a date or release.
 - [ ] Provide a Homebrew formula.
 - [ ] Provide appropriate Linux packages.
 - [x] Add automated CI builds and checks.
+- [x] Add repeatable macOS arm64 and Linux x86_64 archive creation and checks.
 - [ ] Publish reproducible release artifacts.
 - [ ] Document versioning and the release process.
 

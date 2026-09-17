@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: |
@@ -32,6 +32,7 @@ jobs:
             libavfilter-dev \
             libavformat-dev \
             libavutil-dev \
+            libswscale-dev \
             libcurl4-gnutls-dev \
             libgcrypt20-dev \
             libjson-c-dev \
@@ -45,13 +46,16 @@ jobs:
             contrib/addshared.sh \
             contrib/headless_pianobar \
             contrib/remote.sh \
-            contrib/tls_fingerprint.sh
+            contrib/tls_fingerprint.sh \
+            scripts/package-release.sh
           bash -n \
             contrib/change-station-dmenu.sh \
             contrib/eventcmd-examples/eventcmd.sh \
             contrib/eventcmd-examples/multi.sh \
             contrib/headless_signalbox
-          python3 -m py_compile contrib/eventcmd-examples/scrobble.py
+          python3 -m py_compile \
+            contrib/eventcmd-examples/scrobble.py \
+            scripts/create-release-archive.py
           perl -c contrib/eventcmd-examples/dmenu.pl
           ruby -c contrib/eventcmd-examples/rbot.rb
 
@@ -69,13 +73,25 @@ jobs:
           file ./signalbox
           ldd ./signalbox
 
+      - name: Package Linux x86_64
+        run: make package-linux
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: signalbox-linux-x86_64
+          path: |
+            dist/signalbox-*-linux-x86_64.tar.gz
+            dist/signalbox-*-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
   macos:
     name: Build (macOS)
     runs-on: macos-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: brew install ffmpeg json-c libao libgcrypt make ncurses pkgconf

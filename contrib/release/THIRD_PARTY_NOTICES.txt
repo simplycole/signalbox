@@ -1,0 +1,21 @@
+Third-party runtime dependencies
+================================
+
+This archive does not bundle third-party shared libraries. Signalbox loads the
+following libraries from the operating system or package manager. Their own
+packages provide the applicable license texts and notices.
+
+- FFmpeg (https://ffmpeg.org/): licensing depends on the enabled build
+  configuration; see https://ffmpeg.org/legal.html.
+- libgcrypt (https://gnupg.org/software/libgcrypt/): LGPL-2.1-or-later, with
+  GPL-2.0-or-later components.
+- json-c (https://github.com/json-c/json-c): MIT.
+- libao (https://www.xiph.org/ao/): GPL-2.0-or-later.
+- curl/libcurl (https://curl.se/libcurl/): curl license.
+- ncurses (https://invisible-island.net/ncurses/): X11-style permissive
+  license.
+- libsecret (https://gitlab.gnome.org/GNOME/libsecret): LGPL-2.1-or-later;
+  used by Linux builds when available.
+
+macOS builds also use Apple system libraries and the Security and
+CoreFoundation frameworks under the terms supplied with macOS.

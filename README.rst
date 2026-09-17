@@ -116,6 +116,24 @@ available when the inline display is off or only plain lyrics are available.
 Build and run
 -------------
 
+Downloads / binary releases
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The repository can create inspectable release archives with
+``make package-macos`` on an Apple Silicon Mac and ``make package-linux`` on
+x86_64 Linux. Published binaries are not yet promised for every tagged
+release; building from source remains fully supported.
+
+The macOS arm64 archive uses Homebrew's ``ffmpeg``, ``libgcrypt``, ``json-c``,
+and ``libao`` shared libraries rather than bundling them. The Linux x86_64
+archive is dynamically linked and targets the Ubuntu environment exercised by
+GitHub Actions, not every Linux distribution. Each archive includes its exact
+set of support files, documents its runtime prerequisites, and has a SHA-256
+checksum. Windows packaging is planned as a separate milestone.
+
+Build from source
+~~~~~~~~~~~~~~~~~
+
 Signalbox targets macOS, Linux, and native Windows x64. On Unix you need a C99 compiler,
 ``pkg-config``, FFmpeg (``libavcodec``, ``libavformat``, ``libavutil``, and
 ``libavfilter`` plus ``libswscale``), libcurl, libgcrypt, json-c, libao,
@@ -206,7 +224,7 @@ Near-term work is deliberately release-focused:
    interactive default
 4. Persistent listening history with explicit retention and privacy behavior
 5. Richer visualizer modes and broader terminal-art compatibility
-6. Homebrew/Linux packaging and reproducible releases
+6. Homebrew and native Linux package-manager integration
 
 Native Windows x64 builds use the shared TUI renderer with PDCursesMod WinCon,
 native Win32 input, FFmpeg, and libao/WMM. Build/TUI/audio work has been exercised

@@ -11,6 +11,7 @@ ifneq (${WINDOWS},1)
 	CPPFLAGS+=-D_POSIX_C_SOURCE=200809L
 endif
 PROGRAM:=$(PROGRAM_BASE)$(EXEEXT)
+PACKAGE_SCRIPT:=./scripts/package-release.sh
 PREFIX:=/usr/local
 BINDIR:=${PREFIX}/bin
 LIBDIR:=${PREFIX}/lib
@@ -216,6 +217,12 @@ clean:
 
 all: ${PROGRAM}
 
+package-macos:
+	MAKE="$(MAKE)" ${PACKAGE_SCRIPT} macos
+
+package-linux:
+	MAKE="$(MAKE)" ${PACKAGE_SCRIPT} linux
+
 test: ${TEST_TARGETS}
 
 settings-values-test: tests/settings_values_test.c src/settings_values.c src/settings_values.h
@@ -286,4 +293,4 @@ uninstall:
 	${DESTDIR}/${LIBDIR}/libpiano.a \
 	${DESTDIR}/${INCDIR}/piano.h
 
-.PHONY: clean install install-libpiano uninstall test debug all ${TEST_TARGETS}
+.PHONY: clean install install-libpiano uninstall test debug all package-macos package-linux ${TEST_TARGETS}

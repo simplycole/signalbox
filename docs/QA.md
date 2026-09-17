@@ -439,6 +439,26 @@ restore reversible global state, and delete the temporary station last.
   plain lyrics, Track Info, queue prefetch, resize/narrow layout, and quit pass.
 - [ ] Relaunch reuses valid enrichment/art cache data without stale publication.
 
+### Linux
+
+- [ ] The GitHub Actions x86_64 job completes its build and full test gate.
+- [ ] `make package-linux` completes after the gate, and `ldd` reports no
+  unresolved or build-tree dependencies.
+- [ ] Download the ephemeral Actions artifact, verify its `.sha256` file, and
+  confirm the archive contains only the documented runtime/support files.
+
+### Release archives
+
+- [ ] On Apple Silicon, `make package-macos` creates the expected arm64 archive
+  and SHA-256 file under `dist/`.
+- [ ] `otool -L` shows only macOS system paths and the documented Homebrew
+  dependencies; it shows no development, temporary, or build-tree paths.
+- [ ] Extract the macOS archive into a new temporary directory outside the
+  repository; run `./signalbox --version` and `./signalbox --help` there and
+  confirm `config-example`, `COPYING`, and `THIRD_PARTY_NOTICES.txt` are present.
+- [ ] List each archive with `tar -tzf`, and verify checksums with
+  `shasum -a 256 -c` on macOS or `sha256sum -c` on Linux.
+
 ### Windows
 
 - [ ] Clean UCRT64 build and `make test` pass with the WinCon backend.
