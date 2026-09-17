@@ -96,7 +96,7 @@ checking the system clock, the configured `ca_bundle`, and the bundled
 
 ## Audio
 
-Windows playback currently uses the packaged libao live-output path, which
+Windows playback currently uses the libao live-output path, which
 selects its Windows multimedia (WMM) driver. FFmpeg decode, the final packed
 signed-16-bit PCM path, queue transitions, pause/next, and spectrum observation
 are shared with the Unix build.

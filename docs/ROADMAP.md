@@ -94,7 +94,7 @@ plans, not promises of a date or release.
 - [ ] Publish metadata through macOS Now Playing.
 - [ ] Add native notifications.
 - [x] Store credentials securely with Keychain.
-- [ ] Maintain explicit Apple Silicon validation.
+- [x] Maintain explicit Apple Silicon build, test, and package validation.
 
 ## Phase 4 — Linux integration
 
@@ -107,7 +107,8 @@ plans, not promises of a date or release.
 ## Phase 5 — Packaging and releases
 
 - [ ] Provide a Homebrew formula.
-- [ ] Provide appropriate Linux packages.
+- [ ] Provide native Linux distribution packages beyond the current x86_64
+  release archive.
 - [x] Add automated CI builds and checks.
 - [x] Add repeatable macOS arm64 and Linux x86_64 archive creation and checks.
 - [ ] Publish reproducible release artifacts.
@@ -115,12 +116,6 @@ plans, not promises of a date or release.
 
 ## Phase 6 — Extended features
 
-- [x] Add optional terminal album artwork where capability and accessibility
-  permit it.
-- [x] Present richer MusicBrainz track/release metadata, Cover Art Archive art,
-  and LRCLIB synced/plain lyrics through generation-safe background enrichment
-  with a persistent cache.
-- [x] Add generation-safe queue prefetch and searchable in-pane stations.
 - [ ] Provide stable scripting and headless control interfaces.
 - [ ] Consider external integrations only where technically and legally
   appropriate.

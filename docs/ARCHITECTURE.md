@@ -131,7 +131,7 @@ the right pane is at least 69 cells wide, max-aggregates them to eight display
 bands from 38–68 cells, and hides the display below 38 cells. Track and format
 changes reset its fixed state;
 stale snapshots decay during pause, buffering, and transitions. The module has
-no macOS DSP dependency and is intended to carry into Linux and future Windows.
+no macOS DSP dependency and is shared by the macOS, Linux, and Windows builds.
 
 ### Current terminal interaction: `src/ui*`, `src/terminal*`
 
@@ -311,7 +311,7 @@ screen state, and code pages, while `terminal_input_win32.c` owns
 `ReadConsoleInputW` key and resize decoding. Layout and command code do not
 contain Win32 console calls.
 
-Playback remains FFmpeg plus libao on all three platforms; the Windows package
+Playback remains FFmpeg plus libao on all three platforms; the Windows build
 uses libao's WMM output. Windows secure credential storage, subprocess helpers,
 FIFO/Named Pipe control, packaging, and CI remain explicit gaps. Scripts under
 `contrib/` are Unix-oriented helpers outside the core executable. See

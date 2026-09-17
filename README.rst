@@ -42,15 +42,17 @@ Highlights
 - Responsive ``ncursesw`` interface with phosphor, amber, neutral, and
   monochrome themes
 - Real PCM-driven 8/12-band spectrum analyzer with smoothing and peak hold
-- Responsive cached album art using ANSI half blocks with truecolor/256-color fallback
+- Terminal-native cached album art using ANSI half blocks with
+  truecolor/256-color fallback
 - Searchable retained station pane with instant name filtering and safe
-  switching through the existing playback pipeline while Now Playing remains visible
+  switching through the existing playback pipeline while Now Playing remains
+  visible; views sort A-Z or retain original Pandora order
 - Now-playing metadata, adaptive progress, signed-dB volume, upcoming queue,
   and full in-memory session history
 - Synced LRCLIB lyrics with an adaptive previous/current/next strip and
   current-line highlighting in the full Lyrics view
 - Background MusicBrainz enrichment, Cover Art Archive resolution, queue
-  prefetch, and a schema-versioned persistent enrichment cache
+  prefetch, and schema-versioned persistent enrichment and artwork caches
 - Native TUI flows for station creation, rename/delete, QuickMix, genres,
   seeds, feedback, bookmarks, and station modes
 - Configurable bindings with an in-app, responsive, scrollable HELP overlay
@@ -119,17 +121,19 @@ Build and run
 Downloads / binary releases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The repository can create inspectable release archives with
-``make package-macos`` on an Apple Silicon Mac and ``make package-linux`` on
-x86_64 Linux. Published binaries are not yet promised for every tagged
-release; building from source remains fully supported.
+Binary release packages are provided for macOS arm64 and Linux x86_64. They
+are produced with ``make package-macos`` on an Apple Silicon Mac and
+``make package-linux`` on x86_64 Linux. Building from source remains fully
+supported.
 
 The macOS arm64 archive uses Homebrew's ``ffmpeg``, ``libgcrypt``, ``json-c``,
 and ``libao`` shared libraries rather than bundling them. The Linux x86_64
 archive is dynamically linked and targets the Ubuntu environment exercised by
 GitHub Actions, not every Linux distribution. Each archive includes its exact
 set of support files, documents its runtime prerequisites, and has a SHA-256
-checksum. Windows packaging is planned as a separate milestone.
+checksum. Native Windows support is implemented and has been exercised on
+Windows 11, including TUI, TLS/CA handling, and captured audio playback on
+physical hardware, but no Windows binary package is included in 0.1.1.
 
 Build from source
 ~~~~~~~~~~~~~~~~~
@@ -177,7 +181,7 @@ Useful options:
 
 Install under ``/usr/local`` with ``sudo make install`` (or ``gmake install``
 on macOS). Override ``PREFIX`` or use ``DESTDIR`` for packaging. Windows uses
-MSYS2 UCRT64, PDCursesMod WinCon, and the packaged libao/WMM backend; see
+MSYS2 UCRT64, PDCursesMod WinCon, and the libao/WMM audio backend; see
 `Windows build and runtime notes`_. See the `annotated configuration`_ for
 settings and key remapping.
 
