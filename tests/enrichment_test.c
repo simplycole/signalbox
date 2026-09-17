@@ -410,22 +410,42 @@ static bool mockLyrics (const SbTrackIdentity *id, SbLyricsResult *result, void 
 	return result->status == SB_LOOKUP_AVAILABLE;
 }
 
+/* The worker may intentionally wait 1000 ms between uncached provider calls.
+ * Keep a scheduling margin, but return immediately when publication arrives. */
+enum { ASYNC_RESULT_TIMEOUT_MS = 2000, ASYNC_POLL_MS = 10 };
+
+static bool waitLyricsFor (SbMetadataResolver *resolver, uint64_t generation,
+		SbLyricsResult *result, const uint64_t timeoutMs) {
+	const uint64_t start = SbPlatformMonotonicMs ();
+	const uint64_t deadline = start + timeoutMs;
+	for (;;) {
+		if (SbLyricsResolverPoll (resolver, generation, result)) return true;
+		const uint64_t now = SbPlatformMonotonicMs ();
+		if (now >= deadline) return false;
+		const uint64_t remaining = deadline - now;
+		SbPlatformSleepMs ((unsigned int) (remaining < ASYNC_POLL_MS ?
+				remaining : ASYNC_POLL_MS));
+	}
+}
+
 static bool waitLyrics (SbMetadataResolver *resolver, uint64_t generation,
 		SbLyricsResult *result) {
-	for (int i = 0; i < 100; i++) {
-		if (SbLyricsResolverPoll (resolver, generation, result)) return true;
-		SbPlatformSleepMs (10);
-	}
-	return false;
+	return waitLyricsFor (resolver, generation, result,
+			ASYNC_RESULT_TIMEOUT_MS);
 }
 
 static bool waitMetadata (SbMetadataResolver *resolver, uint64_t generation,
 		SbMetadataResult *result) {
-	for (int i = 0; i < 100; i++) {
+	const uint64_t deadline = SbPlatformMonotonicMs () +
+			ASYNC_RESULT_TIMEOUT_MS;
+	for (;;) {
 		if (SbMetadataResolverPoll (resolver, generation, result)) return true;
-		SbPlatformSleepMs (10);
+		const uint64_t now = SbPlatformMonotonicMs ();
+		if (now >= deadline) return false;
+		const uint64_t remaining = deadline - now;
+		SbPlatformSleepMs ((unsigned int) (remaining < ASYNC_POLL_MS ?
+				remaining : ASYNC_POLL_MS));
 	}
-	return false;
 }
 
 static void testProviderStatesAreIndependent (void) {
