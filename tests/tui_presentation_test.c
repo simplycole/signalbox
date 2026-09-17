@@ -91,27 +91,32 @@ int main (void) {
 			assert (BarUiTuiCommandHelpFor (help[i].command) != NULL);
 		}
 	}
-	assert (strcmp (FindHelpCommand (help, helpCount, SB_UI_CMD_HELP,
-			true)->keys, "?") == 0);
-	assert (strcmp (FindHelpCommand (help, helpCount, SB_UI_CMD_QUIT,
-			true)->keys, "q") == 0);
-	assert (strcmp (FindHelpCommand (help, helpCount, SB_UI_CMD_LOVE,
-			true)->keys, "+") == 0);
-	assert (strcmp (FindHelpCommand (help, helpCount, SB_UI_CMD_BAN,
-			true)->keys, "-") == 0);
+	const SbTuiHelpEntry *entry = FindHelpCommand (help, helpCount,
+			SB_UI_CMD_HELP, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "?") == 0);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_QUIT, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "q") == 0);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_LOVE, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "+") == 0);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_BAN, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "-") == 0);
 	assert (FindHelpCommand (help, helpCount, SB_UI_CMD_VOLUME_DOWN, true) != NULL);
 	assert (FindHelpCommand (help, helpCount, SB_UI_CMD_VOLUME_UP, true) != NULL);
 	assert (FindHelpCommand (help, helpCount, SB_UI_CMD_VOLUME_RESET, true) != NULL);
 	assert (FindHelpCommand (help, helpCount, SB_UI_CMD_HISTORY, true) != NULL);
 	assert (FindHelpCommand (help, helpCount, SB_UI_CMD_UPCOMING, true) != NULL);
-	assert (FindHelpCommand (help, helpCount,
-			SB_UI_CMD_CREATE_STATION_FROM_SONG, true) != NULL);
-	assert (strcmp (FindHelpCommand (help, helpCount,
-			SB_UI_CMD_CREATE_STATION_FROM_SONG, true)->keys, "v") == 0);
-	assert (strstr (FindHelpCommand (help, helpCount, SB_UI_CMD_TOGGLE_PAUSE,
-			true)->keys, "p") != NULL);
-	assert (strstr (FindHelpCommand (help, helpCount, SB_UI_CMD_TOGGLE_PAUSE,
-			true)->keys, "Space") != NULL);
+	entry = FindHelpCommand (help, helpCount,
+			SB_UI_CMD_CREATE_STATION_FROM_SONG, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "v") == 0);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_TOGGLE_PAUSE, true);
+	assert (entry != NULL);
+	assert (strstr (entry->keys, "p") != NULL);
+	assert (strstr (entry->keys, "Space") != NULL);
 	assert (FindHelpText (help, helpCount, "z", "A-Z / Original") != NULL);
 	assert (FindHelpText (help, helpCount, "V", "visualizer") != NULL);
 	assert (FindHelpText (help, helpCount, "i / I", "Track Info") != NULL);
@@ -142,16 +147,19 @@ int main (void) {
 	settings.keys[BAR_KS_INFO] = 'o';
 	helpCount = SbTuiPresentationHelpEntries (&settings, help,
 			sizeof (help) / sizeof (*help));
-	assert (strcmp (FindHelpCommand (help, helpCount, SB_UI_CMD_ADD_SHARED,
-			true)->keys, "J") == 0);
-	assert (strcmp (FindHelpCommand (help, helpCount, SB_UI_CMD_INFO,
-			true)->keys, "o") == 0);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_ADD_SHARED, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "J") == 0);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_INFO, true);
+	assert (entry != NULL);
+	assert (strcmp (entry->keys, "o") == 0);
 	/* A configured uppercase V wins; Help must not advertise the local toggle. */
 	settings.keys[BAR_KS_CREATESTATION] = 'V';
 	helpCount = SbTuiPresentationHelpEntries (&settings, help,
 			sizeof (help) / sizeof (*help));
-	assert (strstr (FindHelpCommand (help, helpCount, SB_UI_CMD_CREATE_STATION,
-			true)->keys, "V") != NULL);
+	entry = FindHelpCommand (help, helpCount, SB_UI_CMD_CREATE_STATION, true);
+	assert (entry != NULL);
+	assert (strstr (entry->keys, "V") != NULL);
 	assert (FindHelpCommand (help, helpCount,
 			SB_UI_CMD_TOGGLE_VISUALIZER, false) == NULL);
 
