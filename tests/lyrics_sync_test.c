@@ -49,6 +49,29 @@ int main (void) {
 	lyrics.offset_ms = 7000;
 	context = SbSyncedLyricsLookupCursor (&lyrics, 9000, &cursor, &reseek);
 	assert (context.current_index == 2); /* offset survives cursor recovery */
+
+	/* Async publication uses the current playback position immediately. An
+	 * empty/plain result does not poison the retained cursor or require a track,
+	 * station, resize, or lyric-boundary event to recover. */
+	SbSyncedLyricsDestroy (&lyrics);
+	SbLyricCursorReset (&cursor);
+	context = SbSyncedLyricsLookupCursor (&lyrics, 12000, &cursor, &reseek);
+	assert (context.current == NULL && !cursor.initialized);
+	assert (SbSyncedLyricsParse (&lyrics,
+			"[00:01.00] first\n[00:10.00] current\n[00:20.00] next"));
+	context = SbSyncedLyricsLookupCursor (&lyrics, 12000, &cursor, &reseek);
+	assert (context.current != NULL && strcmp (context.current->text, "current") == 0);
+	assert (context.next != NULL && strcmp (context.next->text, "next") == 0);
+
+	/* Track-to-track clear and republish transitions never retain old text. */
+	SbSyncedLyricsDestroy (&lyrics); /* Synced -> Plain/No match/etc. */
+	assert (lyrics.count == 0 && lyrics.lines == NULL);
+	SbLyricCursorReset (&cursor);
+	assert (SbSyncedLyricsParse (&lyrics,
+			"[00:02.00] replacement one\n[00:08.00] replacement two"));
+	context = SbSyncedLyricsLookupCursor (&lyrics, 9000, &cursor, &reseek);
+	assert (context.current != NULL &&
+			strcmp (context.current->text, "replacement two") == 0);
 	SbSyncedLyricsDestroy (&lyrics);
 	puts ("lyrics sync tests passed");
 	return 0;

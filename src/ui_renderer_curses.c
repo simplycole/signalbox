@@ -122,9 +122,17 @@ typedef struct {
 	bool artOverlayVisible;
 	char artOverlayPath[1024];
 	unsigned int artOverlayColumns, artOverlayRows;
+	int artOverlayY, artOverlayX;
+	SbTuiRect retainedRect, popupRect;
 	SbLyricCursor lyricCursor;
 	uint64_t lyricCursorGeneration;
 	size_t loggedLyricIndex;
+	bool inlineLogInitialized;
+	uint64_t loggedInlineGeneration;
+	int loggedInlineState, loggedInlineReason;
+	size_t loggedInlineLines;
+	bool loggedInlineEligible, loggedInlineVisible, loggedInlineThreeLine,
+			loggedInlineSeparated;
 } SbUiCursesData;
 
 static void SbUiCursesDrawTextModal (const SbUiRenderer *,
@@ -531,6 +539,12 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	data->sizeState = nextState;
 	/* Route the first frame at every new geometry through wnoutrefresh/doupdate. */
 	data->recoveryPending = true;
+	if (data->textModalWindow != NULL) {
+		delwin (data->textModalWindow);
+		data->textModalWindow = NULL;
+	}
+	data->retainedRect = (SbTuiRect) {0};
+	data->popupRect = (SbTuiRect) {0};
 	/* Every adopted geometry invalidates the physical cell map. */
 	erase ();
 	clearok (stdscr, TRUE);
@@ -927,10 +941,49 @@ static void SbUiCursesNowPlaying (SbUiCursesData *data,
 				lyric.next != NULL ? (long long) lyric.next->timestamp_ms : -1LL);
 		data->loggedLyricIndex = lyric.current_index;
 	}
-	const bool showLyrics = SbTuiPresentationInlineLyrics (lyricsDisplay,
-			model->syncedLyrics.count) && height >= 7;
-	const bool showThree = showLyrics && lyricsDisplay == SB_LYRICS_DISPLAY_THREE_LINE &&
-			height >= 11;
+	const SbTuiInlineLyricsPresentation inlineState =
+			SbTuiPresentationInlineLyricsState (model->lyricsState,
+					model->lyricsHasPlain, lyricsDisplay,
+					model->syncedLyrics.count, model->lyricsGeneration,
+					model->songGeneration, height, width);
+	const bool inlineChanged = !data->inlineLogInitialized ||
+			data->loggedInlineGeneration != model->songGeneration ||
+			data->loggedInlineState != model->lyricsState ||
+			data->loggedInlineLines != model->syncedLyrics.count ||
+			data->loggedInlineEligible != inlineState.eligible ||
+			data->loggedInlineVisible != inlineState.visible ||
+			data->loggedInlineThreeLine != inlineState.threeLine ||
+			data->loggedInlineSeparated != inlineState.separated ||
+			data->loggedInlineReason != (int) inlineState.reason;
+	if (inlineChanged) {
+		if (data->inlineLogInitialized &&
+				data->loggedInlineGeneration != model->songGeneration)
+			tuiDebugPrint ("lyrics_inline cleared reason=new_track generation=%llu\n",
+					(unsigned long long) model->songGeneration);
+		const char *mode = model->lyricsState == SB_LOOKUP_AVAILABLE &&
+				model->syncedLyrics.count > 0 ? "synced" :
+				model->lyricsState == SB_LOOKUP_AVAILABLE &&
+				model->lyricsHasPlain ? "plain" :
+				model->lyricsState == SB_LOOKUP_INSTRUMENTAL ? "instrumental" :
+				model->lyricsState == SB_LOOKUP_NO_MATCH ? "no-match" : "unavailable";
+		tuiDebugPrint ("lyrics_inline generation=%llu mode=%s lines=%zu eligible=%s visible=%s presentation=%s reason=%s\n",
+				(unsigned long long) model->songGeneration, mode,
+				model->syncedLyrics.count, inlineState.eligible ? "yes" : "no",
+				inlineState.visible ? "yes" : "no",
+				inlineState.visible ? (inlineState.threeLine ? "three-line" : "line") : "none",
+				SbTuiPresentationInlineLyricsReason (inlineState.reason));
+		data->inlineLogInitialized = true;
+		data->loggedInlineGeneration = model->songGeneration;
+		data->loggedInlineState = model->lyricsState;
+		data->loggedInlineLines = model->syncedLyrics.count;
+		data->loggedInlineEligible = inlineState.eligible;
+		data->loggedInlineVisible = inlineState.visible;
+		data->loggedInlineThreeLine = inlineState.threeLine;
+		data->loggedInlineSeparated = inlineState.separated;
+		data->loggedInlineReason = (int) inlineState.reason;
+	}
+	const bool showLyrics = inlineState.visible;
+	const bool showThree = inlineState.threeLine;
 	int progressRow = 5, stateRow = 6;
 	if (showThree) {
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_MUTED, A_DIM);
@@ -945,9 +998,11 @@ static void SbUiCursesNowPlaying (SbUiCursesData *data,
 		progressRow = 9; stateRow = 10;
 	} else if (showLyrics) {
 		SbUiCursesAttrOn (data, SB_TUI_COLOR_TRACK, A_BOLD);
-		SbUiCursesPut (y + 4, x, width, lyric.current != NULL ? lyric.current->text :
+		SbUiCursesPut (y + (inlineState.separated ? 5 : 4), x, width,
+				lyric.current != NULL ? lyric.current->text :
 				(lyric.next != NULL ? lyric.next->text : ""));
 		SbUiCursesAttrOff (data, SB_TUI_COLOR_TRACK, A_BOLD);
+		if (inlineState.separated) { progressRow = 7; stateRow = 8; }
 	}
 	if (height > progressRow) SbUiCursesProgress (data, model, y + progressRow, x, width);
 	if (height > stateRow) {
@@ -986,12 +1041,61 @@ static SbArtLayout SbUiCursesArtLayout (const SbUiRenderer *renderer,
 	return SbArtChooseLayout ((unsigned int) rightWidth, nowPlayingHeight, true);
 }
 
+static SbTuiModalKind SbUiCursesRetainedModalKind (
+		const SbUiCursesData *data) {
+	if (data->helpVisible) return SB_TUI_MODAL_HELP;
+	return strcmp (data->textModalTitle, "LYRICS") == 0 ?
+			SB_TUI_MODAL_LYRICS : SB_TUI_MODAL_TRACK_INFO;
+}
+
+static SbTuiRect SbUiCursesWindowRect (WINDOW *window) {
+	if (window == NULL) return (SbTuiRect) {0};
+	int y, x, height, width;
+	getbegyx (window, y, x);
+	getmaxyx (window, height, width);
+	return (SbTuiRect) {y, x, height, width};
+}
+
+static SbTuiRect SbUiCursesActiveOverlayRect (const SbUiCursesData *data) {
+	if (SbTuiPresentationRectValid (data->popupRect)) return data->popupRect;
+	if (!data->helpVisible && data->textModalContent == NULL)
+		return (SbTuiRect) {0};
+	if (SbTuiPresentationRectValid (data->retainedRect))
+		return data->retainedRect;
+	int rows, cols;
+	getmaxyx (stdscr, rows, cols);
+	return SbTuiPresentationModalRect (SbUiCursesRetainedModalKind (data),
+			rows, cols, 0);
+}
+
+static void SbUiCursesClearArtOverlap (SbUiCursesData *data,
+		const SbTuiRect overlay) {
+	if (!data->artCompositor.painted ||
+			!SbTuiPresentationRectValid (overlay)) return;
+	const SbTuiRect art = {data->artOverlayY, data->artOverlayX,
+			(int) data->preparedArt.rows, (int) data->preparedArt.columns};
+	if (!SbTuiPresentationRectsIntersect (art, overlay)) return;
+	const int top = art.y > overlay.y ? art.y : overlay.y;
+	const int left = art.x > overlay.x ? art.x : overlay.x;
+	const int bottom = art.y + art.height < overlay.y + overlay.height ?
+			art.y + art.height : overlay.y + overlay.height;
+	const int right = art.x + art.width < overlay.x + overlay.width ?
+			art.x + art.width : overlay.x + overlay.width;
+	int savedY, savedX;
+	getsyx (savedY, savedX);
+	for (int row = top; row < bottom; row++) {
+		fprintf (stdout, "\033[%d;%dH\033[0m", row + 1, left + 1);
+		for (int col = left; col < right; col++) fputc (' ', stdout);
+	}
+	fprintf (stdout, "\033[%d;%dH", savedY + 1, savedX + 1);
+	fflush (stdout);
+}
+
 static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model) {
 	SbUiCursesData *data = renderer->data; int y, x;
 	const SbArtLayout layout = SbUiCursesArtLayout (renderer, model, &y, &x);
-	if (!layout.visible || data->artColorMode == SB_ART_COLOR_NONE ||
-			!SbTuiPresentationArtMayPaint (data->helpVisible,
-					data->textModalContent != NULL, false)) return;
+	if (!layout.visible || data->artColorMode == SB_ART_COLOR_NONE) return;
+	const SbTuiRect overlay = SbUiCursesActiveOverlayRect (data);
 	const unsigned int builds = data->preparedArt.builds;
 	const unsigned int hits = data->preparedArt.hits;
 	if (!SbPreparedArtGet (&data->preparedArt, model->artCachedPath,
@@ -1014,9 +1118,18 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" : "xterm-256");
 	int savedY, savedX; getsyx (savedY, savedX); char sequence[96];
 	for (unsigned int row = 0; row < data->preparedArt.rows; row++) {
-		fprintf (stdout, "\033[%u;%uH", (unsigned int) y + row + 1,
-				(unsigned int) x + 1);
+		bool positioned = false;
 		for (unsigned int col = 0; col < data->preparedArt.columns; col++) {
+			if (!SbTuiPresentationArtCellVisible (overlay, y + (int) row,
+					x + (int) col)) {
+				positioned = false;
+				continue;
+			}
+			if (!positioned) {
+				fprintf (stdout, "\033[%u;%uH", (unsigned int) y + row + 1,
+						(unsigned int) x + col + 1);
+				positioned = true;
+			}
 			const size_t length = SbArtCellAnsi (&data->preparedArt.cells[
 					(size_t) row * data->preparedArt.columns + col],
 					data->artColorMode, sequence, sizeof (sequence));
@@ -1024,6 +1137,8 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 		}
 	}
 	fprintf (stdout, "\033[0m\033[%d;%dH", savedY + 1, savedX + 1); fflush (stdout);
+	data->artOverlayY = y;
+	data->artOverlayX = x;
 	SbTuiPresentationArtDidPaint (&data->artCompositor);
 }
 
@@ -1303,12 +1418,10 @@ static void SbUiCursesUpcoming (const SbUiCursesData *data,
 	}
 }
 
-static void SbUiCursesFrame (const SbUiRenderer *renderer,
+static void SbUiCursesFrame (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
-	if (SbTuiPresentationArtOcclude (&data->artCompositor,
-			data->helpVisible || data->textModalContent != NULL))
-		clearok (stdscr, TRUE);
+	SbUiCursesClearArtOverlap (data, SbUiCursesActiveOverlayRect (data));
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
@@ -1482,12 +1595,13 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 	if (data->helpVisible && data->textModalContent == NULL) {
 		SbHelpRow helpRows[SB_TUI_HELP_MAX_ROWS];
 		const size_t helpRowCount = SbUiCursesHelpRows (renderer, helpRows);
-		const int wantedHeight = (int) helpRowCount + 5;
-		const int height = wantedHeight < rows - 4 ? wantedHeight : rows - 4;
-		const int width = cols < 70 ? cols - 6 : 64;
-		WINDOW * const help = newwin (height, width, (rows - height) / 2,
-				(cols - width) / 2);
+		const SbTuiRect rect = SbTuiPresentationModalRect (SB_TUI_MODAL_HELP,
+				rows, cols, helpRowCount);
+		const int height = rect.height, width = rect.width;
+		WINDOW * const help = newwin (height, width, rect.y, rect.x);
 		if (help != NULL) {
+			data->retainedRect = SbUiCursesWindowRect (help);
+			SbUiCursesClearArtOverlap (data, data->retainedRect);
 			/* Keep the penultimate row for navigation help at every size. */
 			const size_t visibleRows = height > 5 ? (size_t) height - 5 : 0;
 			const size_t maxOffset = helpRowCount > visibleRows ?
@@ -1524,6 +1638,11 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 			wnoutrefresh (stdscr);
 			wnoutrefresh (help);
 			doupdate ();
+			SbUiCursesRenderArt (renderer, model);
+			/* Direct ANSI output bypasses curses' physical cache. Reassert the
+			 * complete framed window after art without repainting the terminal. */
+			touchwin (help);
+			wrefresh (help);
 			delwin (help);
 			if (data->recoveryPending) {
 				data->recoveryPending = false;
@@ -1546,6 +1665,37 @@ static void SbUiCursesFrame (const SbUiRenderer *renderer,
 		if (data->textModalWindow != NULL) wnoutrefresh (data->textModalWindow);
 		doupdate ();
 	}
+	SbUiCursesRenderArt (renderer, model);
+	if (data->textModalWindow != NULL) {
+		touchwin (data->textModalWindow);
+		wrefresh (data->textModalWindow);
+	}
+}
+
+static WINDOW *SbUiCursesModalWindow (SbUiCursesData *data,
+		const char *title, const char *prompt, const SbTuiRect rect) {
+	if (!SbTuiPresentationRectValid (rect)) return NULL;
+	WINDOW *window = newwin (rect.height, rect.width, rect.y, rect.x);
+	if (window != NULL) {
+		const SbTuiRect actual = SbUiCursesWindowRect (window);
+		tuiDebugPrint ("modal_open title=\"%s\" size=%dx%d origin=%d,%d outer=[%d,%d)x[%d,%d)\n",
+				title, actual.width, actual.height, actual.x, actual.y,
+				actual.x, actual.x + actual.width,
+				actual.y, actual.y + actual.height);
+		wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0);
+		SbUiCursesBox (window);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_BORDER, 0);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
+		SbUiCursesWPut (window, 1, 2, rect.width - 4, title);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
+		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
+		SbUiCursesWPut (window, 3, 2, rect.width - 4, prompt);
+		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
+		keypad (window, TRUE);
+		wnoutrefresh (stdscr);
+	}
+	return window;
 }
 
 static WINDOW *SbUiCursesModal (SbUiCursesData *data,
@@ -1554,30 +1704,16 @@ static WINDOW *SbUiCursesModal (SbUiCursesData *data,
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	if (rows < 15 || cols < 50) return NULL;
-	/* Direct ANSI art is invisible to curses' physical-screen cache.  Force the
-	 * background through curses once before any popup so blank modal cells are
-	 * real occluding cells rather than optimized-away assumptions. */
-	if (SbTuiPresentationArtOcclude (&data->artCompositor, true))
-		clearok (stdscr, TRUE);
-	const int width = cols < 72 ? cols - 4 : 68;
-	const int height = wantedHeight < rows - 2 ? wantedHeight : rows - 2;
-	WINDOW *window = newwin (height, width, (rows - height) / 2,
-			(cols - width) / 2);
-	if (window != NULL) {
-		tuiDebugPrint ("modal_open title=\"%s\" size=%dx%d\n", title,
-				width, height);
-		wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0);
-		SbUiCursesBox (window);
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_BORDER, 0);
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
-		SbUiCursesWPut (window, 1, 2, width - 4, title);
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
-		SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
-		SbUiCursesWPut (window, 3, 2, width - 4, prompt);
-		SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
-		keypad (window, TRUE);
-		wnoutrefresh (stdscr);
+	data->popupRect = SbTuiPresentationPopupRect (rows, cols, wantedHeight);
+	/* ANSI art is absent from curses' physical-screen cache. Clear only the
+	 * cells actually covered by this popup; the remaining cover stays intact. */
+	SbUiCursesClearArtOverlap (data, data->popupRect);
+	WINDOW * const window = SbUiCursesModalWindow (data, title, prompt,
+			data->popupRect);
+	if (window == NULL) data->popupRect = (SbTuiRect) {0};
+	else {
+		data->popupRect = SbUiCursesWindowRect (window);
+		SbUiCursesClearArtOverlap (data, data->popupRect);
 	}
 	return window;
 }
@@ -1586,6 +1722,8 @@ static void SbUiCursesPopupClosed (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	/* Recompose immediately: remove the popup through curses, then repaint the
 	 * direct ANSI art at the current geometry. */
+	SbUiCursesData * const data = renderer->data;
+	data->popupRect = (SbTuiRect) {0};
 	clearok (stdscr, TRUE);
 	SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 }
@@ -1845,6 +1983,10 @@ bool SbUiRendererConfirm (SbUiRenderer *renderer, const SbUiModel *model,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
+		if (key == KEY_RESIZE) {
+			SbUiCursesHandleResize (data);
+			continue;
+		}
 		if (key == 27 || key == 'n' || key == 'N') {
 			SbUiCursesPopupClosed (renderer, model); return false;
 		}
@@ -1889,6 +2031,10 @@ int SbUiRendererSelectList (SbUiRenderer *renderer, const SbUiModel *model,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
+		if (key == KEY_RESIZE) {
+			SbUiCursesHandleResize (data);
+			continue;
+		}
 		if (key == 27) {
 			SbUiCursesPopupClosed (renderer, model); return -1;
 		}
@@ -1964,6 +2110,10 @@ int SbUiRendererSelectHistory (SbUiRenderer *renderer,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
+		if (key == KEY_RESIZE) {
+			SbUiCursesHandleResize (data);
+			continue;
+		}
 		if (key == 27) {
 			SbUiCursesPopupClosed (renderer, model); return -1;
 		}
@@ -2112,23 +2262,149 @@ void SbUiRendererDynamicTextModal (SbUiRenderer *renderer,
 	SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 }
 
+typedef struct {
+	char *text, *label;
+	int indent;
+	SbTuiTextRole role;
+	bool field, continuation, section;
+} SbUiCursesModalLine;
+
+static bool SbUiCursesModalLineAdd (SbUiCursesModalLine *lines,
+		size_t *count, const size_t capacity, const char *text,
+		const size_t length, const char *label, const size_t labelLength,
+		const int indent, const SbTuiTextRole role, const bool continuation,
+		const bool section) {
+	if (*count >= capacity) return false;
+	SbUiCursesModalLine * const line = &lines[(*count)++];
+	line->text = strndup (text, length);
+	line->label = label != NULL ? strndup (label, labelLength) : NULL;
+	line->indent = indent; line->role = role;
+	line->field = indent > 0;
+	line->continuation = continuation; line->section = section;
+	return line->text != NULL && (label == NULL || line->label != NULL);
+}
+
+static bool SbUiCursesModalWrap (SbUiCursesModalLine *lines, size_t *count,
+		const size_t capacity, const char *text, const int width,
+		const char *label, const size_t labelLength, const int indent,
+		const SbTuiTextRole role, const bool section) {
+	while (*text == ' ') text++;
+	if (*text == '\0') return SbUiCursesModalLineAdd (lines, count, capacity,
+			"", 0, NULL, 0, 0, SB_TUI_TEXT_PRIMARY, false, false);
+	bool continuation = false;
+	while (*text != '\0') {
+		const int available = width - indent > 0 ? width - indent : 1;
+		const char *end = text;
+		const char *lastSpace = NULL;
+		int cells = 0;
+		while (*end != '\0' && cells < available) {
+			if (*end == ' ') lastSpace = end;
+			end++; cells++;
+		}
+		const char *cut = *end == '\0' ? end :
+				(lastSpace != NULL && lastSpace > text ? lastSpace : end);
+		if (!SbUiCursesModalLineAdd (lines, count, capacity, text,
+				(size_t) (cut - text), continuation ? NULL : label,
+				continuation ? 0 : labelLength, indent, role, continuation,
+				section)) return false;
+		if (*cut == '\0') break;
+		text = cut;
+		while (*text == ' ') text++;
+		continuation = true;
+	}
+	return true;
+}
+
+static void SbUiCursesModalLinesDestroy (SbUiCursesModalLine *lines,
+		const size_t count) {
+	for (size_t i = 0; i < count; i++) {
+		free (lines[i].text);
+		free (lines[i].label);
+	}
+	free (lines);
+}
+
+static SbUiCursesModalLine *SbUiCursesModalLines (char *copy,
+		const bool trackInfo, const int lineWidth, size_t *lineCount) {
+	const size_t capacity = strlen (copy) + 1;
+	SbUiCursesModalLine *lines = calloc (capacity, sizeof (*lines));
+	if (lines == NULL) return NULL;
+	char *cursor = copy;
+	bool ok = true;
+	while (ok) {
+		char *line = cursor;
+		char *newline = strchr (cursor, '\n');
+		if (newline != NULL) {
+			*newline = '\0';
+			cursor = newline + 1;
+		}
+		if (trackInfo) {
+			size_t labelLength = 0; const char *value = NULL;
+			SbTuiTextRole role = SB_TUI_TEXT_PRIMARY;
+			if (SbTuiPresentationSplitField (line, &labelLength, &value, &role)) {
+				const int indent = (int) labelLength + 2;
+				ok = SbUiCursesModalWrap (lines, lineCount, capacity, value,
+						lineWidth, line, labelLength, indent, role, false);
+			} else {
+				ok = SbUiCursesModalWrap (lines, lineCount, capacity, line,
+						lineWidth, NULL, 0, 0, SB_TUI_TEXT_PRIMARY,
+						SbTuiPresentationIsSection (line));
+			}
+		} else {
+			ok = SbUiCursesModalWrap (lines, lineCount, capacity, line,
+					lineWidth, NULL, 0, 0, SB_TUI_TEXT_PRIMARY, false);
+		}
+		if (newline == NULL) break;
+	}
+	if (!ok) {
+		SbUiCursesModalLinesDestroy (lines, *lineCount);
+		*lineCount = 0;
+		return NULL;
+	}
+	return lines;
+}
+
 static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
 	if (data->textModalContent == NULL || data->sizeState != SB_TUI_SIZE_NORMAL) return;
-	int rows, cols; getmaxyx (stdscr, rows, cols); (void) cols;
-	if (data->textModalWindow == NULL) data->textModalWindow = SbUiCursesModal (
-			data, data->textModalTitle,
-			"Up/Down or j/k scroll; Esc, Enter, or opening key closes",
-			rows < 24 ? rows - 2 : 22);
-	WINDOW * const window = data->textModalWindow;
-	if (window == NULL) return;
-	SbUiModalScrollObserveIdentity (&data->textModalScroll,
-			model->songGeneration);
+	const bool trackInfo = strcmp (data->textModalTitle, "TRACK INFO") == 0;
+	const bool lyrics = strcmp (data->textModalTitle, "LYRICS") == 0;
 	char *text = data->textModalContent (data->textModalData);
 	char *copy = strdup (text != NULL ? text : "No information available.");
 	free (text);
 	if (copy == NULL) return;
+	int rows, cols; getmaxyx (stdscr, rows, cols);
+	const SbTuiModalKind kind = lyrics ? SB_TUI_MODAL_LYRICS :
+			SB_TUI_MODAL_TRACK_INFO;
+	const SbTuiRect provisional = SbTuiPresentationModalRect (kind,
+			rows, cols, 0);
+	size_t lineCount = 0;
+	SbUiCursesModalLine *lines = SbUiCursesModalLines (copy, trackInfo,
+			provisional.width - 4, &lineCount);
+	if (lines == NULL) { free (copy); return; }
+	const SbTuiRect rect = SbTuiPresentationModalRect (kind, rows, cols,
+			lineCount);
+	if (data->textModalWindow != NULL) {
+		const SbTuiRect existing = SbUiCursesWindowRect (data->textModalWindow);
+		if (existing.y != rect.y || existing.x != rect.x ||
+				existing.height != rect.height || existing.width != rect.width) {
+			delwin (data->textModalWindow);
+			data->textModalWindow = NULL;
+		}
+	}
+	if (data->textModalWindow == NULL)
+		data->textModalWindow = SbUiCursesModalWindow (data,
+				data->textModalTitle,
+				"Up/Down or j/k scroll; Esc, Enter, or opening key closes", rect);
+	WINDOW * const window = data->textModalWindow;
+	if (window == NULL) {
+		SbUiCursesModalLinesDestroy (lines, lineCount); free (copy); return;
+	}
+	data->retainedRect = SbUiCursesWindowRect (window);
+	SbUiCursesClearArtOverlap (data, data->retainedRect);
+	SbUiModalScrollObserveIdentity (&data->textModalScroll,
+			model->songGeneration);
 	int wh, ww; getmaxyx (window, wh, ww); const int lineWidth = ww - 4;
 	werase (window); wbkgdset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
 	SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_BORDER, 0); SbUiCursesBox (window);
@@ -2138,107 +2414,68 @@ static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 	SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TITLE, A_BOLD);
 	SbUiCursesWPut (window, 3, 2, ww - 4,
 			"Up/Down or j/k scroll; Esc, Enter, or opening key closes");
-		const size_t lineCapacity = strlen (copy) + 1;
-		const char **lines = calloc (lineCapacity, sizeof (*lines));
-		if (lines == NULL) { free (copy); return; }
-		size_t lineCount = 0;
-		char *cursor = copy;
-		while (*cursor != '\0' && lineCount < lineCapacity) {
-			if (*cursor == '\n') {
-				lines[lineCount++] = cursor;
-				*cursor++ = '\0';
-				continue;
+	const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
+	SbUiModalScrollClamp (&data->textModalScroll, lineCount, visible);
+	const SbLyricContext modalLyric = SbSyncedLyricsLookup (
+			&model->syncedLyrics, (int64_t) model->elapsed * 1000);
+	size_t lyricsHeaderEnd = 0;
+	if (lyrics) while (lyricsHeaderEnd < lineCount &&
+			lines[lyricsHeaderEnd].text[0] != '\0') lyricsHeaderEnd++;
+	for (size_t i = 0; i < visible &&
+			data->textModalScroll.offset + i < lineCount; i++) {
+		const size_t index = data->textModalScroll.offset + i;
+		SbUiCursesModalLine * const line = &lines[index];
+		const int y = 5 + (int) i;
+		if (trackInfo && line->field) {
+			const SbTuiColorRole valueRole = SbUiCursesTextRole (line->role);
+			if (!line->continuation && line->label != NULL) {
+				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+				wmove (window, y, 2); waddstr (window, line->label);
+				waddch (window, ':'); waddch (window, ' ');
+				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
 			}
-			while (*cursor == ' ') cursor++;
-			if (*cursor == '\0') break;
-			lines[lineCount++] = cursor;
-			char *end = cursor;
-			char *lastSpace = NULL;
-			int cells = 0;
-			while (*end != '\0' && *end != '\n' && cells < lineWidth) {
-				if (*end == ' ') lastSpace = end;
-				end++; cells++;
-			}
-			if (*end == '\0') break;
-			char *cut = (*end == '\n' || cells < lineWidth) ? end :
-					(lastSpace != NULL ? lastSpace : end);
-			*cut = '\0';
-			cursor = cut + 1;
-		}
-		const size_t visible = wh > 6 ? (size_t) wh - 6 : 1;
-		SbUiModalScrollClamp (&data->textModalScroll, lineCount, visible);
-		const SbLyricContext modalLyric = SbSyncedLyricsLookup (
-				&model->syncedLyrics, (int64_t) model->elapsed * 1000);
-		size_t lyricsHeaderEnd = 0;
-		if (strcmp (data->textModalTitle, "LYRICS") == 0) {
-			while (lyricsHeaderEnd < lineCount && lines[lyricsHeaderEnd][0] != '\0')
-				lyricsHeaderEnd++;
-		}
-		for (size_t i = 0; i < visible &&
-				data->textModalScroll.offset + i < lineCount; i++) {
-			const size_t index = data->textModalScroll.offset + i;
-			char *line = (char *) lines[index];
-			const int y = 5 + (int) i;
-			if (strcmp (data->textModalTitle, "TRACK INFO") == 0) {
-				size_t labelLength = 0; const char *value = NULL;
-				SbTuiTextRole textRole = SB_TUI_TEXT_PRIMARY;
-				if (SbTuiPresentationSplitField (line, &labelLength, &value, &textRole)) {
-					const SbTuiColorRole valueRole = SbUiCursesTextRole (textRole);
-					const int labelWidth = (int) labelLength + 2;
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-					wmove (window, y, 2); waddnstr (window, line,
-							(int) labelLength);
-					waddch (window, ':'); waddch (window, ' ');
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
-					SbUiCursesWAttrOn (window, data, valueRole, 0);
-					SbUiCursesWPut (window, y, 2 + labelWidth,
-							lineWidth - labelWidth, value);
-					SbUiCursesWAttrOff (window, data, valueRole, 0);
-				} else if (SbTuiPresentationIsSection (line)) {
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SECTION, A_BOLD);
-					SbUiCursesWPut (window, y, 2, lineWidth, line);
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SECTION, A_BOLD);
-				} else {
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_PRIMARY, 0);
-					SbUiCursesWPut (window, y, 2, lineWidth, line);
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_PRIMARY, 0);
-				}
-			} else if (strcmp (data->textModalTitle, "LYRICS") == 0 &&
-					index < lyricsHeaderEnd) {
-				char *separator = strstr (line, " — ");
-				if (separator != NULL) {
-					*separator = '\0'; const int artistWidth = SbUiCursesTextWidth (line);
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-					SbUiCursesWPut (window, y, 2, lineWidth, line);
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
-					SbUiCursesWPut (window, y, 2 + artistWidth, 3, " — ");
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
-					SbUiCursesWPut (window, y, 5 + artistWidth,
-							lineWidth - artistWidth - 3, separator + 5);
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
-					*separator = ' ';
-				} else {
-					SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
-					SbUiCursesWPut (window, y, 2, lineWidth, line);
-					SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
-				}
+			SbUiCursesWAttrOn (window, data, valueRole, 0);
+			SbUiCursesWPut (window, y, 2 + line->indent,
+					lineWidth - line->indent, line->text);
+			SbUiCursesWAttrOff (window, data, valueRole, 0);
+		} else if (trackInfo && line->section) {
+			SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_SECTION, A_BOLD);
+			SbUiCursesWPut (window, y, 2, lineWidth, line->text);
+			SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_SECTION, A_BOLD);
+		} else if (lyrics && index < lyricsHeaderEnd) {
+			char *separator = strstr (line->text, " — ");
+			if (separator != NULL) {
+				*separator = '\0'; const int artistWidth = SbUiCursesTextWidth (line->text);
+				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+				SbUiCursesWPut (window, y, 2, lineWidth, line->text);
+				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ARTIST, A_BOLD);
+				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_MUTED, 0);
+				SbUiCursesWPut (window, y, 2 + artistWidth, 3, " — ");
+				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_MUTED, 0);
+				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+				SbUiCursesWPut (window, y, 5 + artistWidth,
+						lineWidth - artistWidth - 3, separator + 5);
+				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_TRACK, A_BOLD);
+				*separator = ' ';
 			} else {
-				const bool currentLyric = strcmp (data->textModalTitle, "LYRICS") == 0 &&
-						modalLyric.current != NULL &&
-						strcmp (line, modalLyric.current->text) == 0;
-				SbUiCursesWAttrOn (window, data, currentLyric ?
-						SB_TUI_COLOR_TRACK : SB_TUI_COLOR_PRIMARY,
-						currentLyric ? A_BOLD : 0);
-				SbUiCursesWPut (window, y, 2, lineWidth, line);
-				SbUiCursesWAttrOff (window, data, currentLyric ?
-						SB_TUI_COLOR_TRACK : SB_TUI_COLOR_PRIMARY,
-						currentLyric ? A_BOLD : 0);
+				SbUiCursesWAttrOn (window, data, SB_TUI_COLOR_ALBUM, 0);
+				SbUiCursesWPut (window, y, 2, lineWidth, line->text);
+				SbUiCursesWAttrOff (window, data, SB_TUI_COLOR_ALBUM, 0);
 			}
-			wattrset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+		} else {
+			const bool currentLyric = lyrics && modalLyric.current != NULL &&
+					strcmp (line->text, modalLyric.current->text) == 0;
+			SbUiCursesWAttrOn (window, data, currentLyric ?
+					SB_TUI_COLOR_TRACK : SB_TUI_COLOR_PRIMARY,
+					currentLyric ? A_BOLD : 0);
+			SbUiCursesWPut (window, y, 2, lineWidth, line->text);
+			SbUiCursesWAttrOff (window, data, currentLyric ?
+					SB_TUI_COLOR_TRACK : SB_TUI_COLOR_PRIMARY,
+					currentLyric ? A_BOLD : 0);
 		}
-	free (lines); free (copy);
+		wattrset (window, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+	}
+	SbUiCursesModalLinesDestroy (lines, lineCount); free (copy);
 }
 
 static char *SbUiCursesStaticText (void *opaque) {
@@ -2322,6 +2559,10 @@ bool SbUiRendererToggleList (SbUiRenderer *renderer, const SbUiModel *model,
 		const int key = SbUiCursesReadKey (window,
 				SB_TUI_INPUT_MODAL, false, -1).key;
 		delwin (window);
+		if (key == KEY_RESIZE) {
+			SbUiCursesHandleResize (data);
+			continue;
+		}
 		if (key == 27) {
 			SbUiCursesPopupClosed (renderer, model); return false;
 		}
@@ -2355,7 +2596,7 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 			data->artOverlayColumns != desired.columns ||
 			data->artOverlayRows != desired.rows));
 	if (artChanged) {
-		(void) SbTuiPresentationArtOcclude (&data->artCompositor, true);
+		data->artCompositor.painted = false;
 		clearok (stdscr, TRUE);
 	}
 	if (visible != data->artOverlayVisible)
@@ -2368,10 +2609,10 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 				data->artColorMode == SB_ART_COLOR_256 ? "xterm-256" : "disabled");
 	data->artOverlayVisible = visible;
 	data->artOverlayColumns = desired.columns; data->artOverlayRows = desired.rows;
+	data->artOverlayY = artY; data->artOverlayX = artX;
 	snprintf (data->artOverlayPath, sizeof (data->artOverlayPath), "%s",
 			visible ? model->artCachedPath : "");
 	SbUiCursesFrame (renderer, model);
-	SbUiCursesRenderArt (renderer, model);
 }
 
 static void SbUiCursesLocalNotice (SbUiCursesData *data, const char *notice) {

@@ -13,10 +13,13 @@ for layout and input; after its atomic screen update, the prepared cells are
 painted into the reserved Now Playing rectangle with standard ANSI color and
 Unicode half blocks. Cache identity includes path, target geometry, and color
 mode, so normal progress redraws do not decode or resize artwork. Because the
-ANSI cells bypass curses' physical-screen cache, opening any modal invalidates
-and repaints the curses screen without art; retained-overlay redraws suppress
-art until the modal closes, when the normal compositor restores it at the
-current geometry.
+ANSI cells bypass curses' physical-screen cache, the compositor uses the actual
+topmost `WINDOW` origin and dimensions to clear and clip every cell in the
+half-open outer frame rectangle. Uncovered art remains visible immediately
+outside that frame, and closing or resizing an overlay immediately recomposes
+the full cover at the current geometry. Retained overlays are touched and
+repainted after direct ANSI emission so their complete frame remains physically
+authoritative without forcing a full-terminal repaint.
 
 `src/enrichment.c` implements a provider-neutral enrichment boundary. A Pandora
 song is copied into a `SbTrackIdentity`; original display strings are retained
@@ -53,8 +56,11 @@ The generic lyrics result retains LRCLIB's matched identity, record ID,
 instrumental flag, plain lyrics, and synchronized lyrics. `lyrics_sync.c`
 parses synchronized LRC lines once when a result is published; the renderer
 uses a cursor for sequential playback and binary-search recovery after a timing
-discontinuity. Inline one- or three-line display is configurable, and the full
-Lyrics view highlights the current synchronized line. Lowercase `i` opens the
+discontinuity. Inline eligibility carries the current song generation and is
+re-evaluated on every published lyric/art/layout state; plain-only lyrics remain
+available only in the full view. Inline one- or three-line display is
+configurable, and the full Lyrics view highlights the current synchronized
+line. Lowercase `i` opens the
 one unified Track Info view;
 uppercase `I` is a harmless alias. `L` opens Lyrics, with lowercase `l` also
 accepted. The aliases toggle retained modal state in the main TUI loop; async

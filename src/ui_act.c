@@ -684,7 +684,7 @@ BarUiActCallback(BarUiActActivateStation) {
 		/* Reject every outstanding publication for the old track immediately;
 		 * the next track will advance this generation again when it starts. */
 		app->enrichmentGeneration++;
-		SbUiModelSetSyncedLyrics (&app->uiModel, NULL);
+		SbUiModelSetLyrics (&app->uiModel, SB_LOOKUP_IDLE, false, NULL);
 		app->uiModel.artState = SB_LOOKUP_UNAVAILABLE;
 		app->uiModel.artCachedPath[0] = '\0';
 		drainPlaylist (app);

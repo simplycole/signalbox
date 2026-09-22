@@ -282,14 +282,21 @@ allows every application.
 - **Action:** Open Help, Track Info, Lyrics, and a confirmation or text prompt
   over visible art; repeat while art changes from Loading to Ready, while the
   spectrum/progress redraws, and across a resize. **Expected:** every modal
-  remains topmost with no art pixels inside it. Closing the modal immediately
-  restores correctly sized art without requiring another resize.
+  remains topmost with no art pixels inside it, while non-overlapping art stays
+  visible. Closing the modal immediately restores correctly sized art without
+  requiring another resize.
 - **Action:** Press `L` (or `l`) for synced, plain-only, instrumental, no-match,
   and temporarily unavailable results when available. **Expected:** state text
   is `Synced`, `Plain`, `Instrumental`, `No match`, or `Temporarily unavailable`;
   synced highlighting follows playback and recovers after pause/seek-like
   discontinuities. `lyrics_display = off|line|three-line` affects only inline
   lyrics, not the full Lyrics view.
+- **Action:** Let Plain, no-match, unavailable, or instrumental tracks transition
+  into a synced track through both normal queue progression and a station switch;
+  also open/close Help, Track Info, and Lyrics while synced lyrics are visible.
+  **Expected:** old inline text clears on the new track and the current synced
+  line appears as soon as its timeline arrives, without requiring a station
+  change, resize, modal toggle, or next timestamp.
 - **Action:** Quit after enrichment, relaunch, and revisit the same track if
   practical. **Expected:** valid metadata/lyrics/art cache entries are reused;
   corrupt or incompatible cache files are ignored; transient failures are not

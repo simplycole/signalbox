@@ -37,29 +37,91 @@ static bool CommandHasReachableKey (const BarSettings_t *settings,
 }
 
 int main (void) {
-	/* Direct ANSI art must yield to every modal class. */
-	assert (SbTuiPresentationArtMayPaint (false, false, false));
-	assert (!SbTuiPresentationArtMayPaint (true, false, false)); /* Help */
-	assert (!SbTuiPresentationArtMayPaint (false, true, false)); /* Track Info */
-	assert (!SbTuiPresentationArtMayPaint (false, true, false)); /* Lyrics */
-	assert (!SbTuiPresentationArtMayPaint (false, false, true)); /* Dialogs */
+	/* Primary modals share width, centering, clamping, and chrome policy while
+	 * retaining content-appropriate preferred heights. */
+	const SbTuiRect helpRect = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_HELP, 68, 192, 80);
+	const SbTuiRect trackInfoRect = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_TRACK_INFO, 68, 192, 22);
+	const SbTuiRect lyricsRect = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_LYRICS, 68, 192, 80);
+	assert (helpRect.width == 72 && helpRect.height >= 32 && helpRect.height <= 34);
+	assert (lyricsRect.width == 72 && lyricsRect.height >= 38 &&
+			lyricsRect.height <= 40);
+	assert (trackInfoRect.width == 72 && trackInfoRect.height >= 26 &&
+			trackInfoRect.height <= 32);
+	assert (helpRect.x == trackInfoRect.x && trackInfoRect.x == lyricsRect.x);
+	assert (helpRect.width == trackInfoRect.width &&
+			trackInfoRect.width == lyricsRect.width);
+	assert (helpRect.x == (192 - helpRect.width) / 2);
+	assert (helpRect.y == (68 - helpRect.height) / 2);
+	assert (trackInfoRect.y == (68 - trackInfoRect.height) / 2);
+	assert (lyricsRect.y == (68 - lyricsRect.height) / 2);
+	/* Track Info ends two outer rows after its last rendered content row and
+	 * clamps long content rather than forcing Lyrics-height dead space. */
+	const SbTuiRect shortInfo = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_TRACK_INFO, 68, 192, 8);
+	const SbTuiRect longInfo = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_TRACK_INFO, 68, 192, 80);
+	assert (shortInfo.height == 15 && longInfo.height == 32);
+	const SbTuiRect medium = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_LYRICS, 40, 100, 50);
+	assert (medium.width == 72 && medium.height >= 20 && medium.height <= 24);
+	assert (medium.x == (100 - medium.width) / 2);
+	assert (medium.y == (40 - medium.height) / 2);
+	const SbTuiRect compact = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_HELP, 24, 70, 80);
+	assert (compact.width == 66 && compact.height >= 12 && compact.height < 20);
+	const SbTuiRect narrow = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_LYRICS, 15, 50, 80);
+	assert (narrow.width == 46 && narrow.height == 13);
+	assert (narrow.x >= 0 && narrow.y >= 0);
+	assert (narrow.x + narrow.width <= 50 && narrow.y + narrow.height <= 15);
+	assert (narrow.height - 6 > 0); /* text title/footer leave a viewport */
+
+	/* ANSI art is clipped cell-by-cell only where the topmost overlay overlaps. */
+	const SbTuiRect artRect = {6, 66, 10, 20};
+	const SbTuiRect noOverlap = {20, 80, 8, 12};
+	const SbTuiRect partial = {8, 76, 8, 20};
+	const SbTuiRect full = {5, 60, 20, 40};
+	assert (!SbTuiPresentationRectsIntersect (artRect, noOverlap));
+	assert (SbTuiPresentationRectsIntersect (artRect, partial));
+	assert (SbTuiPresentationRectsIntersect (artRect, full));
+	assert (!SbTuiPresentationRectContains (noOverlap, 6, 66));
+	assert (!SbTuiPresentationRectContains (partial, 7, 76));
+	assert (SbTuiPresentationRectContains (partial, 8, 76));
+	assert (SbTuiPresentationRectContains (full, 6, 66));
+	const SbTuiRect closed = {0};
+	assert (!SbTuiPresentationRectContains (closed, 8, 76));
+	const SbTuiRect resizedModal = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_LYRICS, 54, 150, 80);
+	assert (resizedModal.x == (150 - resizedModal.width) / 2);
+	assert (resizedModal.y == (54 - resizedModal.height) / 2);
+	/* Every popup class uses its actual centered bounds; no approximate shared
+	 * modal geometry is reconstructed by the compositor. */
+	const SbTuiRect dialog = SbTuiPresentationPopupRect (68, 192, 8);
+	assert (dialog.width == 68 && dialog.height == 8);
+	assert (dialog.x == 62 && dialog.y == 30);
+	assert (!SbTuiPresentationArtCellVisible (helpRect, helpRect.y, helpRect.x));
+	assert (!SbTuiPresentationArtCellVisible (trackInfoRect, trackInfoRect.y,
+			trackInfoRect.x));
+	assert (!SbTuiPresentationArtCellVisible (lyricsRect, lyricsRect.y,
+			lyricsRect.x));
+	assert (!SbTuiPresentationArtCellVisible (dialog, dialog.y, dialog.x));
 	SbTuiArtCompositor compositor = {0};
-	assert (!SbTuiPresentationArtOcclude (&compositor, true));
 	SbTuiPresentationArtDidPaint (&compositor);
 	assert (compositor.painted);
-	assert (SbTuiPresentationArtOcclude (&compositor, true));
-	assert (!compositor.painted);
-	/* Art becoming ready and timer redraws cannot repaint an open Help modal. */
-	for (size_t update = 0; update < 4; update++) {
-		assert (!SbTuiPresentationArtMayPaint (true, false, false));
-		assert (!SbTuiPresentationArtOcclude (&compositor, true));
-	}
-	/* Closing permits immediate restoration; resize re-occludes at new geometry. */
-	assert (SbTuiPresentationArtMayPaint (false, false, false));
-	SbTuiPresentationArtDidPaint (&compositor);
-	assert (SbTuiPresentationArtOcclude (&compositor, true));
-	assert (!SbTuiPresentationArtMayPaint (false, true, false));
-	assert (!SbTuiPresentationArtMayPaint (false, false, true));
+
+	/* Half-open outer rectangles own every border cell, but no adjacent cell. */
+	const SbTuiRect frame = {10, 20, 6, 8};
+	assert (!SbTuiPresentationArtCellVisible (frame, 10, 20)); /* top/left */
+	assert (!SbTuiPresentationArtCellVisible (frame, 10, 27)); /* top/right */
+	assert (!SbTuiPresentationArtCellVisible (frame, 15, 20)); /* bottom/left */
+	assert (!SbTuiPresentationArtCellVisible (frame, 15, 27)); /* bottom/right */
+	assert (SbTuiPresentationArtCellVisible (frame, 9, 20)); /* above */
+	assert (SbTuiPresentationArtCellVisible (frame, 16, 20)); /* below */
+	assert (SbTuiPresentationArtCellVisible (frame, 10, 19)); /* left */
+	assert (SbTuiPresentationArtCellVisible (frame, 10, 28)); /* right */
 
 	BarSettings_t settings = {0};
 	for (size_t i = 0; i < BAR_KS_COUNT; i++)
@@ -198,6 +260,50 @@ int main (void) {
 	assert (!SbTuiPresentationInlineLyrics (2, 0)); /* plain stays out of inline */
 	assert (SbTuiPresentationInlineLyrics (2, 22)); /* synced renders inline */
 	assert (!SbTuiPresentationInlineLyrics (0, 22)); /* display=off */
+	SbTuiInlineLyricsPresentation inlineLyrics =
+			SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, true,
+					SB_LYRICS_DISPLAY_THREE_LINE, 0, 1, 1, 11, 40);
+	assert (!inlineLyrics.eligible && !inlineLyrics.visible &&
+			inlineLyrics.reason == SB_TUI_INLINE_PLAIN); /* Plain -> Synced */
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, true,
+			SB_LYRICS_DISPLAY_THREE_LINE, 20, 1, 1, 11, 40);
+	assert (inlineLyrics.eligible && inlineLyrics.visible && inlineLyrics.threeLine &&
+			inlineLyrics.separated);
+	/* Synced -> Plain clears immediately; all non-synced terminal states do too. */
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, true,
+			SB_LYRICS_DISPLAY_THREE_LINE, 0, 2, 2, 11, 40);
+	assert (!inlineLyrics.visible && inlineLyrics.reason == SB_TUI_INLINE_PLAIN);
+	const int terminalStates[] = {SB_LOOKUP_NO_MATCH, SB_LOOKUP_UNAVAILABLE,
+			SB_LOOKUP_INSTRUMENTAL};
+	for (size_t i = 0; i < sizeof (terminalStates) / sizeof (*terminalStates); i++) {
+		inlineLyrics = SbTuiPresentationInlineLyricsState (terminalStates[i], false,
+				SB_LYRICS_DISPLAY_THREE_LINE, 0, 3, 3, 11, 40);
+		assert (!inlineLyrics.eligible && !inlineLyrics.visible);
+		inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, false,
+				SB_LYRICS_DISPLAY_THREE_LINE, 12, 3, 3, 11, 40);
+		assert (inlineLyrics.eligible && inlineLyrics.visible);
+	}
+	/* Both ordinary and station-driven next songs publish against the current
+	 * song generation. Stale results and layout suppression remain explicit. */
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, false,
+			SB_LYRICS_DISPLAY_LINE, 12, 4, 5, 8, 40);
+	assert (!inlineLyrics.eligible &&
+			inlineLyrics.reason == SB_TUI_INLINE_STALE_GENERATION);
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, false,
+			SB_LYRICS_DISPLAY_LINE, 12, 5, 5, 6, 40);
+	assert (inlineLyrics.eligible && !inlineLyrics.visible &&
+			inlineLyrics.reason == SB_TUI_INLINE_LAYOUT);
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, false,
+			SB_LYRICS_DISPLAY_LINE, 12, 5, 5, 8, 40);
+	assert (inlineLyrics.visible && !inlineLyrics.separated);
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, false,
+			SB_LYRICS_DISPLAY_LINE, 12, 5, 5, 9, 40);
+	assert (inlineLyrics.visible && inlineLyrics.separated);
+	/* async result/layout invalidation */
+	inlineLyrics = SbTuiPresentationInlineLyricsState (SB_LOOKUP_AVAILABLE, false,
+			SB_LYRICS_DISPLAY_OFF, 12, 5, 5, 11, 40);
+	assert (!inlineLyrics.eligible &&
+			inlineLyrics.reason == SB_TUI_INLINE_DISPLAY_OFF);
 	assert (SbTuiPresentationStatus (text, sizeof (text), "Ready", SB_LOOKUP_LOADING, 24));
 	assert (strcmp (text, "Ready    Art: Loading") == 0);
 	assert (SbTuiPresentationStatus (text, sizeof (text), "Ready", SB_LOOKUP_LOADING, 18));

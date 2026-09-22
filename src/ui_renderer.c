@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "debug.h"
+#include "enrichment.h"
 #include "ui.h"
 #include "ui_renderer.h"
 
@@ -99,6 +100,9 @@ void SbUiModelSetSong (SbUiModel *model, const PianoSong_t *song,
 		SbUiModelRememberSong (model);
 		++model->songGeneration;
 		SbSyncedLyricsDestroy (&model->syncedLyrics);
+		model->lyricsState = SB_LOOKUP_IDLE;
+		model->lyricsHasPlain = false;
+		model->lyricsGeneration = model->songGeneration;
 	}
 	model->song = song;
 	model->songStation = songStation;
@@ -106,8 +110,18 @@ void SbUiModelSetSong (SbUiModel *model, const PianoSong_t *song,
 }
 
 bool SbUiModelSetSyncedLyrics (SbUiModel *model, const char *payload) {
+	return SbUiModelSetLyrics (model, payload != NULL ? SB_LOOKUP_AVAILABLE :
+			SB_LOOKUP_IDLE, false, payload);
+}
+
+bool SbUiModelSetLyrics (SbUiModel *model, const int state,
+		const bool hasPlainLyrics, const char *syncedPayload) {
 	assert (model != NULL);
-	const bool parsed = SbSyncedLyricsParse (&model->syncedLyrics, payload);
+	const bool parsed = SbSyncedLyricsParse (&model->syncedLyrics,
+			state == SB_LOOKUP_AVAILABLE ? syncedPayload : NULL);
+	model->lyricsState = state;
+	model->lyricsHasPlain = hasPlainLyrics;
+	model->lyricsGeneration = model->songGeneration;
 	SbUiModelChanged (model);
 	return parsed;
 }

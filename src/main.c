@@ -616,6 +616,7 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 	app->metadata.status = SB_LOOKUP_LOADING;
 	SbLyricsResultDestroy (&app->lyrics); app->lyrics.status = SB_LOOKUP_LOADING;
 	snprintf (app->lyrics.provider, sizeof (app->lyrics.provider), "LRCLIB");
+	SbUiModelSetLyrics (&app->uiModel, SB_LOOKUP_LOADING, false, NULL);
 	SbAlbumArtResultInit(&app->albumArt);
 	app->albumArt.status = app->metadataResolver.artStarted ?
 			SB_LOOKUP_LOADING : SB_LOOKUP_UNAVAILABLE;
@@ -629,6 +630,7 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 	else {
 		app->metadata.status = SB_LOOKUP_ERROR;
 		app->lyrics.status = SB_LOOKUP_UNAVAILABLE;
+		SbUiModelSetLyrics (&app->uiModel, SB_LOOKUP_UNAVAILABLE, false, NULL);
 		app->albumArt.status = app->uiModel.artState = SB_LOOKUP_UNAVAILABLE;
 		snprintf (app->metadata.error, sizeof (app->metadata.error),
 				"Metadata worker unavailable");
@@ -769,8 +771,8 @@ static void BarMainLoop (BarApp_t *app) {
 		if (SbLyricsResolverPoll (&app->metadataResolver,
 				app->enrichmentGeneration, &lyrics)) {
 			SbLyricsResultDestroy (&app->lyrics); app->lyrics = lyrics;
-			SbUiModelSetSyncedLyrics (&app->uiModel,
-					lyrics.status == SB_LOOKUP_AVAILABLE ? lyrics.syncedLyrics : NULL);
+			SbUiModelSetLyrics (&app->uiModel, lyrics.status,
+					lyrics.plainLyrics != NULL, lyrics.syncedLyrics);
 			if (lyrics.status == SB_LOOKUP_AVAILABLE)
 				tuiDebugPrint ("lyrics_sync mode=%s lines=%zu\n",
 						app->uiModel.syncedLyrics.count > 0 ? "synced" : "plain",

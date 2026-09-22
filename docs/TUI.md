@@ -74,6 +74,10 @@ monochrome themes.
 Track Info and Lyrics scroll with the navigation keys and update in place when
 background enrichment completes. Enter, Escape, or the opening key closes the
 view. Resize redraws the active view without starting a nested renderer loop.
+Help, Track Info, and Lyrics use one centered responsive modal family with a
+preferred width of 72 columns. Help targets a compact half-height viewport,
+Lyrics a generous three-fifths-height viewport, and Track Info sizes to its
+wrapped content within a bounded maximum.
 
 ## Layout and accessibility
 

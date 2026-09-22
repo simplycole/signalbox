@@ -70,6 +70,9 @@ typedef struct {
 	int artState;
 	char artProvider[32], artCachedPath[1024];
 	unsigned int artWidth, artHeight;
+	int lyricsState;
+	bool lyricsHasPlain;
+	uint64_t lyricsGeneration;
 	SbSyncedLyrics syncedLyrics;
 } SbUiModel;
 
@@ -116,6 +119,8 @@ void SbUiModelSetVolume (SbUiModel *, int);
 void SbUiModelSetActivity (SbUiModel *, SbUiActivityState);
 void SbUiModelSetSpectrum (SbUiModel *, const SbSpectrumSnapshot *, bool);
 bool SbUiModelSetSyncedLyrics (SbUiModel *, const char *);
+bool SbUiModelSetLyrics (SbUiModel *, int state, bool hasPlainLyrics,
+		const char *syncedPayload);
 
 void SbUiRendererInitClassic (SbUiRenderer *, const BarSettings_t *);
 bool SbUiRendererInitCurses (SbUiRenderer *, const BarSettings_t *, SbTuiTheme);

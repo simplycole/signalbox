@@ -3,6 +3,7 @@
 #include "ui_dispatch.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -72,6 +73,63 @@ const char *SbTuiPresentationLyricsState (const int status,
 bool SbTuiPresentationInlineLyrics (const int displayMode,
 		const size_t syncedLineCount) {
 	return displayMode != 0 && syncedLineCount > 0;
+}
+
+SbTuiInlineLyricsPresentation SbTuiPresentationInlineLyricsState (
+		const int lyricsState, const bool hasPlainLyrics, const int displayMode,
+		const size_t syncedLineCount, const uint64_t lyricsGeneration,
+		const uint64_t songGeneration, const int availableHeight,
+		const int availableWidth) {
+	SbTuiInlineLyricsPresentation result = {false, false, false, false,
+			SB_TUI_INLINE_UNAVAILABLE};
+	if (lyricsState == SB_LOOKUP_INSTRUMENTAL) {
+		result.reason = SB_TUI_INLINE_INSTRUMENTAL;
+		return result;
+	}
+	if (lyricsState == SB_LOOKUP_NO_MATCH) {
+		result.reason = SB_TUI_INLINE_NO_MATCH;
+		return result;
+	}
+	if (lyricsState != SB_LOOKUP_AVAILABLE) return result;
+	if (syncedLineCount == 0) {
+		result.reason = hasPlainLyrics ? SB_TUI_INLINE_PLAIN :
+				SB_TUI_INLINE_NO_TIMELINE;
+		return result;
+	}
+	if (lyricsGeneration != songGeneration) {
+		result.reason = SB_TUI_INLINE_STALE_GENERATION;
+		return result;
+	}
+	if (displayMode == 0) {
+		result.reason = SB_TUI_INLINE_DISPLAY_OFF;
+		return result;
+	}
+	result.eligible = true;
+	if (availableHeight < 7 || availableWidth < 20) {
+		result.reason = SB_TUI_INLINE_LAYOUT;
+		return result;
+	}
+	result.visible = true;
+	result.threeLine = displayMode == SB_LYRICS_DISPLAY_THREE_LINE &&
+			availableHeight >= 11;
+	result.separated = result.threeLine || availableHeight >= 9;
+	result.reason = SB_TUI_INLINE_SHOWN;
+	return result;
+}
+
+const char *SbTuiPresentationInlineLyricsReason (
+		const SbTuiInlineLyricsReason reason) {
+	switch (reason) {
+		case SB_TUI_INLINE_SHOWN: return "shown";
+		case SB_TUI_INLINE_PLAIN: return "plain";
+		case SB_TUI_INLINE_NO_TIMELINE: return "no_timeline";
+		case SB_TUI_INLINE_DISPLAY_OFF: return "display_off";
+		case SB_TUI_INLINE_STALE_GENERATION: return "stale_generation";
+		case SB_TUI_INLINE_LAYOUT: return "layout";
+		case SB_TUI_INLINE_INSTRUMENTAL: return "instrumental";
+		case SB_TUI_INLINE_NO_MATCH: return "no_match";
+		default: return "unavailable";
+	}
 }
 
 bool SbTuiPresentationStatus (char *out, const size_t size, const char *status,
@@ -239,16 +297,68 @@ const char *SbTuiPresentationHelpSectionName (const SbTuiHelpSection section) {
 	return section >= 0 && section < SB_TUI_HELP_SECTION_COUNT ? names[section] : "";
 }
 
-bool SbTuiPresentationArtMayPaint (const bool helpVisible,
-		const bool textModalVisible, const bool popupVisible) {
-	return !helpVisible && !textModalVisible && !popupVisible;
+static int SbTuiPresentationMinimum (const int left, const int right) {
+	return left < right ? left : right;
 }
 
-bool SbTuiPresentationArtOcclude (SbTuiArtCompositor *compositor,
-		const bool overlayVisible) {
-	if (compositor == NULL || !overlayVisible || !compositor->painted) return false;
-	compositor->painted = false;
-	return true;
+static int SbTuiPresentationClamp (const int value, const int minimum,
+		const int maximum) {
+	return value < minimum ? minimum : value > maximum ? maximum : value;
+}
+
+SbTuiRect SbTuiPresentationModalRect (const SbTuiModalKind kind,
+		const int rows, const int cols, const size_t contentRows) {
+	if (rows <= 0 || cols <= 0) return (SbTuiRect) {0};
+	const int availableWidth = cols > 4 ? cols - 4 : cols;
+	const int availableHeight = rows > 2 ? rows - 2 : rows;
+	const int usableHeight = rows > 4 ? rows - 4 : rows;
+	int height;
+	if (kind == SB_TUI_MODAL_HELP) {
+		height = SbTuiPresentationClamp ((usableHeight + 1) / 2, 14, 34);
+	} else if (kind == SB_TUI_MODAL_LYRICS) {
+		height = SbTuiPresentationClamp ((usableHeight * 3 + 2) / 5, 14, 40);
+	} else {
+		const int content = contentRows > (size_t) INT_MAX ? INT_MAX :
+				(int) contentRows;
+		height = SbTuiPresentationClamp (content + 7, 14, 32);
+	}
+	height = SbTuiPresentationMinimum (height, availableHeight);
+	const int width = SbTuiPresentationMinimum (72, availableWidth);
+	return (SbTuiRect) {(rows - height) / 2, (cols - width) / 2,
+			height, width};
+}
+
+SbTuiRect SbTuiPresentationPopupRect (const int rows, const int cols,
+		const int wantedHeight) {
+	if (rows <= 0 || cols <= 0) return (SbTuiRect) {0};
+	const int width = SbTuiPresentationMinimum (68, cols > 4 ? cols - 4 : cols);
+	const int height = SbTuiPresentationMinimum (wantedHeight,
+			rows > 2 ? rows - 2 : rows);
+	return (SbTuiRect) {(rows - height) / 2, (cols - width) / 2,
+			height, width};
+}
+
+bool SbTuiPresentationRectValid (const SbTuiRect rect) {
+	return rect.height > 0 && rect.width > 0;
+}
+
+bool SbTuiPresentationRectContains (const SbTuiRect rect,
+		const int y, const int x) {
+	return SbTuiPresentationRectValid (rect) && y >= rect.y && x >= rect.x &&
+			y < rect.y + rect.height && x < rect.x + rect.width;
+}
+
+bool SbTuiPresentationRectsIntersect (const SbTuiRect left,
+		const SbTuiRect right) {
+	return SbTuiPresentationRectValid (left) &&
+			SbTuiPresentationRectValid (right) &&
+			left.x < right.x + right.width && right.x < left.x + left.width &&
+			left.y < right.y + right.height && right.y < left.y + left.height;
+}
+
+bool SbTuiPresentationArtCellVisible (const SbTuiRect overlay,
+		const int y, const int x) {
+	return !SbTuiPresentationRectContains (overlay, y, x);
 }
 
 void SbTuiPresentationArtDidPaint (SbTuiArtCompositor *compositor) {

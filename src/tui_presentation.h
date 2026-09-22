@@ -45,6 +45,33 @@ typedef struct {
 	bool painted;
 } SbTuiArtCompositor;
 
+typedef struct {
+	int y, x, height, width;
+} SbTuiRect;
+
+typedef enum {
+	SB_TUI_MODAL_HELP = 0,
+	SB_TUI_MODAL_TRACK_INFO,
+	SB_TUI_MODAL_LYRICS,
+} SbTuiModalKind;
+
+typedef enum {
+	SB_TUI_INLINE_SHOWN = 0,
+	SB_TUI_INLINE_PLAIN,
+	SB_TUI_INLINE_NO_TIMELINE,
+	SB_TUI_INLINE_DISPLAY_OFF,
+	SB_TUI_INLINE_STALE_GENERATION,
+	SB_TUI_INLINE_LAYOUT,
+	SB_TUI_INLINE_UNAVAILABLE,
+	SB_TUI_INLINE_INSTRUMENTAL,
+	SB_TUI_INLINE_NO_MATCH,
+} SbTuiInlineLyricsReason;
+
+typedef struct {
+	bool eligible, visible, threeLine, separated;
+	SbTuiInlineLyricsReason reason;
+} SbTuiInlineLyricsPresentation;
+
 SbTuiTextRole SbTuiPresentationFieldRole (const char *label);
 bool SbTuiPresentationIsSection (const char *line);
 bool SbTuiPresentationSplitField (const char *line, size_t *labelLength,
@@ -54,6 +81,11 @@ bool SbTuiPresentationLyricsHeader (char *out, size_t size,
 const char *SbTuiPresentationLyricsState (int status, bool hasPlainLyrics,
 		size_t syncedLineCount);
 bool SbTuiPresentationInlineLyrics (int displayMode, size_t syncedLineCount);
+SbTuiInlineLyricsPresentation SbTuiPresentationInlineLyricsState (
+		int lyricsState, bool hasPlainLyrics, int displayMode,
+		size_t syncedLineCount, uint64_t lyricsGeneration,
+		uint64_t songGeneration, int availableHeight, int availableWidth);
+const char *SbTuiPresentationInlineLyricsReason (SbTuiInlineLyricsReason);
 bool SbTuiPresentationStatus (char *out, size_t size, const char *status,
 		int artState, size_t availableWidth);
 int SbTuiArtStatusUpdate (SbTuiArtStatus *, uint64_t generation, int state,
@@ -64,7 +96,11 @@ bool SbTuiPresentationConfiguredKeyReachable (const BarSettings_t *, char key,
 size_t SbTuiPresentationHelpEntries (const BarSettings_t *, SbTuiHelpEntry *,
 		size_t capacity);
 const char *SbTuiPresentationHelpSectionName (SbTuiHelpSection);
-bool SbTuiPresentationArtMayPaint (bool helpVisible, bool textModalVisible,
-		bool popupVisible);
-bool SbTuiPresentationArtOcclude (SbTuiArtCompositor *, bool overlayVisible);
+SbTuiRect SbTuiPresentationModalRect (SbTuiModalKind, int rows, int cols,
+		size_t contentRows);
+SbTuiRect SbTuiPresentationPopupRect (int rows, int cols, int wantedHeight);
+bool SbTuiPresentationRectValid (SbTuiRect);
+bool SbTuiPresentationRectContains (SbTuiRect, int y, int x);
+bool SbTuiPresentationRectsIntersect (SbTuiRect, SbTuiRect);
+bool SbTuiPresentationArtCellVisible (SbTuiRect overlay, int y, int x);
 void SbTuiPresentationArtDidPaint (SbTuiArtCompositor *);
