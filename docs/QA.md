@@ -317,6 +317,28 @@ allows every application.
   low-color terminal. **Expected:** art loads once, remains stable during
   progress redraws, resizes only when its source/layout/color key changes, and
   falls back to text without corrupting the screen.
+- **Action:** Exercise AFI / `Silver And Cold` / `Sing The Sorrow (Deluxe)`,
+  other deluxe/remaster editions, and obscure punk/emo/post-hardcore releases.
+  **Expected:** debug output tries exact release, direct release group, compatible
+  alternate release, then bounded album family in that order; it stops on the
+  first front image, rejects unrelated compilations, and Track Info names
+  `Cover Art Archive`. A transient CAA failure is `Unavailable`, not a persisted
+  `None` result.
+- **Action:** Compare high-contrast black/white, colorful graphic, portrait,
+  dark low-contrast, minimal geometric, and text-heavy covers in both truecolor
+  and 256-color terminals. **Expected:** silhouettes and large logo/title blocks
+  are modestly clearer, dark covers retain useful detail, colors do not smear,
+  clean edges have no conspicuous halos, tiny text remains naturally unreadable,
+  and the art remains intentionally pixelated.
+- **Action:** Resize a sufficiently wide terminal between at least 45 rows,
+  39–44 rows, and fewer than 39 rows; also cross the wide-pane width threshold.
+  **Expected:** square covers request 24×12, 20×10, then compact geometry from
+  the encoded source, with no stale-sized prepared buffer, crowded metadata,
+  modal bleed-through, or incomplete redraw-band restoration.
+- **Action:** Navigate Stations with both `j`/`k` and rapid mouse-wheel input;
+  repeat with Help, Track Info, Lyrics, and a blocking dialog. **Expected:** both
+  navigation methods use the same base-commit/art-emission path; art neither
+  shifts nor leaves fragments, and every modal remains the final writer.
 - **Action:** Open Help, Track Info, Lyrics, and a confirmation or text prompt
   over visible art; repeat while art changes from Loading to Ready, while the
   spectrum/progress redraws, and across a resize. **Expected:** every modal

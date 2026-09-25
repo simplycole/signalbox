@@ -1,22 +1,353 @@
 #include "album_art.h"
 #include "enrichment.h"
+#include "platform.h"
+#include "version.h"
+
 #include <ctype.h>
-#include <stdio.h>
-#include <string.h>
-#include <strings.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include "version.h"
-#include "platform.h"
-void SbAlbumArtResultInit(SbAlbumArtResult*r){memset(r,0,sizeof(*r));r->status=SB_LOOKUP_IDLE;snprintf(r->provider,sizeof(r->provider),"Cover Art Archive");snprintf(r->reason,sizeof(r->reason),"idle");}
-int SbCoverArtHttpStatus(long s,int c){if(c!=CURLE_OK)return SB_LOOKUP_ERROR;if(s==200)return SB_LOOKUP_AVAILABLE;if(s==404)return SB_LOOKUP_NO_MATCH;if(s==429||s>=500)return SB_LOOKUP_UNAVAILABLE;return SB_LOOKUP_ERROR;}
-bool SbAlbumArtMimeSupported(const char*m){return m&&(!strcasecmp(m,"image/jpeg")||!strcasecmp(m,"image/png")||!strcasecmp(m,"image/webp"));}
-bool SbAlbumArtFilename(const char*id,const char*m,char*out,size_t n){if(!id||!*id||!out||n==0)return false;for(const unsigned char*p=(const unsigned char*)id;*p;p++)if(!isalnum(*p)&&*p!='-')return false;const char*e=!m?"jpg":strstr(m,"png")?"png":strstr(m,"webp")?"webp":"jpg";int z=snprintf(out,n,"%s.%s",id,e);return z>0&&(size_t)z<n;}
-static const char*str(json_object*o,const char*k){json_object*v=NULL;return json_object_object_get_ex(o,k,&v)&&json_object_is_type(v,json_type_string)?json_object_get_string(v):"";}
-bool SbCoverArtParse(const char*j,const char*release,SbAlbumArtResult*r){SbAlbumArtResultInit(r);snprintf(r->releaseId,sizeof(r->releaseId),"%s",release?release:"");json_object*root=json_tokener_parse(j),*images=NULL;if(!root||!json_object_object_get_ex(root,"images",&images)||!json_object_is_type(images,json_type_array)){if(root)json_object_put(root);r->status=SB_LOOKUP_ERROR;return false;}json_object*best=NULL;for(size_t i=0;i<json_object_array_length(images);i++){json_object*x=json_object_array_get_idx(images,i),*front=NULL;if(json_object_object_get_ex(x,"front",&front)&&json_object_get_boolean(front)){best=x;break;}}if(!best){r->status=SB_LOOKUP_NO_MATCH;json_object_put(root);return false;}json_object*t=NULL;if(json_object_object_get_ex(best,"thumbnails",&t)){const char*u=str(t,"500");if(!*u)u=str(t,"large");snprintf(r->sourceUrl,sizeof(r->sourceUrl),"%s",u);}if(!r->sourceUrl[0])snprintf(r->sourceUrl,sizeof(r->sourceUrl),"%s",str(best,"image"));if(!r->sourceUrl[0]){r->status=SB_LOOKUP_ERROR;json_object_put(root);return false;}r->status=SB_LOOKUP_AVAILABLE;json_object_put(root);return true;}
+#include <string.h>
+#include <strings.h>
 
-typedef struct { unsigned char *data; size_t length; bool overflow; } ArtBuffer;
-static size_t artWrite(char*p,size_t s,size_t n,void*u){ArtBuffer*b=u;size_t add=s*n;if(add>SB_ART_MAX_BYTES-b->length){b->overflow=true;return 0;}void*q=realloc(b->data,b->length+add+1);if(!q)return 0;b->data=q;memcpy(b->data+b->length,p,add);b->length+=add;b->data[b->length]=0;return add;}
-static bool fetch(const char*url,ArtBuffer*b,long*status,char**type){CURL*c=curl_easy_init();if(!c)return false;curl_easy_setopt(c,CURLOPT_URL,url);curl_easy_setopt(c,CURLOPT_USERAGENT,PROGRAM_NAME "/" VERSION " (https://github.com/signalbox-player/signalbox)");curl_easy_setopt(c,CURLOPT_FOLLOWLOCATION,1L);curl_easy_setopt(c,CURLOPT_MAXREDIRS,5L);curl_easy_setopt(c,CURLOPT_TIMEOUT,15L);curl_easy_setopt(c,CURLOPT_CONNECTTIMEOUT,5L);curl_easy_setopt(c,CURLOPT_WRITEFUNCTION,artWrite);curl_easy_setopt(c,CURLOPT_WRITEDATA,b);CURLcode code=curl_easy_perform(c);curl_easy_getinfo(c,CURLINFO_RESPONSE_CODE,status);if(type){char*t=NULL;curl_easy_getinfo(c,CURLINFO_CONTENT_TYPE,&t);*type=t?strdup(t):NULL;}curl_easy_cleanup(c);return code==CURLE_OK;}
-bool SbCoverArtLookup(const char*id,const char*dir,SbAlbumArtResult*r){SbAlbumArtResultInit(r);if(!id||!*id||!dir){snprintf(r->reason,sizeof(r->reason),"no_release_identity");return false;}snprintf(r->releaseId,sizeof(r->releaseId),"%s",id);char url[256];snprintf(url,sizeof(url),"https://coverartarchive.org/release/%s",id);ArtBuffer meta={0};long status=0;if(!fetch(url,&meta,&status,NULL)){r->httpStatus=status;r->status=meta.overflow?SB_LOOKUP_ERROR:SbCoverArtHttpStatus(status,CURLE_RECV_ERROR);snprintf(r->reason,sizeof(r->reason),r->status==SB_LOOKUP_UNAVAILABLE?"temporarily_unavailable":"download_error");free(meta.data);return false;}r->httpStatus=status;r->status=SbCoverArtHttpStatus(status,CURLE_OK);if(r->status!=SB_LOOKUP_AVAILABLE){snprintf(r->reason,sizeof(r->reason),r->status==SB_LOOKUP_NO_MATCH?"no_match":r->status==SB_LOOKUP_UNAVAILABLE?"temporarily_unavailable":"download_error");free(meta.data);return false;}if(!SbCoverArtParse((char*)meta.data,id,r)){snprintf(r->reason,sizeof(r->reason),r->status==SB_LOOKUP_NO_MATCH?"no_match":"download_error");free(meta.data);return false;}free(meta.data);ArtBuffer image={0};char*type=NULL;const bool fetched=fetch(r->sourceUrl,&image,&status,&type);if(!fetched||status!=200||image.overflow||!SbAlbumArtMimeSupported(type)){r->httpStatus=status;r->byteCount=image.length;r->status=fetched?SbCoverArtHttpStatus(status,CURLE_OK):SB_LOOKUP_ERROR;if(r->status==SB_LOOKUP_AVAILABLE)r->status=SB_LOOKUP_ERROR;snprintf(r->reason,sizeof(r->reason),fetched&&status==200&&!image.overflow&&!SbAlbumArtMimeSupported(type)?"unsupported_format":r->status==SB_LOOKUP_UNAVAILABLE?"temporarily_unavailable":"download_error");free(type);free(image.data);return false;}r->httpStatus=status;r->byteCount=image.length;snprintf(r->mimeType,sizeof(r->mimeType),"%s",type);free(type);char name[96];if(!SbAlbumArtFilename(id,r->mimeType,name,sizeof(name))){free(image.data);r->status=SB_LOOKUP_ERROR;snprintf(r->reason,sizeof(r->reason),"download_error");return false;}char*path=SbPlatformJoinPath(dir,name);char*tmp=path?malloc(strlen(path)+5):NULL;if(!path||!tmp){free(path);free(tmp);free(image.data);r->status=SB_LOOKUP_ERROR;snprintf(r->reason,sizeof(r->reason),"download_error");return false;}sprintf(tmp,"%s.tmp",path);FILE*f=fopen(tmp,"wb");bool ok=false;if(f){ok=fwrite(image.data,1,image.length,f)==image.length&&fflush(f)==0;if(fclose(f)!=0)ok=false;}if(ok)ok=SbPlatformAtomicReplace(tmp,path);remove(tmp);if(ok){snprintf(r->cachedPath,sizeof(r->cachedPath),"%s",path);snprintf(r->reason,sizeof(r->reason),"available");}else{r->status=SB_LOOKUP_ERROR;snprintf(r->reason,sizeof(r->reason),"download_error");}free(path);free(tmp);free(image.data);return ok;}
+typedef struct {
+	unsigned char *data;
+	size_t length;
+	bool overflow;
+} ArtBuffer;
+
+const char *SbAlbumArtProviderName (const SbAlbumArtProvider provider) {
+	return provider == SB_ART_PROVIDER_COVER_ART_ARCHIVE ?
+			"Cover Art Archive" : "None";
+}
+
+const char *SbAlbumArtStepName (const SbAlbumArtResolutionStep step) {
+	switch (step) {
+		case SB_ART_STEP_EXACT_RELEASE: return "exact_release";
+		case SB_ART_STEP_RELEASE_GROUP: return "release_group";
+		case SB_ART_STEP_ALTERNATE_RELEASE: return "alternate_release";
+		case SB_ART_STEP_ALBUM_FAMILY: return "album_family";
+		default: return "done";
+	}
+}
+
+SbAlbumArtResolutionStep SbAlbumArtNextStep (
+		const SbAlbumArtResolutionStep step, const int status,
+		const bool hasReleaseGroup, const bool hasAlternateRelease,
+		const bool hasAlbumFamily) {
+	if (status == SB_LOOKUP_AVAILABLE || status == SB_LOOKUP_UNAVAILABLE ||
+			status == SB_LOOKUP_ERROR) return SB_ART_STEP_DONE;
+	if (step < SB_ART_STEP_RELEASE_GROUP && hasReleaseGroup)
+		return SB_ART_STEP_RELEASE_GROUP;
+	if (step < SB_ART_STEP_ALTERNATE_RELEASE && hasAlternateRelease)
+		return SB_ART_STEP_ALTERNATE_RELEASE;
+	if (step < SB_ART_STEP_ALBUM_FAMILY && hasAlbumFamily)
+		return SB_ART_STEP_ALBUM_FAMILY;
+	return SB_ART_STEP_DONE;
+}
+
+void SbAlbumArtResultInit (SbAlbumArtResult *result) {
+	memset (result, 0, sizeof (*result));
+	result->status = SB_LOOKUP_IDLE;
+	result->providerKind = SB_ART_PROVIDER_NONE;
+	snprintf (result->provider, sizeof (result->provider), "%s",
+			SbAlbumArtProviderName (SB_ART_PROVIDER_NONE));
+	snprintf (result->reason, sizeof (result->reason), "idle");
+}
+
+int SbCoverArtHttpStatus (const long status, const int curlCode) {
+	if (curlCode != CURLE_OK) return SB_LOOKUP_ERROR;
+	if (status == 200) return SB_LOOKUP_AVAILABLE;
+	if (status == 404) return SB_LOOKUP_NO_MATCH;
+	if (status == 429 || status >= 500) return SB_LOOKUP_UNAVAILABLE;
+	return SB_LOOKUP_ERROR;
+}
+
+bool SbAlbumArtMimeSupported (const char *mime) {
+	return mime != NULL && (!strcasecmp (mime, "image/jpeg") ||
+			!strcasecmp (mime, "image/png") ||
+			!strcasecmp (mime, "image/webp"));
+}
+
+static bool safeIdentity (const char *identity) {
+	if (identity == NULL || *identity == '\0') return false;
+	for (const unsigned char *p = (const unsigned char *) identity; *p; p++)
+		if (!isalnum (*p) && *p != '-') return false;
+	return true;
+}
+
+static const char *mimeExtension (const char *mime) {
+	return mime == NULL ? "jpg" : strstr (mime, "png") != NULL ? "png" :
+			strstr (mime, "webp") != NULL ? "webp" : "jpg";
+}
+
+bool SbAlbumArtFilename (const char *identity, const char *mime,
+		char *out, const size_t size) {
+	if (!safeIdentity (identity) || out == NULL || size == 0) return false;
+	const int written = snprintf (out, size, "%s.%s", identity,
+			mimeExtension (mime));
+	return written > 0 && (size_t) written < size;
+}
+
+bool SbAlbumArtCacheFilename (const SbAlbumArtProvider provider,
+		const SbAlbumArtIdentityKind kind, const char *identity,
+		const char *mime, char *out, const size_t size) {
+	if (provider != SB_ART_PROVIDER_COVER_ART_ARCHIVE ||
+			(kind != SB_ART_IDENTITY_RELEASE &&
+			kind != SB_ART_IDENTITY_RELEASE_GROUP) ||
+			!safeIdentity (identity) || out == NULL || size == 0) return false;
+	const int written = snprintf (out, size, "caa-%s-%s.%s",
+			kind == SB_ART_IDENTITY_RELEASE ? "release" : "group",
+			identity, mimeExtension (mime));
+	return written > 0 && (size_t) written < size;
+}
+
+static const char *jsonString (json_object *object, const char *key) {
+	json_object *value = NULL;
+	return json_object_object_get_ex (object, key, &value) &&
+			json_object_is_type (value, json_type_string) ?
+			json_object_get_string (value) : "";
+}
+
+static void releaseFromUrl (const char *url, char *out, const size_t size) {
+	if (url == NULL || out == NULL || size == 0) return;
+	const char *value = strrchr (url, '/');
+	value = value != NULL ? value + 1 : url;
+	if (safeIdentity (value)) snprintf (out, size, "%s", value);
+}
+
+static bool coverArtParse (const char *json, const char *identity,
+		const SbAlbumArtIdentityKind kind, SbAlbumArtResult *result) {
+	SbAlbumArtResultInit (result);
+	result->providerKind = SB_ART_PROVIDER_COVER_ART_ARCHIVE;
+	result->identityKind = kind;
+	result->confidence = kind == SB_ART_IDENTITY_RELEASE ? 1.0 : 0.96;
+	snprintf (result->provider, sizeof (result->provider), "%s",
+			SbAlbumArtProviderName (result->providerKind));
+	if (kind == SB_ART_IDENTITY_RELEASE)
+		snprintf (result->releaseId, sizeof (result->releaseId), "%s",
+				identity != NULL ? identity : "");
+	else
+		snprintf (result->releaseGroupId, sizeof (result->releaseGroupId), "%s",
+				identity != NULL ? identity : "");
+	json_object *root = json_tokener_parse (json), *images = NULL;
+	if (root == NULL || !json_object_object_get_ex (root, "images", &images) ||
+			!json_object_is_type (images, json_type_array)) {
+		if (root != NULL) json_object_put (root);
+		result->status = SB_LOOKUP_ERROR;
+		return false;
+	}
+	json_object *best = NULL;
+	for (size_t i = 0; i < json_object_array_length (images); i++) {
+		json_object *candidate = json_object_array_get_idx (images, i);
+		json_object *front = NULL;
+		if (json_object_object_get_ex (candidate, "front", &front) &&
+				json_object_get_boolean (front)) {
+			best = candidate;
+			break;
+		}
+	}
+	if (best == NULL) {
+		result->status = SB_LOOKUP_NO_MATCH;
+		json_object_put (root);
+		return false;
+	}
+	json_object *thumbnails = NULL;
+	if (json_object_object_get_ex (best, "thumbnails", &thumbnails)) {
+		const char *url = jsonString (thumbnails, "500");
+		if (*url == '\0') url = jsonString (thumbnails, "large");
+		snprintf (result->sourceUrl, sizeof (result->sourceUrl), "%s", url);
+	}
+	if (result->sourceUrl[0] == '\0')
+		snprintf (result->sourceUrl, sizeof (result->sourceUrl), "%s",
+				jsonString (best, "image"));
+	if (kind == SB_ART_IDENTITY_RELEASE_GROUP)
+		releaseFromUrl (jsonString (root, "release"), result->releaseId,
+				sizeof (result->releaseId));
+	if (result->sourceUrl[0] == '\0') {
+		result->status = SB_LOOKUP_ERROR;
+		json_object_put (root);
+		return false;
+	}
+	result->status = SB_LOOKUP_AVAILABLE;
+	json_object_put (root);
+	return true;
+}
+
+bool SbCoverArtParse (const char *json, const char *release,
+		SbAlbumArtResult *result) {
+	return coverArtParse (json, release, SB_ART_IDENTITY_RELEASE, result);
+}
+
+bool SbCoverArtParseGroup (const char *json, const char *releaseGroup,
+		SbAlbumArtResult *result) {
+	return coverArtParse (json, releaseGroup,
+			SB_ART_IDENTITY_RELEASE_GROUP, result);
+}
+
+static size_t artWrite (char *data, const size_t size, const size_t count,
+		void *userdata) {
+	ArtBuffer *buffer = userdata;
+	const size_t add = size * count;
+	if (add > SB_ART_MAX_BYTES - buffer->length) {
+		buffer->overflow = true;
+		return 0;
+	}
+	void *next = realloc (buffer->data, buffer->length + add + 1);
+	if (next == NULL) return 0;
+	buffer->data = next;
+	memcpy (buffer->data + buffer->length, data, add);
+	buffer->length += add;
+	buffer->data[buffer->length] = 0;
+	return add;
+}
+
+static bool fetch (const char *url, ArtBuffer *buffer, long *status,
+		char **type) {
+	CURL *curl = curl_easy_init ();
+	if (curl == NULL) return false;
+	curl_easy_setopt (curl, CURLOPT_URL, url);
+	curl_easy_setopt (curl, CURLOPT_USERAGENT, PROGRAM_NAME "/" VERSION
+			" (https://github.com/signalbox-player/signalbox)");
+	curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt (curl, CURLOPT_MAXREDIRS, 5L);
+	curl_easy_setopt (curl, CURLOPT_TIMEOUT, 15L);
+	curl_easy_setopt (curl, CURLOPT_CONNECTTIMEOUT, 5L);
+	curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, artWrite);
+	curl_easy_setopt (curl, CURLOPT_WRITEDATA, buffer);
+	const CURLcode code = curl_easy_perform (curl);
+	curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, status);
+	if (type != NULL) {
+		char *contentType = NULL;
+		curl_easy_getinfo (curl, CURLINFO_CONTENT_TYPE, &contentType);
+		*type = contentType != NULL ? strdup (contentType) : NULL;
+	}
+	curl_easy_cleanup (curl);
+	return code == CURLE_OK;
+}
+
+static void setFailureReason (SbAlbumArtResult *result) {
+	snprintf (result->reason, sizeof (result->reason), "%s",
+			result->status == SB_LOOKUP_NO_MATCH ? "no_match" :
+			result->status == SB_LOOKUP_UNAVAILABLE ?
+			"temporarily_unavailable" : "download_error");
+}
+
+static bool writeImage (const char *directory, const char *identity,
+		SbAlbumArtResult *result, const ArtBuffer *image) {
+	char name[128];
+	if (!SbAlbumArtCacheFilename (result->providerKind, result->identityKind,
+			identity, result->mimeType, name, sizeof (name))) return false;
+	char *path = SbPlatformJoinPath (directory, name);
+	char *temporary = path != NULL ? malloc (strlen (path) + 5) : NULL;
+	if (path == NULL || temporary == NULL) {
+		free (path); free (temporary);
+		return false;
+	}
+	sprintf (temporary, "%s.tmp", path);
+	FILE *file = fopen (temporary, "wb");
+	bool ok = file != NULL;
+	if (file != NULL) {
+		ok = fwrite (image->data, 1, image->length, file) == image->length &&
+				fflush (file) == 0;
+		if (fclose (file) != 0) ok = false;
+	}
+	if (ok) ok = SbPlatformAtomicReplace (temporary, path);
+	remove (temporary);
+	if (ok) snprintf (result->cachedPath, sizeof (result->cachedPath),
+			"%s", path);
+	free (path); free (temporary);
+	return ok;
+}
+
+static bool coverArtLookup (const char *identity,
+		const SbAlbumArtIdentityKind kind, const char *directory,
+		SbAlbumArtResult *result) {
+	const uint64_t started = SbPlatformMonotonicMs ();
+	SbAlbumArtResultInit (result);
+	result->providerKind = SB_ART_PROVIDER_COVER_ART_ARCHIVE;
+	result->identityKind = kind;
+	snprintf (result->provider, sizeof (result->provider), "%s",
+			SbAlbumArtProviderName (result->providerKind));
+	if (!safeIdentity (identity) || directory == NULL) {
+		snprintf (result->reason, sizeof (result->reason), "no_release_identity");
+		return false;
+	}
+	char url[256];
+	snprintf (url, sizeof (url), "https://coverartarchive.org/%s/%s",
+			kind == SB_ART_IDENTITY_RELEASE ? "release" : "release-group",
+			identity);
+	ArtBuffer metadata = {0}; long status = 0;
+	if (!fetch (url, &metadata, &status, NULL)) {
+		result->httpStatus = status;
+		result->status = metadata.overflow ? SB_LOOKUP_ERROR :
+				SbCoverArtHttpStatus (status, CURLE_RECV_ERROR);
+		setFailureReason (result);
+		free (metadata.data);
+		result->resolutionElapsedMs = SbPlatformMonotonicMs () - started;
+		return false;
+	}
+	result->httpStatus = status;
+	result->status = SbCoverArtHttpStatus (status, CURLE_OK);
+	if (result->status != SB_LOOKUP_AVAILABLE) {
+		setFailureReason (result);
+		free (metadata.data);
+		result->resolutionElapsedMs = SbPlatformMonotonicMs () - started;
+		return false;
+	}
+	const bool parsed = kind == SB_ART_IDENTITY_RELEASE ?
+			SbCoverArtParse ((char *) metadata.data, identity, result) :
+			SbCoverArtParseGroup ((char *) metadata.data, identity, result);
+	free (metadata.data);
+	if (!parsed) {
+		setFailureReason (result);
+		result->resolutionElapsedMs = SbPlatformMonotonicMs () - started;
+		return false;
+	}
+	const uint64_t downloadStarted = SbPlatformMonotonicMs ();
+	ArtBuffer image = {0}; char *type = NULL;
+	const bool fetched = fetch (result->sourceUrl, &image, &status, &type);
+	result->downloadElapsedMs = SbPlatformMonotonicMs () - downloadStarted;
+	if (!fetched || status != 200 || image.overflow ||
+			!SbAlbumArtMimeSupported (type)) {
+		result->httpStatus = status;
+		result->byteCount = image.length;
+		result->status = fetched ? SbCoverArtHttpStatus (status, CURLE_OK) :
+				SB_LOOKUP_ERROR;
+		if (result->status == SB_LOOKUP_AVAILABLE) result->status = SB_LOOKUP_ERROR;
+		if (fetched && status == 200 && !image.overflow &&
+				!SbAlbumArtMimeSupported (type))
+			snprintf (result->reason, sizeof (result->reason),
+					"unsupported_format");
+		else setFailureReason (result);
+		free (type); free (image.data);
+		result->resolutionElapsedMs = SbPlatformMonotonicMs () - started;
+		return false;
+	}
+	result->httpStatus = status;
+	result->byteCount = image.length;
+	snprintf (result->mimeType, sizeof (result->mimeType), "%s", type);
+	free (type);
+	const bool ok = writeImage (directory, identity, result, &image);
+	free (image.data);
+	if (ok) snprintf (result->reason, sizeof (result->reason), "available");
+	else {
+		result->status = SB_LOOKUP_ERROR;
+		snprintf (result->reason, sizeof (result->reason), "download_error");
+	}
+	result->resolutionElapsedMs = SbPlatformMonotonicMs () - started;
+	return ok;
+}
+
+bool SbCoverArtLookup (const char *release, const char *directory,
+		SbAlbumArtResult *result) {
+	return coverArtLookup (release, SB_ART_IDENTITY_RELEASE,
+			directory, result);
+}
+
+bool SbCoverArtGroupLookup (const char *releaseGroup, const char *directory,
+		SbAlbumArtResult *result) {
+	return coverArtLookup (releaseGroup, SB_ART_IDENTITY_RELEASE_GROUP,
+			directory, result);
+}

@@ -214,8 +214,79 @@ bool SbMetadataDeserialize (const char *serialized, SbMetadataResult *r) {
 }
 static char *lyricsSerialize(const SbLyricsResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"status",json_object_new_int(r->status));json_object_object_add(o,"artist",json_object_new_string(r->artist));json_object_object_add(o,"title",json_object_new_string(r->title));json_object_object_add(o,"album",json_object_new_string(r->album));json_object_object_add(o,"record_id",json_object_new_string(r->recordId));json_object_object_add(o,"duration",json_object_new_double(r->duration));json_object_object_add(o,"instrumental",json_object_new_boolean(r->instrumental));json_object_object_add(o,"plain",json_object_new_string(r->plainLyrics?r->plainLyrics:""));json_object_object_add(o,"synced",json_object_new_string(r->syncedLyrics?r->syncedLyrics:""));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
 static bool lyricsDeserialize(const char*s,SbLyricsResult*r){json_object*o=json_tokener_parse(s),*v=NULL;if(!o)return false;SbLyricsResultInit(r);copyText(r->provider,sizeof(r->provider),"LRCLIB");json_object_object_get_ex(o,"status",&v);r->status=(SbLookupStatus)json_object_get_int(v);copyText(r->artist,sizeof(r->artist),jsonString(o,"artist"));copyText(r->title,sizeof(r->title),jsonString(o,"title"));copyText(r->album,sizeof(r->album),jsonString(o,"album"));copyText(r->recordId,sizeof(r->recordId),jsonString(o,"record_id"));if(json_object_object_get_ex(o,"duration",&v))r->duration=json_object_get_double(v);if(json_object_object_get_ex(o,"instrumental",&v))r->instrumental=json_object_get_boolean(v);const char*p=jsonString(o,"plain"),*y=jsonString(o,"synced");if(*p)r->plainLyrics=strdup(p);if(*y)r->syncedLyrics=strdup(y);json_object_put(o);return SbCacheStatePersistent(r->status);}
-static char *artSerialize(const SbAlbumArtResult*r){json_object*o=json_object_new_object();json_object_object_add(o,"release_id",json_object_new_string(r->releaseId));json_object_object_add(o,"url",json_object_new_string(r->sourceUrl));json_object_object_add(o,"mime",json_object_new_string(r->mimeType));json_object_object_add(o,"path",json_object_new_string(r->cachedPath));json_object_object_add(o,"width",json_object_new_int(r->width));json_object_object_add(o,"height",json_object_new_int(r->height));char*s=strdup(json_object_to_json_string_ext(o,JSON_C_TO_STRING_PLAIN));json_object_put(o);return s;}
-static bool artDeserialize(const SbCacheEntry*e,const char*release,SbAlbumArtResult*r){json_object*o=json_tokener_parse(e->payload),*v=NULL;if(!o)return false;SbAlbumArtResultInit(r);r->status=e->state;const char*stored=jsonString(o,"release_id");copyText(r->releaseId,sizeof(r->releaseId),*stored?stored:release);copyText(r->sourceUrl,sizeof(r->sourceUrl),jsonString(o,"url"));copyText(r->mimeType,sizeof(r->mimeType),jsonString(o,"mime"));copyText(r->cachedPath,sizeof(r->cachedPath),jsonString(o,"path"));if(json_object_object_get_ex(o,"width",&v))r->width=json_object_get_int(v);if(json_object_object_get_ex(o,"height",&v))r->height=json_object_get_int(v);json_object_put(o);if(r->status==SB_LOOKUP_AVAILABLE){FILE*f=fopen(r->cachedPath,"rb");if(!f)return false;fclose(f);}return true;}
+static char *artSerialize (const SbAlbumArtResult *result) {
+	json_object *object = json_object_new_object ();
+	json_object_object_add (object, "provider_kind",
+			json_object_new_int (result->providerKind));
+	json_object_object_add (object, "identity_kind",
+			json_object_new_int (result->identityKind));
+	json_object_object_add (object, "provider",
+			json_object_new_string (result->provider));
+	json_object_object_add (object, "release_id",
+			json_object_new_string (result->releaseId));
+	json_object_object_add (object, "release_group_id",
+			json_object_new_string (result->releaseGroupId));
+	json_object_object_add (object, "url",
+			json_object_new_string (result->sourceUrl));
+	json_object_object_add (object, "mime",
+			json_object_new_string (result->mimeType));
+	json_object_object_add (object, "path",
+			json_object_new_string (result->cachedPath));
+	json_object_object_add (object, "confidence",
+			json_object_new_double (result->confidence));
+	json_object_object_add (object, "width",
+			json_object_new_int (result->width));
+	json_object_object_add (object, "height",
+			json_object_new_int (result->height));
+	char *serialized = strdup (json_object_to_json_string_ext (object,
+			JSON_C_TO_STRING_PLAIN));
+	json_object_put (object);
+	return serialized;
+}
+
+static bool artDeserialize (const SbCacheEntry *entry,
+		const char *fallbackRelease, SbAlbumArtResult *result) {
+	json_object *object = json_tokener_parse (entry->payload), *value = NULL;
+	if (object == NULL) return false;
+	SbAlbumArtResultInit (result);
+	result->status = entry->state;
+	if (json_object_object_get_ex (object, "provider_kind", &value))
+		result->providerKind = (SbAlbumArtProvider) json_object_get_int (value);
+	if (json_object_object_get_ex (object, "identity_kind", &value))
+		result->identityKind = (SbAlbumArtIdentityKind) json_object_get_int (value);
+	copyText (result->provider, sizeof (result->provider),
+			jsonString (object, "provider"));
+	if (result->provider[0] == '\0') copyText (result->provider,
+			sizeof (result->provider),
+			SbAlbumArtProviderName (result->providerKind));
+	const char *stored = jsonString (object, "release_id");
+	copyText (result->releaseId, sizeof (result->releaseId),
+			*stored ? stored : fallbackRelease);
+	copyText (result->releaseGroupId, sizeof (result->releaseGroupId),
+			jsonString (object, "release_group_id"));
+	copyText (result->sourceUrl, sizeof (result->sourceUrl),
+			jsonString (object, "url"));
+	copyText (result->mimeType, sizeof (result->mimeType),
+			jsonString (object, "mime"));
+	copyText (result->cachedPath, sizeof (result->cachedPath),
+			jsonString (object, "path"));
+	if (json_object_object_get_ex (object, "confidence", &value))
+		result->confidence = json_object_get_double (value);
+	if (json_object_object_get_ex (object, "width", &value))
+		result->width = json_object_get_int (value);
+	if (json_object_object_get_ex (object, "height", &value))
+		result->height = json_object_get_int (value);
+	json_object_put (object);
+	result->cacheHit = true;
+	copyText (result->reason, sizeof (result->reason),
+			result->status == SB_LOOKUP_AVAILABLE ? "available" : "no_match");
+	if (result->status == SB_LOOKUP_AVAILABLE) {
+		FILE *file = fopen (result->cachedPath, "rb");
+		if (file == NULL) return false;
+		fclose (file);
+	}
+	return true;
+}
 
 bool SbLrclibParse (const char *json, SbLyricsResult *result) {
 	SbLyricsResultInit (result); copyText (result->provider,
@@ -1623,20 +1694,41 @@ static bool musicBrainzArtFetch (const char *url, SbHttpBuffer *body,
 	return musicBrainzFetch (url, "art_release_lookup", body, failure);
 }
 
-static bool cachedCoverLookup (SbMetadataResolver *r, const char *release,
+static const char *lookupStateName (SbLookupStatus);
+
+static const char *coverArtCacheProvider (
+		const SbAlbumArtIdentityKind kind) {
+	return kind == SB_ART_IDENTITY_RELEASE_GROUP ?
+			"coverartarchive-release-group-v3" :
+			"coverartarchive-release-v3";
+}
+
+static bool cachedCoverLookup (SbMetadataResolver *resolver,
+		const SbAlbumArtIdentityKind kind, const char *identity,
 		SbAlbumArtResult *art) {
-	const SbCacheEntry *cached = SbPersistentCacheGet (&r->artPersistent,
-			"coverartarchive-v2", release, SB_CACHE_ART, time (NULL));
-	if (cached && artDeserialize (cached, release, art)) {
-		enrichmentDebugPrint ("art cache=%s release_mbid=%s path=%s\n",
-				art->status == SB_LOOKUP_AVAILABLE ? "hit" : "negative", release, art->cachedPath);
+	const char *cacheProvider = coverArtCacheProvider (kind);
+	const SbCacheEntry *cached = SbPersistentCacheGet (
+			&resolver->artPersistent, cacheProvider, identity,
+			SB_CACHE_ART, time (NULL));
+	if (cached != NULL && artDeserialize (cached,
+			kind == SB_ART_IDENTITY_RELEASE ? identity : "", art)) {
+		enrichmentDebugPrint ("art cache source=%s identity=%s hit=yes state=%s path=%s\n",
+				cacheProvider, identity, lookupStateName (
+						(SbLookupStatus) art->status), art->cachedPath);
 		return art->status == SB_LOOKUP_AVAILABLE;
 	}
-	SbCoverArtLookup (release, r->artDirectory, art);
-	if (art->status == SB_LOOKUP_AVAILABLE || art->status == SB_LOOKUP_NO_MATCH) {
-		char *payload = artSerialize (art); if (payload != NULL) {
-			SbPersistentCachePut (&r->artPersistent, "coverartarchive-v2", release,
-					art->status, payload, SB_CACHE_ART, time (NULL)); free (payload);
+	enrichmentDebugPrint ("art cache source=%s identity=%s hit=no\n",
+			cacheProvider, identity);
+	if (kind == SB_ART_IDENTITY_RELEASE_GROUP)
+		SbCoverArtGroupLookup (identity, resolver->artDirectory, art);
+	else SbCoverArtLookup (identity, resolver->artDirectory, art);
+	if (art->status == SB_LOOKUP_AVAILABLE ||
+			art->status == SB_LOOKUP_NO_MATCH) {
+		char *payload = artSerialize (art);
+		if (payload != NULL) {
+			SbPersistentCachePut (&resolver->artPersistent, cacheProvider,
+					identity, art->status, payload, SB_CACHE_ART, time (NULL));
+			free (payload);
 		}
 	}
 	return art->status == SB_LOOKUP_AVAILABLE;
@@ -1676,7 +1768,8 @@ static bool rankedReleaseArt (SbMetadataResolver *r, const char *json,
 		json_object *release = json_object_array_get_idx (releases, topIndex);
 		const char *releaseId = jsonString (release, "id");
 		enrichmentDebugPrint ("art fallback step=%s release_mbid=%s score=%.1f\n", step, releaseId, top);
-		if (*releaseId && cachedCoverLookup (r, releaseId, art)) { json_object_put (root); return true; }
+		if (*releaseId && cachedCoverLookup (r, SB_ART_IDENTITY_RELEASE,
+				releaseId, art)) { json_object_put (root); return true; }
 		if (art->status == SB_LOOKUP_UNAVAILABLE || art->status == SB_LOOKUP_ERROR) {
 			json_object_put (root); return false;
 		}
@@ -1882,60 +1975,128 @@ static void *artResolverThread (void *arg) {
 		const char *recording = job.recordingId;
 		const SbTrackIdentity identity = job.identity;
 		const uint64_t generation = job.generation;
-		SbAlbumArtResult art; SbAlbumArtResultInit(&art);
-		char trackKey[80]; SbTrackCacheKey ("coverart-selection-v2", &identity, trackKey, sizeof (trackKey));
+		const uint64_t resolutionStarted = SbPlatformMonotonicMs ();
+		SbAlbumArtResult art; SbAlbumArtResultInit (&art);
+		char trackKey[80]; SbTrackCacheKey ("coverart-selection-v3", &identity,
+				trackKey, sizeof (trackKey));
 		const SbCacheEntry *trackCached = SbPersistentCacheGet (&r->artPersistent,
-				"coverart-selection-v2", trackKey, SB_CACHE_ART, time (NULL));
+				"coverart-selection-v3", trackKey, SB_CACHE_ART, time (NULL));
 		enrichmentDebugPrint("art state=loading generation=%llu artist=\"%s\" title=\"%s\" album=\"%s\" recording_mbid=%s release_mbid=%s release_group_mbid=%s\n",(unsigned long long)generation,identity.artist,identity.title,identity.album,recording,release,group);
-		bool found = trackCached && artDeserialize (trackCached, release, &art) &&
-				art.status == SB_LOOKUP_AVAILABLE;
-		if (found) enrichmentDebugPrint ("art fallback cache=track_selection release_mbid=%s\n", art.releaseId);
-		if (!found && release[0] && r->artDirectory) {
-			enrichmentDebugPrint ("art fallback step=best_release release_mbid=%s\n", release);
-			found = cachedCoverLookup (r, release, &art);
+		const bool selectionCached = trackCached != NULL &&
+				artDeserialize (trackCached, release, &art);
+		bool found = selectionCached && art.status == SB_LOOKUP_AVAILABLE;
+		const bool cachedNoMatch = selectionCached &&
+				art.status == SB_LOOKUP_NO_MATCH;
+		SbAlbumArtResolutionStep step = SB_ART_STEP_EXACT_RELEASE;
+		SbLookupStatus stepStatus = SB_LOOKUP_NO_MATCH;
+		if (selectionCached)
+			enrichmentDebugPrint ("art cache source=track_selection hit=yes state=%s provider=%s\n",
+					lookupStateName ((SbLookupStatus) art.status), art.provider);
+		else enrichmentDebugPrint ("art cache source=track_selection hit=no\n");
+		if (!found && !cachedNoMatch && release[0] && r->artDirectory) {
+			found = cachedCoverLookup (r, SB_ART_IDENTITY_RELEASE,
+					release, &art);
+			enrichmentDebugPrint ("art provider=coverartarchive step=exact_release result=%s cache_hit=%s elapsed_ms=%llu\n",
+					lookupStateName ((SbLookupStatus) art.status),
+					art.cacheHit ? "yes" : "no",
+					(unsigned long long) art.resolutionElapsedMs);
+			stepStatus = (SbLookupStatus) art.status;
+		}
+		if (!found && !cachedNoMatch)
+			step = SbAlbumArtNextStep (SB_ART_STEP_EXACT_RELEASE,
+					stepStatus, group[0] != '\0', group[0] != '\0',
+					identity.album[0] != '\0' && identity.artist[0] != '\0');
+		if (!found && !cachedNoMatch &&
+				step == SB_ART_STEP_RELEASE_GROUP &&
+				!foregroundArtPending (r) && r->artDirectory) {
+			found = cachedCoverLookup (r, SB_ART_IDENTITY_RELEASE_GROUP,
+					group, &art);
+			enrichmentDebugPrint ("art provider=coverartarchive step=release_group result=%s cache_hit=%s elapsed_ms=%llu\n",
+					lookupStateName ((SbLookupStatus) art.status),
+					art.cacheHit ? "yes" : "no",
+					(unsigned long long) art.resolutionElapsedMs);
+			stepStatus = (SbLookupStatus) art.status;
+			step = SbAlbumArtNextStep (SB_ART_STEP_RELEASE_GROUP,
+					stepStatus, true, true,
+					identity.album[0] != '\0' && identity.artist[0] != '\0');
 		}
 		SbLookupStatus mbFailure = SB_LOOKUP_NO_MATCH;
-		if (!found && !foregroundArtPending (r) &&
-				art.status != SB_LOOKUP_UNAVAILABLE &&
-				art.status != SB_LOOKUP_ERROR && group[0]) {
+		if (!found && !cachedNoMatch &&
+				step == SB_ART_STEP_ALTERNATE_RELEASE &&
+				!foregroundArtPending (r)) {
 			char url[512]; SbHttpBuffer body = {0};
 			snprintf (url, sizeof (url), "https://musicbrainz.org/ws/2/release?release-group=%s&inc=artist-credits+release-groups&fmt=json&limit=25", group);
-			enrichmentDebugPrint ("art fallback step=release_group_lookup release_group_mbid=%s\n", group);
+			enrichmentDebugPrint ("art provider=musicbrainz step=alternate_release_lookup release_group_mbid=%s\n", group);
 			if (musicBrainzArtFetch (url, &body, &mbFailure)) found = rankedReleaseArt (r,
-					body.data, &identity, release, "alternate_edition", &art);
+					body.data, &identity, release, "alternate_release", &art);
 			free (body.data);
+			if (found) art.confidence = .90;
+			stepStatus = found ? SB_LOOKUP_AVAILABLE :
+					(art.status == SB_LOOKUP_UNAVAILABLE ||
+					art.status == SB_LOOKUP_ERROR ?
+					(SbLookupStatus) art.status : mbFailure);
+			enrichmentDebugPrint ("art provider=coverartarchive step=alternate_release result=%s confidence=%.2f\n",
+					lookupStateName (stepStatus),
+					found ? art.confidence : 0.0);
+			step = SbAlbumArtNextStep (SB_ART_STEP_ALTERNATE_RELEASE,
+					stepStatus, true, true,
+					identity.album[0] != '\0' && identity.artist[0] != '\0');
 		}
-		if (!found && !foregroundArtPending (r) &&
-				art.status != SB_LOOKUP_UNAVAILABLE && art.status != SB_LOOKUP_ERROR &&
-				identity.album[0] && identity.artist[0]) {
+		if (!found && !cachedNoMatch && step == SB_ART_STEP_ALBUM_FAMILY &&
+				!foregroundArtPending (r)) {
 			CURL *curl = curl_easy_init (); SbHttpBuffer body = {0};
 			if (curl != NULL) { char query[700], url[1600]; snprintf (query, sizeof (query),
 					"release:\"%s\" AND artist:\"%s\"", identity.album, identity.artist);
 				char *escaped = curl_easy_escape (curl, query, 0); curl_easy_cleanup (curl);
 				if (escaped != NULL) { snprintf (url, sizeof (url), "https://musicbrainz.org/ws/2/release/?query=%s&fmt=json&limit=12", escaped); curl_free (escaped);
-					enrichmentDebugPrint ("art fallback step=bounded_album_lookup artist=\"%s\" album=\"%s\"\n", identity.artist, identity.album);
+					enrichmentDebugPrint ("art provider=musicbrainz step=album_family_lookup artist=\"%s\" album=\"%s\"\n", identity.artist, identity.album);
 					if (musicBrainzArtFetch (url, &body, &mbFailure)) found = rankedReleaseArt (r,
-							body.data, &identity, NULL, "album_release", &art); }
+							body.data, &identity, NULL, "album_family", &art); }
 			}
 			free (body.data);
+			if (found) art.confidence = .82;
+			stepStatus = found ? SB_LOOKUP_AVAILABLE :
+					(art.status == SB_LOOKUP_UNAVAILABLE ||
+					art.status == SB_LOOKUP_ERROR ?
+					(SbLookupStatus) art.status : mbFailure);
+			enrichmentDebugPrint ("art provider=coverartarchive step=album_family result=%s confidence=%.2f\n",
+					lookupStateName (stepStatus),
+					found ? art.confidence : 0.0);
 		}
-		if (!found && job.priority != SB_ENRICH_PRIORITY_CURRENT &&
+		if (!found && !cachedNoMatch &&
+				job.priority != SB_ENRICH_PRIORITY_CURRENT &&
 				foregroundArtPending (r)) {
 			pthread_mutex_lock (&r->lock);
 			deferArtJobLocked (r, &job);
 			pthread_mutex_unlock (&r->lock);
 			continue;
 		}
-		if (found) { snprintf (art.reason, sizeof (art.reason), "available"); char *payload=artSerialize(&art);
-			if(payload){SbPersistentCachePut(&r->artPersistent,"coverart-selection-v2",trackKey,art.status,payload,SB_CACHE_ART,time(NULL));free(payload);} }
-		else if (art.status != SB_LOOKUP_UNAVAILABLE && art.status != SB_LOOKUP_ERROR) {
+		if (found) snprintf (art.reason, sizeof (art.reason), "available");
+		else if (!cachedNoMatch && art.status != SB_LOOKUP_UNAVAILABLE &&
+				art.status != SB_LOOKUP_ERROR) {
 			art.status = mbFailure == SB_LOOKUP_UNAVAILABLE ? SB_LOOKUP_UNAVAILABLE :
 					mbFailure == SB_LOOKUP_ERROR ? SB_LOOKUP_ERROR : SB_LOOKUP_NO_MATCH;
 			snprintf (art.reason, sizeof (art.reason), art.status == SB_LOOKUP_NO_MATCH ?
 					"no_match" : "temporarily_unavailable");
 		}
-		SbPersistentCacheWrite(&r->artPersistent);
-		enrichmentDebugPrint("art provider=coverartarchive generation=%llu http=%ld result=%s mime=%s bytes=%zu url=%s path=%s\n",(unsigned long long)generation,art.httpStatus,art.reason,art.mimeType,art.byteCount,art.sourceUrl,art.cachedPath);
+		art.resolutionElapsedMs = SbPlatformMonotonicMs () - resolutionStarted;
+		if (!selectionCached && (art.status == SB_LOOKUP_AVAILABLE ||
+				art.status == SB_LOOKUP_NO_MATCH)) {
+			char *payload = artSerialize (&art);
+			if (payload != NULL) {
+				SbPersistentCachePut (&r->artPersistent,
+						"coverart-selection-v3", trackKey, art.status,
+						payload, SB_CACHE_ART, time (NULL));
+				free (payload);
+			}
+		}
+		SbPersistentCacheWrite (&r->artPersistent);
+		enrichmentDebugPrint ("art selection provider=%s confidence=%.2f generation=%llu result=%s cache_hit=%s resolution_elapsed_ms=%llu download_elapsed_ms=%llu mime=%s bytes=%zu path=%s\n",
+				art.provider, art.confidence, (unsigned long long) generation,
+				art.reason, art.cacheHit ? "yes" : "no",
+				(unsigned long long) art.resolutionElapsedMs,
+				(unsigned long long) art.downloadElapsedMs,
+				art.mimeType, art.byteCount, art.cachedPath);
 		pthread_mutex_lock (&r->lock);
 		SbEnrichmentPrefetchEntry *entry = prefetchEntryLocked (r, job.key,
 				&job.identity, false);
@@ -2128,12 +2289,15 @@ void SbMetadataResolverRequest (SbMetadataResolver *r, const SbTrackIdentity *id
 	}
 	if (entry != NULL) {
 		const uint64_t age = SbPlatformMonotonicMs () - entry->startedAtMs;
-		enrichmentDebugPrint ("enrichment prefetch promote artist=\"%s\" title=\"%s\" prefetch age_ms=%llu lyrics_ready_at_start=%s metadata_ready_at_start=%s art_ready_at_start=%s\n",
+		enrichmentDebugPrint ("enrichment prefetch promote artist=\"%s\" title=\"%s\" prefetch age_ms=%llu lyrics_ready_at_start=%s metadata_ready_at_start=%s art_resolved_at_start=%s art_state=%s art_provider=%s\n",
 				id->artist, id->title, (unsigned long long) age,
 				lyricsReady ? "yes" : "no", metadataReady ? "yes" : "no",
-				artReady ? "yes" : "no");
+				entry->artDone ? "yes" : "no",
+				entry->artDone ? lookupStateName (
+						(SbLookupStatus) entry->art.status) : "loading",
+				entry->art.provider[0] ? entry->art.provider : "none");
 	} else {
-		enrichmentDebugPrint ("prefetch age_ms=0 lyrics_ready_at_start=no metadata_ready_at_start=no art_ready_at_start=no\n");
+		enrichmentDebugPrint ("prefetch age_ms=0 lyrics_ready_at_start=no metadata_ready_at_start=no art_resolved_at_start=no art_state=loading art_provider=none\n");
 	}
 	bool resolverWork = r->jobActive && strcmp (r->activeKey, key) == 0;
 	bool artWork = r->artJobActive && strcmp (r->activeArtKey, key) == 0;

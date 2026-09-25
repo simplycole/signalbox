@@ -1044,7 +1044,8 @@ static SbArtLayout SbUiCursesArtLayout (const SbUiRenderer *renderer,
 	if (cols < 80 || rows < 24 || model->artState != SB_LOOKUP_AVAILABLE ||
 			renderer->settings->albumArtMode == SB_ALBUM_ART_OFF) return (SbArtLayout) {0};
 	const int split = cols / 3, rightWidth = cols - (split + 2) - 2; *x = split + 2;
-	const unsigned int nowPlayingHeight = rows >= 45 ? 11 : 8;
+	const unsigned int nowPlayingHeight =
+			SbTuiPresentationNowPlayingHeight (rows);
 	return SbArtChooseLayout ((unsigned int) rightWidth, nowPlayingHeight, true);
 }
 
@@ -1125,11 +1126,14 @@ static bool SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 	data->currentArtRect = art;
 	SbUiCursesLogArtOcclusion (data, art, overlay);
 	if (data->preparedArt.builds != builds)
-		tuiDebugPrint ("art prepare cache=miss art decode=ok source=%ux%u requested=%ux%u prepared=%ux%u color=%s\n",
+		tuiDebugPrint ("art prepare cache=miss decode=ok source=%ux%u requested=%ux%u prepared=%ux%u color=%s quality_version=%u resize=lanczos decode_elapsed_ms=%llu prepare_elapsed_ms=%llu\n",
 				data->preparedArt.sourceWidth, data->preparedArt.sourceHeight,
 				data->preparedArt.requestedColumns, data->preparedArt.requestedRows,
 				data->preparedArt.columns, data->preparedArt.rows,
-				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" : "xterm-256");
+				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" : "xterm-256",
+				data->preparedArt.qualityVersion,
+				(unsigned long long) data->preparedArt.decodeElapsedMs,
+				(unsigned long long) data->preparedArt.prepareElapsedMs);
 	else if (data->preparedArt.hits != hits && data->preparedArt.hits == 1)
 		tuiDebugPrint ("art prepare cache=hit path=%s requested=%ux%u color=%s\n",
 				data->preparedArt.path, data->preparedArt.requestedColumns,
@@ -1522,7 +1526,8 @@ static void SbUiCursesFrame (SbUiRenderer *renderer,
 	if (cols >= 80 && rows >= 24) {
 		const int split = cols / 3;
 		SbUiCursesVLine (stdscr, 3, split, statusY - 4);
-		const int nowPlayingHeight = rows >= 45 ? 11 : 8;
+		const int nowPlayingHeight = (int)
+				SbTuiPresentationNowPlayingHeight (rows);
 		const size_t upcomingCount = SbUiCursesUpcomingCount (model);
 		const int rightWidth = cols - (split + 2) - 2;
 		const int spectrumRows = model->visualizerEnabled && rightWidth >= 38 ?

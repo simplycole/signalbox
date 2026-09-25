@@ -83,7 +83,8 @@ Highlights
   monochrome themes
 - Real PCM-driven 8/12-band spectrum analyzer with smoothing and peak hold
 - Terminal-native cached album art using ANSI half blocks with
-  truecolor/256-color fallback
+  truecolor/256-color fallback, direct Cover Art Archive release-group recovery,
+  and gentle tiny-grid contrast/sharpening that preserves the pixel aesthetic
 - Searchable retained station pane with instant name filtering and safe
   switching through the existing playback pipeline while Now Playing remains
   visible; views sort A-Z or retain original Pandora order
@@ -94,8 +95,8 @@ Highlights
 - Background MusicBrainz enrichment with canonical recording identity, selected
   release, release-group-derived original dates, edition dates, type, country,
   label/catalog, ISRC, and concise source-labeled genres or tags when available;
-  Cover Art
-  Archive resolution, bounded next/+2 enrichment prefetch, playlist refill, and
+  Cover Art Archive exact-release, canonical release-group, and validated
+  alternate-release resolution, bounded next/+2 enrichment prefetch, playlist refill, and
   schema-versioned persistent enrichment and artwork caches
 - Native TUI flows for station creation, rename/delete, QuickMix, genres,
   seeds, feedback, bookmarks, and station modes

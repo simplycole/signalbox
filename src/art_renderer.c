@@ -1,4 +1,5 @@
 #include "art_renderer.h"
+#include "platform.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
@@ -71,13 +72,101 @@ bool SbArtResizeFit (const SbArtImage *source, unsigned int width,
 	out->rgba = malloc ((size_t) fitWidth * fitHeight * 4); if (!out->rgba) return false;
 	struct SwsContext *sws = sws_getContext ((int) source->width, (int) source->height,
 			AV_PIX_FMT_RGBA, (int) fitWidth, (int) fitHeight, AV_PIX_FMT_RGBA,
-			SWS_BILINEAR, NULL, NULL, NULL);
+			SWS_LANCZOS | SWS_ACCURATE_RND, NULL, NULL, NULL);
 	const uint8_t *src[] = {source->rgba}; int srcStride[] = {(int) source->width * 4};
 	uint8_t *dst[] = {out->rgba}; int dstStride[] = {(int) fitWidth * 4};
 	const bool ok = sws != NULL && sws_scale (sws, src, srcStride, 0,
 			(int) source->height, dst, dstStride) == (int) fitHeight;
 	sws_freeContext (sws); if (!ok) { SbArtImageDestroy (out); return false; }
 	out->width = fitWidth; out->height = fitHeight; return true;
+}
+
+static uint8_t SbArtClampByte (const int value) {
+	return (uint8_t) (value < 0 ? 0 : value > 255 ? 255 : value);
+}
+
+static unsigned int SbArtLuma (const uint8_t *pixel) {
+	return (unsigned int) ((54U * pixel[0] + 183U * pixel[1] +
+			19U * pixel[2] + 128U) >> 8);
+}
+
+static unsigned int SbArtPercentile (const unsigned int histogram[256],
+		const size_t count, const unsigned int numerator,
+		const unsigned int denominator) {
+	const size_t wanted = count * numerator / denominator;
+	size_t seen = 0;
+	for (unsigned int value = 0; value < 256; value++) {
+		seen += histogram[value];
+		if (seen >= wanted) return value;
+	}
+	return 255;
+}
+
+bool SbArtEnhance (SbArtImage *image) {
+	if (image == NULL || image->rgba == NULL || image->width == 0 ||
+			image->height == 0) return false;
+	const size_t pixels = (size_t) image->width * image->height;
+	unsigned int histogram[256] = {0}; size_t visible = 0;
+	for (size_t i = 0; i < pixels; i++) {
+		const uint8_t *pixel = image->rgba + i * 4;
+		if (pixel[3] < 16) continue;
+		histogram[SbArtLuma (pixel)]++;
+		visible++;
+	}
+	if (visible == 0) return true;
+	const unsigned int low = SbArtPercentile (histogram, visible, 5, 100);
+	const unsigned int median = SbArtPercentile (histogram, visible, 50, 100);
+	const unsigned int high = SbArtPercentile (histogram, visible, 95, 100);
+	const unsigned int range = high > low ? high - low : 0;
+	/* Percentiles reject isolated highlights and shadows.  Contrast expansion
+	 * is capped at 16%, preserving the source's character without turning this
+	 * tiny terminal grid into harsh autocontrast. */
+	unsigned int gain256 = 256;
+	if (range >= 24 && range < 206) {
+		const unsigned int ideal = 206U * 256U / range;
+		gain256 = ideal < 297U ? ideal : 297U;
+	}
+	const int center = (int) (low + high) / 2;
+	for (size_t i = 0; i < pixels; i++) {
+		uint8_t *pixel = image->rgba + i * 4;
+		if (pixel[3] < 16) continue;
+		const int luma = (int) SbArtLuma (pixel);
+		int target = center + (luma - center) * (int) gain256 / 256;
+		/* Very dark covers receive a bounded two-to-four-level midtone lift. */
+		if (median < 72 && target > 0 && target < 255)
+			target += target * (255 - target) / (255 * 16);
+		const int delta = target - luma;
+		for (size_t channel = 0; channel < 3; channel++)
+			pixel[channel] = SbArtClampByte ((int) pixel[channel] + delta);
+	}
+	uint8_t *base = malloc (pixels * 4);
+	if (base == NULL) return false;
+	memcpy (base, image->rgba, pixels * 4);
+	/* A capped 1/8-strength four-neighbour unsharp mask improves silhouettes
+	 * and large lettering while avoiding halos and noisy micro-detail. */
+	for (unsigned int y = 0; y < image->height; y++) {
+		for (unsigned int x = 0; x < image->width; x++) {
+			uint8_t *pixel = image->rgba +
+					((size_t) y * image->width + x) * 4;
+			if (pixel[3] < 16) continue;
+			for (size_t channel = 0; channel < 3; channel++) {
+				const int centerValue = base[
+						((size_t) y * image->width + x) * 4 + channel];
+				int sum = 0, neighbours = 0;
+				if (x > 0) { sum += base[((size_t) y * image->width + x - 1) * 4 + channel]; neighbours++; }
+				if (x + 1 < image->width) { sum += base[((size_t) y * image->width + x + 1) * 4 + channel]; neighbours++; }
+				if (y > 0) { sum += base[((size_t) (y - 1) * image->width + x) * 4 + channel]; neighbours++; }
+				if (y + 1 < image->height) { sum += base[((size_t) (y + 1) * image->width + x) * 4 + channel]; neighbours++; }
+				if (neighbours == 0) continue;
+				int adjustment = (centerValue - sum / neighbours) / 8;
+				if (adjustment < -12) adjustment = -12;
+				if (adjustment > 12) adjustment = 12;
+				pixel[channel] = SbArtClampByte (centerValue + adjustment);
+			}
+		}
+	}
+	free (base);
+	return true;
 }
 
 unsigned char SbArtXterm256 (uint8_t r, uint8_t g, uint8_t b) {
@@ -113,20 +202,31 @@ bool SbPreparedArtGet (SbPreparedArt *art, const char *path, unsigned int column
 	if (!art || !path || !*path || !columns || !rows || mode == SB_ART_COLOR_NONE) return false;
 	if ((art->cells || art->failed) && !strcmp (art->path,path) &&
 			art->requestedColumns==columns && art->requestedRows==rows &&
-			art->mode==mode) { art->hits++; return !art->failed; }
+			art->mode==mode && art->qualityVersion == SB_ART_QUALITY_VERSION) {
+		art->hits++; return !art->failed;
+	}
 	const unsigned int builds = art->builds; SbPreparedArtDestroy (art); art->builds = builds;
 	art->builds++; snprintf(art->path,sizeof(art->path),"%s",path);
 	art->requestedColumns=columns; art->requestedRows=rows; art->mode=mode;
-	SbArtImage source={0}, resized={0}; bool ok=SbArtDecodeFile(path,&source); art->sourceWidth=source.width; art->sourceHeight=source.height;
+	art->qualityVersion = SB_ART_QUALITY_VERSION;
+	SbArtImage source={0}, resized={0};
+	const uint64_t decodeStarted = SbPlatformMonotonicMs ();
+	bool ok=SbArtDecodeFile(path,&source);
+	art->decodeElapsedMs = SbPlatformMonotonicMs () - decodeStarted;
+	art->sourceWidth=source.width; art->sourceHeight=source.height;
+	const uint64_t prepareStarted = SbPlatformMonotonicMs ();
 	if(ok) ok=SbArtResizeFit(&source,columns,rows*2,&resized);
+	if(ok) ok=SbArtEnhance(&resized);
 	unsigned int cellColumns=0,cellRows=0; if(ok) ok=SbArtCellsBuild(&resized,mode,&art->cells,&cellColumns,&cellRows);
+	art->prepareElapsedMs = SbPlatformMonotonicMs () - prepareStarted;
 	SbArtImageDestroy(&source); SbArtImageDestroy(&resized); if(!ok){art->failed=true;return false;}
 	art->columns=cellColumns; art->rows=cellRows; return true;
 }
 
 SbArtLayout SbArtChooseLayout (unsigned int width, unsigned int height, bool enabled) {
 	SbArtLayout out={0}; if(!enabled || width < 48 || height < 8) return out;
-	out.columns = width >= 80 && height >= 10 ? 20 :
+	out.columns = width >= 88 && height >= 12 ? 24 :
+			width >= 80 && height >= 10 ? 20 :
 			width >= 68 && height >= 8 ? 16 : width >= 56 ? 12 : 10;
 	if (out.columns + 24 > width) return (SbArtLayout){0};
 	out.rows = (out.columns + 1) / 2; if(out.rows > height) out.rows=height;

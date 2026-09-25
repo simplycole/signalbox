@@ -7,8 +7,14 @@ directional; the preceding sections describe code present in this repository.
 ## Metadata enrichment
 
 Cached encoded album art flows through the renderer-neutral FFmpeg decoder,
-bounded RGBA image, aspect-preserving bilinear resize, terminal color conversion,
-and an in-memory prepared-art cache. The curses renderer remains authoritative
+bounded RGBA image, aspect-preserving Lanczos reduction to the effective terminal
+pixel grid, conservative tonal enhancement, terminal color conversion, and an
+in-memory prepared-art cache. Tonal preparation caps percentile-based contrast
+expansion at 16%, applies only a tiny lift to dark covers, and follows with a
+capped one-eighth-strength four-neighbour unsharp mask. Wide layouts request a
+24-column by 12-terminal-row grid directly from the encoded source; smaller
+layouts retain 20×10, 16×8, 12×6, and 10×5 fallbacks. It does not boost
+saturation, dither, or upscale an already prepared grid. The curses renderer remains authoritative
 for layout and input; after its atomic screen update, the prepared cells are
 painted into the reserved Now Playing rectangle with standard ANSI color and
 Unicode half blocks. Cache identity includes path, target geometry, and color
@@ -20,7 +26,11 @@ remains visible immediately outside that half-open frame, and closing or
 resizing an overlay immediately recomposes the full cover at the current
 geometry. Retained overlays are repainted after direct ANSI emission; Help also
 explicitly invalidates its physical curses rows, so its complete frame is the
-final physical writer without forcing a full-terminal repaint.
+final physical writer without forcing a full-terminal repaint. Before a later
+curses commit, the full-width band containing the previous ANSI art, plus a
+one-row guard, is marked physically corrupted. This prevents curses update
+optimizations from moving cells that exist in the terminal but not in curses'
+physical-screen model; ANSI art remains the final writer on non-modal frames.
 
 `src/enrichment.c` implements a provider-neutral enrichment boundary. A Pandora
 song is copied into a `SbTrackIdentity`; original display strings are retained
@@ -130,13 +140,48 @@ and flushed temporary files are atomically replaced. Cache schema 5 persists
 the complete rich metadata result, including category provenance; older cache
 files are ignored and replaced without manual deletion. Deserialization also
 rechecks the date invariant.
-Successful MusicBrainz results retain recording,
-release, and release-group MBIDs internally. The
-release MBID drives Cover Art Archive lookup, preferring a front 500px image.
-Encoded JPEG, PNG, or WebP data (at most 5 MiB) is stored separately under
-`art/`. A generic result and renderer contract expose status, provider, URL,
-MIME type, cached path, dimensions, and release identity without coupling the
-UI to Cover Art Archive. Generation checks prevent stale UI publication.
+Successful MusicBrainz results retain recording, release, and release-group
+MBIDs internally. Art resolution uses a provider-neutral result containing the
+provider kind and display name, source URL, source identity kind, release and
+release-group identity, MIME type, confidence, cached path, state, byte count,
+and timing. The current bounded ladder is:
+
+1. the selected release's front Cover Art Archive image;
+2. the selected release group's canonical front image via the direct
+   [`/release-group/{mbid}` Cover Art Archive endpoint](https://musicbrainz.org/doc/Cover_Art_Archive/API);
+3. the best conservatively matched alternate release in that validated group;
+4. the existing bounded artist/album family recovery.
+
+Only entries marked `front` are accepted. Compilation, artist, and album-family
+guards continue to reject unrelated artwork. Encoded JPEG, PNG, or WebP data
+(at most 5 MiB) is stored separately under `art/`. Source filenames include
+provider plus release-vs-group identity, while persistent entries use distinct
+provider/version namespaces, preventing provider or identity collisions. A
+successful or authoritative no-match result is reusable; rate limits, timeouts,
+transport failures, and provider-unavailable states are never persisted as
+no-art. The same ladder and caches serve current, next, and +2 work, and
+generation checks prevent stale UI publication. Track Info shows only the clean
+provider name, never source URLs.
+
+Last.fm was evaluated for the secondary-provider slot. Its documented
+[`album.getInfo`](https://www.last.fm/api/show/album.getInfo) and
+[`track.getInfo`](https://www.last.fm/api/show/track.getInfo) methods require an
+API key (though not an authenticated user
+session), expose image-size URLs, and return explicit service-offline,
+temporary-error, and rate-limit states. Signalbox does not use those images:
+the current [Last.fm API terms](https://www.last.fm/api/tos) explicitly exclude images/artwork from permitted
+API use. No API-key setting is therefore exposed. fanart.tv was also evaluated;
+its [album endpoint](https://api.fanart.tv/) cleanly accepts a MusicBrainz
+release-group MBID but requires
+a project key and serves user-contributed artwork under a separate policy. It
+was not added because the extra legal/configuration surface is disproportionate
+after direct CAA release-group recovery. Offline operation and installations
+without third-party keys continue normally with CAA and cached art only.
+
+Prepared terminal cells are memory-only and keyed by encoded source path,
+requested geometry, color mode, and quality-algorithm version, so no persistent
+prepared-art migration is required for the quality algorithm change. Decode, preparation, cache-hit,
+provider-resolution, and image-download timings are available in debug output.
 
 LRCLIB is an open/community lyrics service requiring no API key. Signalbox
 identifies itself with its version and project URL, spaces requests, honors a

@@ -109,14 +109,30 @@ busy loop.
 ## Album artwork
 
 Cover Art Archive files are decoded through FFmpeg into bounded RGBA data,
-resized with aspect preservation, and converted to ANSI half-block cells.
+reduced with aspect-preserving Lanczos filtering, gently normalized and
+sharpened at the effective pixel grid, and converted to ANSI half-block cells.
+The treatment is deliberately restrained: art stays chunky, with no saturation
+boost or default dithering. A sufficiently wide/tall Now Playing pane requests
+24×12 terminal cells directly from the encoded source; medium and compact panes
+fall back through 20×10, 16×8, 12×6, and 10×5. Resolution prefers the selected release,
+then the direct canonical release-group front image, then compatible alternate
+releases and bounded album-family recovery. Track Info reports the selected
+provider as `Cover Art Archive`; raw URLs and identities remain internal.
 `album_art = auto|pixel|off` defaults to `auto`. Truecolor is preferred when
 advertised; otherwise a 256-color conversion is used. Monochrome, unsupported,
 small, loading, and failed-art states retain the complete text layout.
 
-The prepared-cell cache is keyed by source path, geometry, and color mode.
+The prepared-cell cache is keyed by source path, geometry, color mode, and
+quality-algorithm version.
 Normal progress redraws therefore do not decode or resize the image. Native
 Kitty, iTerm2, and Sixel protocols are intentionally not used.
+
+Source images and authoritative misses use provider- and identity-aware cache
+keys. Transient network, timeout, and rate-limit failures are not negative
+cached. Current and next/+2 prefetch work share the exact same resolver ladder,
+so a completed source image promotes immediately when its track starts. No
+optional artwork API key is required; Last.fm artwork is intentionally not used
+because its current API terms exclude images/artwork from permitted API use.
 
 ## Lyrics and enrichment
 

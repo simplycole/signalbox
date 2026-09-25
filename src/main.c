@@ -823,8 +823,14 @@ static void BarMainLoop (BarApp_t *app) {
 			snprintf(app->uiModel.artProvider,sizeof(app->uiModel.artProvider),"%s",art.provider);
 			snprintf(app->uiModel.artCachedPath,sizeof(app->uiModel.artCachedPath),"%s",art.cachedPath);
 			app->uiModel.artWidth=art.width; app->uiModel.artHeight=art.height;
-			tuiDebugPrint("art state=%s generation=%llu path=%s\n",art.reason,
-					(unsigned long long)app->enrichmentGeneration,art.cachedPath);
+			tuiDebugPrint ("art state=%s generation=%llu provider=%s confidence=%.2f cache_hit=%s resolution_elapsed_ms=%llu download_elapsed_ms=%llu path=%s\n",
+					art.reason,
+					(unsigned long long) app->enrichmentGeneration,
+					art.provider, art.confidence,
+					art.cacheHit ? "yes" : "no",
+					(unsigned long long) art.resolutionElapsedMs,
+					(unsigned long long) art.downloadElapsedMs,
+					art.cachedPath);
 			SbUiRendererRender(&app->uiRenderer,&app->uiModel,SB_UI_RENDER_STATE);
 		}
 		/* song finished playing, clean up things/scrobble song */

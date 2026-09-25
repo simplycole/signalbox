@@ -127,7 +127,7 @@ static void TestCompositorModalOwnership (const SbTuiRect modal,
 }
 
 static void TestBackgroundNavigationArtOrder (void) {
-	const SbTuiRect art = {6, 66, 10, 20};
+	const SbTuiRect art = {6, 66, 12, 24};
 	char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS];
 	/* Keyboard and mouse navigation share the same base-commit/art-emission
 	 * frame.  In both cases every art cell is the final writer and the full
@@ -149,6 +149,10 @@ static void TestBackgroundNavigationArtOrder (void) {
 }
 
 int main (void) {
+	assert (SbTuiPresentationNowPlayingHeight (45) == 12);
+	assert (SbTuiPresentationNowPlayingHeight (44) == 10);
+	assert (SbTuiPresentationNowPlayingHeight (39) == 10);
+	assert (SbTuiPresentationNowPlayingHeight (38) == 8);
 	/* Primary modals share width, centering, clamping, and chrome policy while
 	 * retaining content-appropriate preferred heights. */
 	const SbTuiRect helpRect = SbTuiPresentationModalRect (
@@ -192,11 +196,11 @@ int main (void) {
 	assert (narrow.height - 6 > 0); /* text title/footer leave a viewport */
 
 	/* ANSI art is clipped cell-by-cell only where the topmost overlay overlaps. */
-	const SbTuiRect artRect = {6, 66, 10, 20};
+	const SbTuiRect artRect = {6, 66, 12, 24};
 	const SbTuiRect redrawBand = SbTuiPresentationArtRedrawBand (
 			artRect, COMPOSITOR_ROWS, COMPOSITOR_COLS);
 	assert (redrawBand.y == 5 && redrawBand.x == 0);
-	assert (redrawBand.height == 12 && redrawBand.width == COMPOSITOR_COLS);
+	assert (redrawBand.height == 14 && redrawBand.width == COMPOSITOR_COLS);
 	const SbTuiRect topBand = SbTuiPresentationArtRedrawBand (
 			(SbTuiRect) {0, 4, 3, 5}, 8, 20);
 	assert (topBand.y == 0 && topBand.height == 4 && topBand.width == 20);

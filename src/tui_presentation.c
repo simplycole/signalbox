@@ -383,3 +383,7 @@ SbTuiRect SbTuiPresentationArtRedrawBand (const SbTuiRect art,
 	if (first >= end || first >= screenRows) return (SbTuiRect) {0};
 	return (SbTuiRect) {first, 0, end - first, screenCols};
 }
+
+unsigned int SbTuiPresentationNowPlayingHeight (const int screenRows) {
+	return screenRows >= 45 ? 12U : screenRows >= 39 ? 10U : 8U;
+}

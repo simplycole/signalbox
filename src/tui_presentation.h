@@ -107,3 +107,4 @@ SbTuiCellOwner SbTuiPresentationCellOwner (SbTuiRect art,
 bool SbTuiPresentationArtCellVisible (SbTuiRect overlay, int y, int x);
 SbTuiRect SbTuiPresentationArtRedrawBand (SbTuiRect art,
 		int screenRows, int screenCols);
+unsigned int SbTuiPresentationNowPlayingHeight (int screenRows);

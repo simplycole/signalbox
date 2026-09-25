@@ -255,8 +255,8 @@ album-art-test: tests/album_art_test.c src/album_art.c src/album_art.h src/platf
 	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBCURL_CFLAGS} ${LIBJSONC_CFLAGS} -o $@$(EXEEXT) tests/album_art_test.c src/album_art.c src/platform.c ${LIBCURL_LDFLAGS} ${LIBJSONC_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
-art-renderer-test: tests/art_renderer_test.c src/art_renderer.c src/art_renderer.h
-	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBSWSCALE_CFLAGS} -o $@$(EXEEXT) tests/art_renderer_test.c src/art_renderer.c ${LIBAV_LDFLAGS} ${LIBSWSCALE_LDFLAGS}
+art-renderer-test: tests/art_renderer_test.c src/art_renderer.c src/art_renderer.h src/platform.c src/platform.h
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${LIBAV_CFLAGS} ${LIBSWSCALE_CFLAGS} -o $@$(EXEEXT) tests/art_renderer_test.c src/art_renderer.c src/platform.c ${LIBAV_LDFLAGS} ${LIBSWSCALE_LDFLAGS} $(if ${WINDOWS},-lshell32 -lole32 -luuid)
 	./$@$(EXEEXT)
 
 tui-presentation-test: tests/tui_presentation_test.c src/tui_presentation.c src/tui_presentation.h src/ui_keymap.c src/ui_dispatch.h
