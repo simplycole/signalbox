@@ -105,3 +105,5 @@ bool SbTuiPresentationRectsIntersect (SbTuiRect, SbTuiRect);
 SbTuiCellOwner SbTuiPresentationCellOwner (SbTuiRect art,
 		SbTuiRect overlay, int y, int x);
 bool SbTuiPresentationArtCellVisible (SbTuiRect overlay, int y, int x);
+SbTuiRect SbTuiPresentationArtRedrawBand (SbTuiRect art,
+		int screenRows, int screenCols);

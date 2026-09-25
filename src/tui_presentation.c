@@ -372,3 +372,14 @@ bool SbTuiPresentationArtCellVisible (const SbTuiRect overlay,
 		const int y, const int x) {
 	return !SbTuiPresentationRectContains (overlay, y, x);
 }
+
+SbTuiRect SbTuiPresentationArtRedrawBand (const SbTuiRect art,
+		const int screenRows, const int screenCols) {
+	if (!SbTuiPresentationRectValid (art) || screenRows <= 0 || screenCols <= 0)
+		return (SbTuiRect) {0};
+	const int first = art.y > 0 ? art.y - 1 : 0;
+	const long long guardedEnd = (long long) art.y + art.height + 1;
+	const int end = guardedEnd < screenRows ? (int) guardedEnd : screenRows;
+	if (first >= end || first >= screenRows) return (SbTuiRect) {0};
+	return (SbTuiRect) {first, 0, end - first, screenCols};
+}

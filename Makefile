@@ -235,7 +235,7 @@ settings-values-test: tests/settings_values_test.c src/settings_values.c src/set
 	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/settings_values_test.c src/settings_values.c
 	./$@$(EXEEXT)
 
-station-browser-test: tests/station_browser_test.c src/station_browser.c src/station_browser.h
+station-browser-test: tests/station_browser_test.c src/station_browser.c src/station_browser.h src/mouse_state.h
 	${CC} ${CPPFLAGS} -std=c99 -O2 -I src ${ALL_CFLAGS} -UNDEBUG -o $@$(EXEEXT) tests/station_browser_test.c src/station_browser.c
 	./$@$(EXEEXT)
 

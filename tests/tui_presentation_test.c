@@ -51,6 +51,11 @@ static void CompositorPaintArt (
 				cells[y][x] = 'A';
 }
 
+static void CompositorPaintBase (
+		char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS], const char value) {
+	memset (cells, value, COMPOSITOR_ROWS * COMPOSITOR_COLS);
+}
+
 static void CompositorDrawModal (
 		char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS], const SbTuiRect modal,
 		const char *title) {
@@ -121,6 +126,28 @@ static void TestCompositorModalOwnership (const SbTuiRect modal,
 			assert (cells[y][x] == 'A');
 }
 
+static void TestBackgroundNavigationArtOrder (void) {
+	const SbTuiRect art = {6, 66, 10, 20};
+	char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS];
+	/* Keyboard and mouse navigation share the same base-commit/art-emission
+	 * frame.  In both cases every art cell is the final writer and the full
+	 * surrounding base remains free of displaced fragments. */
+	const char navigationBase[] = {'K', 'M'};
+	for (size_t input = 0; input < sizeof (navigationBase); input++) {
+		CompositorPaintBase (cells, 'B');
+		CompositorPaintArt (cells, art, (SbTuiRect) {0});
+		CompositorPaintBase (cells, navigationBase[input]);
+		CompositorPaintArt (cells, art, (SbTuiRect) {0});
+		for (int y = 0; y < COMPOSITOR_ROWS; y++) {
+			for (int x = 0; x < COMPOSITOR_COLS; x++) {
+				const bool inArt = SbTuiPresentationRectContains (art, y, x);
+				assert (cells[y][x] ==
+						(inArt ? 'A' : navigationBase[input]));
+			}
+		}
+	}
+}
+
 int main (void) {
 	/* Primary modals share width, centering, clamping, and chrome policy while
 	 * retaining content-appropriate preferred heights. */
@@ -166,6 +193,18 @@ int main (void) {
 
 	/* ANSI art is clipped cell-by-cell only where the topmost overlay overlaps. */
 	const SbTuiRect artRect = {6, 66, 10, 20};
+	const SbTuiRect redrawBand = SbTuiPresentationArtRedrawBand (
+			artRect, COMPOSITOR_ROWS, COMPOSITOR_COLS);
+	assert (redrawBand.y == 5 && redrawBand.x == 0);
+	assert (redrawBand.height == 12 && redrawBand.width == COMPOSITOR_COLS);
+	const SbTuiRect topBand = SbTuiPresentationArtRedrawBand (
+			(SbTuiRect) {0, 4, 3, 5}, 8, 20);
+	assert (topBand.y == 0 && topBand.height == 4 && topBand.width == 20);
+	const SbTuiRect bottomBand = SbTuiPresentationArtRedrawBand (
+			(SbTuiRect) {6, 4, 2, 5}, 8, 20);
+	assert (bottomBand.y == 5 && bottomBand.height == 3);
+	assert (!SbTuiPresentationRectValid (SbTuiPresentationArtRedrawBand (
+			(SbTuiRect) {0}, COMPOSITOR_ROWS, COMPOSITOR_COLS)));
 	const SbTuiRect noOverlap = {20, 80, 8, 12};
 	const SbTuiRect partial = {8, 76, 8, 20};
 	const SbTuiRect full = {5, 60, 20, 40};
@@ -212,6 +251,7 @@ int main (void) {
 	TestCompositorModalOwnership (testTrack, "TRACK INFO");
 	TestCompositorModalOwnership (testLyrics, "LYRICS");
 	TestCompositorModalOwnership (testDialog, "CONFIRM");
+	TestBackgroundNavigationArtOrder ();
 	/* Resized retained modals recompute ownership with no stale old clip. */
 	TestCompositorModalOwnership (SbTuiPresentationModalRect (
 			SB_TUI_MODAL_HELP, 30, 76, 40), "SIGNALBOX HELP RESIZED");

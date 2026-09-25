@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mouse_state.h"
 #include "station_browser.h"
 
 static void Link (PianoStation_t *stations, const size_t count) {
@@ -51,6 +52,10 @@ int main (void) {
 	assert (!SbStationBrowserIsCurrent (&stations[2], &stations[3]));
 	assert (SbStationBrowserMove (&browser, 0, -1) == 0);
 	assert (SbStationBrowserMove (&browser, 0, 2) == 2);
+	assert (SbStationBrowserMove (&browser, 2, SB_UI_MOUSE_WHEEL_UP) == 1);
+	assert (SbStationBrowserMove (&browser, 2, SB_UI_MOUSE_WHEEL_DOWN) == 3);
+	assert (SbStationBrowserMove (&browser, 0, SB_UI_MOUSE_WHEEL_UP) == 0);
+	assert (SbStationBrowserMove (&browser, 4, SB_UI_MOUSE_WHEEL_DOWN) == 4);
 	assert (SbStationBrowserMove (&browser, 2, 99) == 4);
 	assert (SbStationBrowserMove (&browser, 4, -99) == 0);
 	assert (SbStationBrowserScroll (&browser, 0, 0, 2) == 0);

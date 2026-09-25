@@ -79,38 +79,92 @@ static void testRetainedModalScrollBounds (void) {
 }
 
 static void testCursesWheelStateMapping (void) {
-	const uint64_t up = UINT64_C (1) << 20;
-	const uint64_t down = UINT64_C (1) << 21;
-	const uint64_t legacyDown = UINT64_C (1) << 6;
-	const uint64_t reportPosition = UINT64_C (1) << 31;
-	assert (SbUiMouseWheelDirection (up, up, down, 0, reportPosition, 2) == -1);
-	assert (SbUiMouseWheelDirection (down, up, down, 0, reportPosition, 2) == 1);
-	/* A compatibility form must carry its complete distinguishing context. */
-	assert (SbUiMouseWheelDirection (legacyDown, up, 0, legacyDown,
-			reportPosition, 1) == 0); /* A physical middle click is not a wheel. */
-	assert (SbUiMouseWheelDirection (legacyDown | reportPosition,
-			up, 0, legacyDown, reportPosition, 1) == 1);
-	assert (SbUiMouseWheelDirection (legacyDown | reportPosition,
-			up, 0, legacyDown, reportPosition, 2) == 0);
-	assert (SbUiMouseWheelDirection (up | down, up, down, 0,
-			reportPosition, 2) == 0);
-	assert (SbUiMouseWheelDirection (0, up, down, legacyDown,
-			reportPosition, 1) == 0);
-	/* Actual local ncurses ABI v1 values observed on macOS. */
-	assert (SbUiMouseWheelDirection (UINT64_C (0x80000),
-			UINT64_C (0x80000), 0, UINT64_C (0x80),
-			UINT64_C (0x8000000), 1) ==
-			SB_UI_SCROLL_TOWARD_TOP);
-	/* BUTTON1_CLICKED is ambiguous and must remain a click, even in a modal. */
-	assert (SbUiMouseWheelDirection (UINT64_C (0x4),
-			UINT64_C (0x80000), 0, UINT64_C (0x80),
-			UINT64_C (0x8000000), 1) == 0);
+	SbUiMouseWheelMasks masks = {
+			.wheelUpPressed = UINT64_C (0x80000),
+			.wheelUpClicked = UINT64_C (0x100000),
+			.wheelDownPressed = UINT64_C (0x2000000),
+			.wheelDownClicked = UINT64_C (0x4000000),
+			.reportPosition = UINT64_C (0x8000000),
+	};
+	assert (SbUiMouseWheelDirection (masks.wheelUpPressed, masks) ==
+			SB_UI_MOUSE_WHEEL_UP);
+	assert (SbUiMouseWheelDirection (masks.wheelUpClicked, masks) ==
+			SB_UI_MOUSE_WHEEL_UP);
+	assert (SbUiMouseWheelDirection (masks.wheelDownPressed, masks) ==
+			SB_UI_MOUSE_WHEEL_DOWN);
+	assert (SbUiMouseWheelDirection (masks.wheelDownClicked, masks) ==
+			SB_UI_MOUSE_WHEEL_DOWN);
+	assert (SbUiMouseWheelDirection (UINT64_C (0x2), masks) ==
+			SB_UI_MOUSE_WHEEL_NONE); /* BUTTON1_PRESSED */
+	assert (SbUiMouseWheelDirection (UINT64_C (0x4), masks) ==
+			SB_UI_MOUSE_WHEEL_NONE); /* BUTTON1_CLICKED */
+	assert (SbUiMouseWheelDirection (UINT64_C (0x100), masks) ==
+			SB_UI_MOUSE_WHEEL_NONE); /* BUTTON2_CLICKED */
+	assert (SbUiMouseWheelDirection (UINT64_C (0x4000), masks) ==
+			SB_UI_MOUSE_WHEEL_NONE); /* BUTTON3_CLICKED */
+	assert (SbUiMouseWheelDirection (UINT64_C (0x20000000), masks) ==
+			SB_UI_MOUSE_WHEEL_NONE); /* Unknown bit. */
+	assert (SbUiMouseWheelDirection (masks.wheelUpPressed |
+			masks.wheelDownPressed, masks) == SB_UI_MOUSE_WHEEL_NONE);
+
+	/* Apple ncurses v1 maps X10 button 5 to REPORT_MOUSE_POSITION alone.
+	 * It is accepted only when the exact terminal/build fallback is enabled. */
+	assert (SbUiMouseWheelDirection (masks.reportPosition, masks) ==
+			SB_UI_MOUSE_WHEEL_NONE);
+	masks.appleTerminalNcursesV1 = 1;
+	const int appleWheelDown = SbUiMouseWheelDirection (
+			masks.reportPosition, masks);
+	assert (appleWheelDown == SB_UI_MOUSE_WHEEL_DOWN);
+	/* Physical decoding is identical with or without a modal; UI ownership and
+	 * background navigation are decided only after decoding. */
+	assert (SbUiMouseWheelOwnedByModal (1, appleWheelDown));
+	assert (!SbUiMouseWheelOwnedByModal (0, appleWheelDown));
+	enum { TEST_KEY_MOUSE = 409, TEST_KEY_UP = 1001, TEST_KEY_DOWN = 1002 };
+	assert (SbUiMouseWheelNavigationKey (TEST_KEY_MOUSE, appleWheelDown,
+			TEST_KEY_UP, TEST_KEY_DOWN) == TEST_KEY_DOWN);
+	assert (SbUiMouseWheelDirection (masks.reportPosition | UINT64_C (0x2),
+			masks) == SB_UI_MOUSE_WHEEL_NONE);
 	assert (SbUiMouseWheelOwnedByModal (1, SB_UI_SCROLL_TOWARD_TOP));
 	assert (SbUiMouseWheelOwnedByModal (1, SB_UI_SCROLL_TOWARD_BOTTOM));
 	assert (!SbUiMouseWheelOwnedByModal (1, 0));
 	assert (!SbUiMouseWheelOwnedByModal (0, SB_UI_SCROLL_TOWARD_TOP));
 	assert (SbUiMouseWheelFromNativeDelta (120) == SB_UI_SCROLL_TOWARD_TOP);
 	assert (SbUiMouseWheelFromNativeDelta (-120) == SB_UI_SCROLL_TOWARD_BOTTOM);
+	assert (SbUiMouseWheelNavigationKey (TEST_KEY_MOUSE,
+			SbUiMouseWheelFromNativeDelta (120), TEST_KEY_UP,
+			TEST_KEY_DOWN) == TEST_KEY_UP);
+	assert (SbUiMouseWheelNavigationKey (TEST_KEY_MOUSE,
+			SbUiMouseWheelFromNativeDelta (-120), TEST_KEY_UP,
+			TEST_KEY_DOWN) == TEST_KEY_DOWN);
+	/* An ordinary click or unsupported/unknown event stays KEY_MOUSE and never
+	 * enters the background Up/Down navigation path. */
+	assert (SbUiMouseWheelNavigationKey (TEST_KEY_MOUSE,
+			SB_UI_MOUSE_WHEEL_NONE, TEST_KEY_UP,
+			TEST_KEY_DOWN) == TEST_KEY_MOUSE);
+	assert (SbUiMouseListMove (2, 5, SB_UI_MOUSE_WHEEL_UP) == 1);
+	assert (SbUiMouseListMove (2, 5, SB_UI_MOUSE_WHEEL_DOWN) == 3);
+	assert (SbUiMouseListMove (0, 5, SB_UI_MOUSE_WHEEL_UP) == 0);
+	assert (SbUiMouseListMove (4, 5, SB_UI_MOUSE_WHEEL_DOWN) == 4);
+	assert (SbUiMouseListMove (9, 0, SB_UI_MOUSE_WHEEL_DOWN) == 0);
+}
+
+static void testReadOnlyModalWheelIntegration (void) {
+	/* Exercise three independent modal instances with the same centralized
+	 * direction values used by the read-only modal routes. */
+	SbUiModalScrollState modal[3];
+	for (size_t index = 0; index < sizeof (modal) / sizeof (*modal); index++) {
+		SbUiModalScrollOpen (&modal[index], index + 1);
+		SbUiModalScrollClamp (&modal[index], 20, 8);
+		SbUiModalScrollWheel (&modal[index], SB_UI_MOUSE_WHEEL_DOWN);
+		assert (modal[index].offset == 3);
+		SbUiModalScrollWheel (&modal[index], SB_UI_MOUSE_WHEEL_UP);
+		assert (modal[index].offset == 0);
+		SbUiModalScrollWheel (&modal[index], SB_UI_MOUSE_WHEEL_UP);
+		assert (modal[index].offset == 0);
+		modal[index].offset = modal[index].maximum - 1;
+		SbUiModalScrollWheel (&modal[index], SB_UI_MOUSE_WHEEL_DOWN);
+		assert (modal[index].offset == modal[index].maximum);
+	}
 }
 
 static void testMouseBitNames (void) {
@@ -1058,7 +1112,8 @@ static void testRapidCurrentReplacementPublishesNewestOnly (void) {
 
 int main (void) {
 	testNormalization (); testRetainedModalScroll (); testRetainedModalScrollBounds ();
-	testCursesWheelStateMapping (); testMouseBitNames (); testUpcomingHeight ();
+	testCursesWheelStateMapping (); testReadOnlyModalWheelIntegration ();
+	testMouseBitNames (); testUpcomingHeight ();
 	testMusicBrainzHttpStates (); testLrclibTransientPolicy ();
 	testCacheKey (); testBestMatch (); testRichMusicBrainzMetadata ();
 	testAlbumDateSemanticsRegressions (); testDeathCabFallbackAndJackKaysHappyPath ();
