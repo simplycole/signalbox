@@ -91,8 +91,12 @@ Highlights
   and full in-memory session history
 - Synced LRCLIB lyrics with an adaptive previous/current/next strip and
   current-line highlighting in the full Lyrics view
-- Background MusicBrainz enrichment, Cover Art Archive resolution, queue
-  prefetch, and schema-versioned persistent enrichment and artwork caches
+- Background MusicBrainz enrichment with canonical recording identity, selected
+  release, release-group-derived original dates, edition dates, type, country,
+  label/catalog, ISRC, and concise source-labeled genres or tags when available;
+  Cover Art
+  Archive resolution, bounded next/+2 enrichment prefetch, playlist refill, and
+  schema-versioned persistent enrichment and artwork caches
 - Native TUI flows for station creation, rename/delete, QuickMix, genres,
   seeds, feedback, bookmarks, and station modes
 - Configurable bindings with an in-app, responsive, scrollable HELP overlay
@@ -100,6 +104,9 @@ Highlights
   plaintext is never written by the TUI
 - Classic UI, FIFO remote control, audio pipe, proxy, and event-command
   compatibility inherited from pianobar
+- Process-lived macOS libao/CoreAudio output across compatible track transitions,
+  avoiding unsafe per-track AudioUnit teardown while preserving Linux, Windows,
+  and audio-pipe close behavior
 
 Controls
 --------

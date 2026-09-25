@@ -137,14 +137,27 @@ static void testUpcomingHeight (void) {
 }
 
 static void testMusicBrainzHttpStates (void) {
+	assert (SbMusicBrainzRateDelayMs (0, 100) == 0);
+	assert (SbMusicBrainzRateDelayMs (100, 100) == 1000);
+	assert (SbMusicBrainzRateDelayMs (100, 1099) == 1);
+	assert (SbMusicBrainzRateDelayMs (100, 1100) == 0);
+	assert (SbMusicBrainzRequestBudget () == 5);
 	assert (SbMusicBrainzHttpStatus (503, 0) == SB_LOOKUP_UNAVAILABLE);
-	assert (SbMusicBrainzHttpStatus (500, 0) == SB_LOOKUP_ERROR);
+	assert (SbMusicBrainzHttpStatus (500, 0) == SB_LOOKUP_UNAVAILABLE);
+	assert (SbMusicBrainzHttpStatus (429, 0) == SB_LOOKUP_UNAVAILABLE);
 	assert (SbMusicBrainzHttpStatus (200, 0) == SB_LOOKUP_LOADING);
-	assert (SbMusicBrainzHttpStatus (503, 7) == SB_LOOKUP_ERROR);
+	assert (SbMusicBrainzHttpStatus (503, 7) == SB_LOOKUP_UNAVAILABLE);
 	assert (SbMusicBrainzShouldRetry (503, 0, 1));
 	assert (!SbMusicBrainzShouldRetry (503, 0, 2));
-	assert (!SbMusicBrainzShouldRetry (500, 0, 1));
-	assert (!SbMusicBrainzShouldRetry (503, 7, 1));
+	const long transient[] = {429, 500, 502, 503, 504};
+	for (size_t i = 0; i < sizeof (transient) / sizeof (*transient); i++)
+		assert (SbMusicBrainzShouldRetry (transient[i], CURLE_OK, 1));
+	assert (SbMusicBrainzShouldRetry (0, CURLE_OPERATION_TIMEDOUT, 1));
+	assert (SbMusicBrainzShouldRetry (503, CURLE_COULDNT_CONNECT, 1));
+	assert (!SbMusicBrainzShouldRetry (404, CURLE_OK, 1));
+	assert (SbMusicBrainzRetryDelayMs (0) == 1000);
+	assert (SbMusicBrainzRetryDelayMs (3) == 3000);
+	assert (SbMusicBrainzRetryDelayMs (30) == 5000);
 	/* A successful bounded second response proceeds to normal parsing. */
 	assert (SbMusicBrainzHttpStatus (200, 0) == SB_LOOKUP_LOADING);
 }
@@ -175,6 +188,14 @@ static void testCacheKey (void) {
 	SbTrackCacheKey ("musicbrainz", &a, ka, sizeof (ka));
 	SbTrackCacheKey ("musicbrainz", &b, kb, sizeof (kb));
 	assert (strcmp (ka, kb) == 0);
+	SbTrackIdentitySetPandoraId (&a, "pandora-recording-a");
+	SbTrackIdentitySetPandoraId (&b, "pandora-recording-b");
+	SbTrackCacheKey ("musicbrainz", &a, ka, sizeof (ka));
+	SbTrackCacheKey ("musicbrainz", &b, kb, sizeof (kb));
+	assert (strcmp (ka, kb) == 0); /* provider data remains reusable */
+	SbTrackWorkKey (&a, ka, sizeof (ka));
+	SbTrackWorkKey (&b, kb, sizeof (kb));
+	assert (strcmp (ka, kb) != 0);
 }
 
 static void testBestMatch (void) {
@@ -190,6 +211,280 @@ static void testBestMatch (void) {
 	assert (strcmp (result.recordingId, "rec-1") == 0);
 	assert (strcmp (result.releaseId, "rel-1") == 0);
 	assert (result.confidence == 1.0);
+}
+
+static void testRichMusicBrainzMetadata (void) {
+	const char json[] = "{\"recordings\":[{\"id\":\"rec-feathers\","
+		"\"title\":\"Feathers\",\"first-release-date\":\"2007\","
+		"\"artist-credit\":[{\"name\":\"Coheed and Cambria\","
+		"\"artist\":{\"id\":\"artist-coheed\"}}],"
+		"\"isrcs\":[\"USSM10703925\",\"us-sm1-07-03924\"],"
+		"\"genres\":[{\"name\":\"alternative rock\",\"count\":5},"
+		"{\"name\":\"Progressive Rock\",\"count\":8},"
+		"{\"name\":\"progressive-rock\",\"count\":2}],"
+		"\"tags\":[{\"name\":\"seen live\",\"count\":40}],"
+		"\"releases\":[{\"id\":\"rel-nwft\",\"title\":\"No World for Tomorrow\","
+		"\"date\":\"2007-10-23\",\"country\":\"US\",\"status\":\"Official\","
+		"\"artist-credit\":[{\"name\":\"Coheed and Cambria\"}],"
+		"\"label-info\":[{\"catalog-number\":\"BAD\",\"label\":{\"name\":\"\"}},"
+		"{\"catalog-number\":\"88697 10270 2\",\"label\":{\"name\":\"Columbia\"}},"
+		"{\"catalog-number\":\"SECOND\",\"label\":{\"name\":\"Legacy\"}}],"
+		"\"release-group\":{\"id\":\"rg-nwft\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2007-10-23\"}}]}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "Coheed and Cambria", "Feathers",
+			"No World for Tomorrow", NULL, 0);
+	assert (SbMusicBrainzParse (json, &id, &result));
+	assert (strcmp (result.release, "No World for Tomorrow") == 0);
+	assert (strcmp (result.releaseDate, "2007-10-23") == 0);
+	assert (strcmp (result.firstReleaseDate, "2007-10-23") == 0);
+	assert (strcmp (result.releaseType, "Album") == 0);
+	assert (strcmp (result.releaseCountry, "US") == 0);
+	assert (strcmp (result.label, "Columbia") == 0);
+	assert (strcmp (result.catalogNumber, "88697 10270 2") == 0);
+	assert (strcmp (result.isrc, "USSM10703924") == 0);
+	assert (strcmp (result.genres, "Progressive Rock, alternative rock") == 0);
+	assert (result.categorySource == SB_METADATA_CATEGORIES_GENRES);
+
+	char display[2048];
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Release Date: 10/23/2007") != NULL);
+	assert (strstr (display, "Original Release:") == NULL);
+	assert (strstr (display, "Edition Release:") == NULL);
+	assert (strstr (display, "Label: Columbia\nCatalog: 88697 10270 2") != NULL);
+	assert (strstr (display, "ISRC: USSM10703924") != NULL);
+	assert (strstr (display, "Genres: Progressive Rock") != NULL);
+	assert (strstr (display, "Tags:") == NULL);
+	assert (strstr (display, "rec-feathers") == NULL);
+	assert (strstr (display, "rg-nwft") == NULL);
+	strcpy (result.releaseCountry, "XE");
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Country: Europe") != NULL);
+
+	/* A fallback edition must not inherit release-specific values from the
+	 * previously selected edition. */
+	const char alternate[] = "{\"releases\":[{\"id\":\"rel-reissue\","
+		"\"title\":\"No World for Tomorrow\",\"date\":\"2023\","
+		"\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Coheed and Cambria\"}],"
+		"\"release-group\":{\"id\":\"rg-nwft\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2007-10-23\"}}]}";
+	assert (SbMusicBrainzSelectRelease (alternate, &id, &result));
+	assert (strcmp (result.releaseId, "rel-reissue") == 0);
+	assert (result.releaseCountry[0] == '\0' && result.label[0] == '\0' &&
+			result.catalogNumber[0] == '\0');
+}
+
+static void testAlbumDateSemanticsRegressions (void) {
+	const char dashboardSearch[] = "{\"recordings\":[{\"id\":\"dashboard-rec\","
+		"\"title\":\"Screaming Infidelities\",\"first-release-date\":\"2011-10-10\","
+		"\"artist-credit\":[{\"name\":\"Dashboard Confessional\","
+		"\"artist\":{\"id\":\"dashboard-artist\"}}]}]}";
+	const char dashboardAlbum[] = "{\"releases\":[{\"id\":\"dashboard-release\","
+		"\"title\":\"The Places You Have Come to Fear the Most\","
+		"\"date\":\"2001-03-20\",\"status\":\"Official\","
+		"\"artist-credit\":[{\"name\":\"Dashboard Confessional\"}],"
+		"\"release-group\":{\"id\":\"dashboard-group\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2001-03-20\"}}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "Dashboard Confessional", "Screaming Infidelities",
+			"The Places You Have Come to Fear the Most", NULL, 0);
+	assert (SbMusicBrainzParse (dashboardSearch, &id, &result));
+	assert (result.status == SB_LOOKUP_AVAILABLE);
+	assert (result.releaseGroupId[0] == '\0' && result.firstReleaseDate[0] == '\0');
+	assert (SbMusicBrainzShouldRetry (503, CURLE_OK, 1));
+	assert (SbMusicBrainzSelectRelease (dashboardAlbum, &id, &result));
+	assert (strcmp (result.firstReleaseDate, "2001-03-20") == 0);
+	assert (strcmp (result.releaseGroupId, "dashboard-group") == 0);
+
+	SbMetadataResult unavailable;
+	assert (SbMusicBrainzParse (dashboardSearch, &id, &unavailable));
+	assert (SbMusicBrainzShouldRetry (503, CURLE_OK, 1));
+	assert (!SbMusicBrainzShouldRetry (503, CURLE_OK, 2));
+	assert (unavailable.status == SB_LOOKUP_AVAILABLE && unavailable.release[0] == '\0' &&
+			unavailable.firstReleaseDate[0] == '\0');
+
+	const char brandSearch[] = "{\"recordings\":[{\"id\":\"brand-rec\","
+		"\"title\":\"I Will Play My Game Beneath The Spin Light\","
+		"\"first-release-date\":\"2017-10-15\",\"artist-credit\":["
+		"{\"name\":\"Brand New\",\"artist\":{\"id\":\"brand-artist\"}}]}]}";
+	const char deja[] = "{\"releases\":[{\"id\":\"825f384f-efcd-475f-b69c-8b618feb88f4\","
+		"\"title\":\"Deja Entendu\",\"date\":\"2003-06-17\",\"status\":\"Official\","
+		"\"artist-credit\":[{\"name\":\"Brand New\"}],\"release-group\":{"
+		"\"id\":\"6917ec0c-3d53-3835-bd9d-d079d70c1ce0\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2003-06-17\"}}]}";
+	SbTrackIdentitySet (&id, "Brand New", "I Will Play My Game Beneath The Spin Light",
+			"Deja Entendu", NULL, 0);
+	assert (SbMusicBrainzParse (brandSearch, &id, &result));
+	assert (result.firstReleaseDate[0] == '\0');
+	assert (SbMusicBrainzSelectRelease (deja, &id, &result));
+	assert (strcmp (result.firstReleaseDate, "2003-06-17") == 0);
+	assert (strcmp (result.releaseDate, "2003-06-17") == 0);
+	assert (strcmp (result.firstReleaseDate, "2017-10-15") != 0);
+
+	strcpy (result.firstReleaseDate, "2017-10-15");
+	strcpy (result.releaseDate, "2003-06-17");
+	assert (!SbMetadataValidateDates (&result));
+	assert (result.firstReleaseDate[0] == '\0');
+	assert (strcmp (result.releaseDate, "2003-06-17") == 0);
+	char display[1024];
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Original Release:") == NULL);
+	assert (strstr (display, "Edition Release: 06/17/2003") != NULL);
+}
+
+static void testDeathCabFallbackAndJackKaysHappyPath (void) {
+	const char plansSearch[] = "{\"recordings\":[{\"id\":\"plans-rec\","
+		"\"title\":\"I Will Follow You into the Dark\",\"artist-credit\":["
+		"{\"name\":\"Death Cab For Cutie\",\"artist\":{\"id\":\"dcfc\"}}]}]}";
+	const char plansAlbum[] = "{\"releases\":[{\"id\":\"plans-release\","
+		"\"title\":\"Plans\",\"date\":\"2005-08-30\",\"status\":\"Official\","
+		"\"artist-credit\":[{\"name\":\"Death Cab for Cutie\"}],\"release-group\":{"
+		"\"id\":\"plans-group\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2005-08-30\"}}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "Death Cab For Cutie", "I Will Follow You into the Dark",
+			"Plans", NULL, 0);
+	assert (SbMusicBrainzParse (plansSearch, &id, &result));
+	assert (result.status == SB_LOOKUP_AVAILABLE && result.release[0] == '\0');
+	assert (SbMusicBrainzShouldRetry (503, CURLE_OK, 1));
+	assert (SbMusicBrainzSelectRelease (plansAlbum, &id, &result));
+	assert (strcmp (result.release, "Plans") == 0);
+	assert (strcmp (result.firstReleaseDate, "2005-08-30") == 0);
+
+	const char jackSearch[] = "{\"recordings\":[{\"id\":\"jack-rec\","
+		"\"title\":\"Drinking Song\",\"artist-credit\":[{\"name\":\"Jack Kays\","
+		"\"artist\":{\"id\":\"jack\"}}],\"releases\":[{\"id\":\"deadbeat-release\","
+		"\"title\":\"DEADBEAT! - Disc 1\",\"date\":\"2024-08-23\","
+		"\"country\":\"XW\",\"status\":\"Official\",\"artist-credit\":["
+		"{\"name\":\"Jack Kays\"}],\"label-info\":[{\"catalog-number\":\"19687235072\","
+		"\"label\":{\"name\":\"Columbia\"}}],\"release-group\":{"
+		"\"id\":\"deadbeat-group\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2024-08-23\"}}]}]}";
+	SbTrackIdentitySet (&id, "Jack Kays", "Drinking Song", "DEADBEAT! - Disc 1", NULL, 0);
+	assert (SbMusicBrainzParse (jackSearch, &id, &result));
+	assert (strcmp (result.firstReleaseDate, "2024-08-23") == 0);
+	assert (strcmp (result.releaseType, "Album") == 0);
+	assert (strcmp (result.label, "Columbia") == 0);
+	char display[1024];
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Country: Worldwide") != NULL);
+}
+
+static void testProgressiveMetadataPublication (void) {
+	SbMetadataResolver resolver; SbMetadataResult basic, rich, observed;
+	SbMetadataResolverInit (&resolver); SbMetadataResultInit (&basic);
+	basic.status = SB_LOOKUP_AVAILABLE; strcpy (basic.provider, "MusicBrainz");
+	strcpy (basic.artist, "Artist"); strcpy (basic.title, "Track"); basic.confidence = 1.0;
+	SbMetadataResolverPublishProgress (&resolver, 9, &basic);
+	assert (SbMetadataResolverPoll (&resolver, 9, &observed));
+	assert (strcmp (observed.title, "Track") == 0 && observed.release[0] == '\0');
+	rich = basic; strcpy (rich.release, "Album"); strcpy (rich.releaseId, "release");
+	strcpy (rich.releaseGroupId, "group"); strcpy (rich.firstReleaseDate, "2020");
+	SbMetadataResolverPublishProgress (&resolver, 9, &rich);
+	assert (SbMetadataResolverPoll (&resolver, 9, &observed));
+	assert (strcmp (observed.release, "Album") == 0);
+	SbMetadataResolverPublishProgress (&resolver, 8, &basic);
+	assert (!SbMetadataResolverPoll (&resolver, 9, &observed));
+	SbMetadataResolverDestroy (&resolver);
+}
+
+static void testDeluxeDatesAndDetailMerge (void) {
+	const char search[] = "{\"recordings\":[{\"id\":\"rec-foo\",\"title\":\"Song\","
+		"\"artist-credit\":[{\"name\":\"Artist\",\"artist\":{\"id\":\"a\"}}],"
+		"\"releases\":[{\"id\":\"deluxe\",\"title\":\"Foo (20th Anniversary Deluxe)\","
+		"\"date\":\"2025-05\",\"status\":\"Official\","
+		"\"artist-credit\":[{\"name\":\"Artist\"}],\"release-group\":{\"id\":\"foo-group\","
+		"\"primary-type\":\"Album\",\"first-release-date\":\"2005\"}}]}]}";
+	const char detail[] = "{\"id\":\"deluxe\",\"title\":\"Foo (20th Anniversary Deluxe)\","
+		"\"date\":\"2025-05\",\"country\":\"GB\",\"label-info\":["
+		"{\"catalog-number\":\"CAT-20\",\"label\":{\"name\":\"Example Records\"}}],"
+		"\"release-group\":{\"id\":\"foo-group\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2005\"}}";
+	const char group[] = "{\"id\":\"foo-group\",\"primary-type\":\"Album\","
+		"\"first-release-date\":\"2005\",\"genres\":["
+		"{\"name\":\"Art Rock\",\"count\":4}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "Artist", "Song", "Foo (20th Anniversary Deluxe)", NULL, 0);
+	assert (SbMusicBrainzParse (search, &id, &result));
+	/* The detail helper uses the same 503 -> retry -> successful parse policy. */
+	assert (SbMusicBrainzShouldRetry (503, CURLE_OK, 1));
+	assert (SbMusicBrainzApplyReleaseDetail (detail, &result));
+	assert (SbMusicBrainzApplyReleaseGroupDetail (group, &result));
+	assert (strcmp (result.firstReleaseDate, "2005") == 0);
+	assert (strcmp (result.releaseDate, "2025-05") == 0);
+	assert (strcmp (result.label, "Example Records") == 0);
+	assert (strcmp (result.catalogNumber, "CAT-20") == 0);
+	assert (strcmp (result.genres, "Art Rock") == 0);
+	char display[1024];
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Original Release: 2005") != NULL);
+	assert (strstr (display, "Edition Release: 05/2025") != NULL);
+}
+
+static void testWeakMetadataAndTransientDetail (void) {
+	const char json[] = "{\"recordings\":[{\"id\":\"rec\",\"title\":\"Song\","
+		"\"artist-credit\":[{\"name\":\"Artist\",\"artist\":{\"id\":\"a\"}}]}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "Artist", "Song", "Missing Album", NULL, 0);
+	assert (SbMusicBrainzParse (json, &id, &result));
+	assert (result.status == SB_LOOKUP_AVAILABLE && result.release[0] == '\0');
+	SbMetadataResult before = result;
+	assert (!SbMusicBrainzApplyReleaseDetail ("not-json", &result));
+	assert (memcmp (&before, &result, sizeof (result)) == 0);
+	char *serialized = SbMetadataSerialize (&result); SbMetadataResult restored;
+	assert (serialized != NULL && SbMetadataDeserialize (serialized, &restored));
+	free (serialized);
+	assert (restored.status == SB_LOOKUP_AVAILABLE);
+	assert (strcmp (restored.artist, "Artist") == 0 && restored.release[0] == '\0');
+	char display[1024];
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Canonical Artist: Artist") != NULL);
+	assert (strstr (display, "Release:") == NULL);
+	assert (strstr (display, "Genres:") == NULL && strstr (display, "Tags:") == NULL);
+}
+
+static void testTagFallbackAndMetadataCacheRoundTrip (void) {
+	const char json[] = "{\"recordings\":[{\"id\":\"rec\",\"title\":\"Song\","
+		"\"artist-credit\":[{\"name\":\"Artist\",\"artist\":{\"id\":\"a\"}}],"
+		"\"isrcs\":[\"invalid\",\"ZZAAA2400001\"],\"tags\":["
+		"{\"name\":\"space rock\",\"count\":9},{\"name\":\"SPACE-ROCK\",\"count\":8},"
+		"{\"name\":\"psychedelic rock\",\"count\":7},{\"name\":\" art rock \",\"count\":6},"
+		"{\"name\":\"progressive rock\",\"count\":5},{\"name\":\"dream pop\",\"count\":4},"
+		"{\"name\":\"shoegaze\",\"count\":3},{\"name\":\"noise\",\"count\":0}]}]}";
+	SbTrackIdentity id; SbMetadataResult result, restored;
+	SbTrackIdentitySet (&id, "Artist", "Song", NULL, NULL, 0);
+	assert (SbMusicBrainzParse (json, &id, &result));
+	assert (strcmp (result.genres,
+			"space rock, psychedelic rock, art rock, progressive rock, dream pop") == 0);
+	assert (result.categorySource == SB_METADATA_CATEGORIES_TAGS);
+	assert (strcmp (result.isrc, "ZZAAA2400001") == 0);
+	strcpy (result.release, "Cached Release"); strcpy (result.releaseDate, "2024-09-03");
+	strcpy (result.firstReleaseDate, "1999"); strcpy (result.releaseType, "Album");
+	strcpy (result.releaseCountry, "JP"); strcpy (result.label, "Cache Label");
+	strcpy (result.catalogNumber, "CACHE-1"); strcpy (result.releaseId, "release-id");
+	strcpy (result.releaseGroupId, "group-id");
+	char *serialized = SbMetadataSerialize (&result); assert (serialized != NULL);
+	assert (SbMetadataDeserialize (serialized, &restored)); free (serialized);
+	assert (strcmp (restored.release, result.release) == 0);
+	assert (strcmp (restored.firstReleaseDate, result.firstReleaseDate) == 0);
+	assert (strcmp (restored.releaseType, result.releaseType) == 0);
+	assert (strcmp (restored.releaseCountry, result.releaseCountry) == 0);
+	assert (strcmp (restored.label, result.label) == 0);
+	assert (strcmp (restored.catalogNumber, result.catalogNumber) == 0);
+	assert (strcmp (restored.isrc, result.isrc) == 0);
+	assert (strcmp (restored.genres, result.genres) == 0);
+	assert (restored.categorySource == SB_METADATA_CATEGORIES_TAGS);
+	char display[1024];
+	assert (SbMetadataFormatAvailableFields (&restored, display, sizeof (display)));
+	assert (strstr (display, "Tags: space rock") != NULL);
+	assert (strstr (display, "Genres:") == NULL);
+	/* Deserialization is defensive even within the current schema. */
+	strcpy (result.firstReleaseDate, "2025-01-01");
+	strcpy (result.releaseDate, "2024-09-03");
+	serialized = SbMetadataSerialize (&result); assert (serialized != NULL);
+	assert (SbMetadataDeserialize (serialized, &restored)); free (serialized);
+	assert (restored.firstReleaseDate[0] == '\0');
+	assert (strcmp (restored.releaseDate, "2024-09-03") == 0);
 }
 
 static void testAlbumAwareArtRelease (void) {
@@ -220,6 +515,94 @@ static void testAlbumAwareArtRelease (void) {
 	SbMetadataResultInit (&result);
 	assert (SbMusicBrainzSelectArtRelease (deluxe, &id, &result));
 	assert (strcmp (result.releaseId, "deluxe") == 0);
+}
+
+static void testAlbumFamilyFallbackAndCompletion (void) {
+	char family[SB_ENRICH_TEXT_MAX];
+	assert (SbMusicBrainzAlbumFamilyTitle ("Sing the Sorrow (Deluxe)",
+			family, sizeof (family)));
+	assert (strcmp (family, "Sing the Sorrow") == 0);
+	assert (SbMusicBrainzAlbumFamilyTitle (
+			"From Under the Cork Tree (20th Anniversary Deluxe)",
+			family, sizeof (family)));
+	assert (strcmp (family, "From Under the Cork Tree") == 0);
+	assert (!SbMusicBrainzAlbumFamilyTitle ("Songs: Ohia",
+			family, sizeof (family)));
+	assert (strcmp (family, "Songs: Ohia") == 0);
+	assert (!SbMusicBrainzAlbumFamilyTitle ("The Wall (Disc 2)",
+			family, sizeof (family)));
+	assert (strcmp (family, "The Wall (Disc 2)") == 0);
+	assert (!SbMusicBrainzAlbumFamilyTitle ("Soundtrack, Vol. 2",
+			family, sizeof (family)));
+
+	/* Exact lookup has no usable release; the one conservative family query
+	 * selects an edition, then the same post-selection completion state machine
+	 * requires release detail followed by release-group detail. */
+	const char exact[] = "{\"releases\":[]}";
+	const char familySearch[] = "{\"releases\":[{\"id\":\"unrelated-compilation\","
+			"\"title\":\"Goth Rock Collection\",\"status\":\"Official\","
+			"\"artist-credit\":[{\"name\":\"Various Artists\"}],"
+			"\"release-group\":{\"id\":\"comp-group\",\"primary-type\":\"Album\","
+			"\"secondary-types\":[\"Compilation\"]}},{\"id\":\"afi-deluxe\","
+			"\"title\":\"Sing the Sorrow (Deluxe)\",\"date\":\"2023\","
+			"\"status\":\"Official\",\"artist-credit\":[{\"name\":\"AFI\"}],"
+			"\"release-group\":{\"id\":\"afi-group\"}}]}";
+	const char releaseDetail[] = "{\"id\":\"afi-deluxe\","
+			"\"title\":\"Sing the Sorrow (Deluxe)\",\"date\":\"2023-03-10\","
+			"\"country\":\"US\",\"label-info\":[{\"catalog-number\":\"AFI-20\","
+			"\"label\":{\"name\":\"DreamWorks\"}}],"
+			"\"release-group\":{\"id\":\"afi-group\"}}";
+	const char groupDetail[] = "{\"id\":\"afi-group\","
+			"\"primary-type\":\"Album\",\"first-release-date\":\"2003-03-11\","
+			"\"tags\":[{\"name\":\"alternative rock\",\"count\":4}]}";
+	SbTrackIdentity id; SbMetadataResult result;
+	SbTrackIdentitySet (&id, "AFI", "Girl's Not Grey",
+			"Sing the Sorrow (Deluxe)", NULL, 0);
+	SbMetadataResultInit (&result);
+	assert (!SbMusicBrainzSelectRelease (exact, &id, &result));
+	assert (SbMusicBrainzSelectRelease (familySearch, &id, &result));
+	assert (strcmp (result.releaseId, "afi-deluxe") == 0);
+	assert (SbMusicBrainzNextCompletion (&result, "", "") ==
+			SB_METADATA_COMPLETION_RELEASE);
+	assert (SbMusicBrainzApplyReleaseDetail (releaseDetail, &result));
+	assert (SbMusicBrainzNextCompletion (&result, result.releaseId, "") ==
+			SB_METADATA_COMPLETION_RELEASE_GROUP);
+	assert (SbMusicBrainzApplyReleaseGroupDetail (groupDetail, &result));
+	assert (SbMusicBrainzNextCompletion (&result, result.releaseId,
+			result.releaseGroupId) == SB_METADATA_COMPLETION_NONE);
+	assert (strcmp (result.firstReleaseDate, "2003-03-11") == 0);
+	assert (result.categorySource == SB_METADATA_CATEGORIES_TAGS);
+	char display[1024];
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Original Release: 03/11/2003") != NULL);
+	assert (strstr (display, "Edition Release: 03/10/2023") != NULL);
+
+	/* A release chosen directly by the album lookup is not terminal: missing
+	 * group facts explicitly schedule the downstream group request. */
+	const char pageAvenue[] = "{\"releases\":[{\"id\":\"page-release\","
+			"\"title\":\"Page Avenue\",\"date\":\"2004-05-10\",\"country\":\"XE\","
+			"\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Story of the Year\"}],"
+			"\"label-info\":[{\"catalog-number\":\"9 48438-2\","
+			"\"label\":{\"name\":\"Maverick\"}}],"
+			"\"release-group\":{\"id\":\"page-group\"}}]}";
+	SbTrackIdentitySet (&id, "Story Of The Year", "Anthem of Our Dying Day",
+			"Page Avenue", NULL, 0);
+	SbMetadataResultInit (&result);
+	assert (SbMusicBrainzSelectRelease (pageAvenue, &id, &result));
+	assert (SbMusicBrainzNextCompletion (&result, "", "") ==
+			SB_METADATA_COMPLETION_RELEASE_GROUP);
+	const char pageGroup[] = "{\"id\":\"page-group\","
+			"\"primary-type\":\"Album\",\"first-release-date\":\"2003-09-16\","
+			"\"genres\":[{\"name\":\"Post-Hardcore\",\"count\":3}]}";
+	assert (SbMusicBrainzApplyReleaseGroupDetail (pageGroup, &result));
+	assert (strcmp (result.releaseId, "page-release") == 0);
+	assert (strcmp (result.releaseDate, "2004-05-10") == 0);
+	assert (strcmp (result.firstReleaseDate, "2003-09-16") == 0);
+	assert (result.categorySource == SB_METADATA_CATEGORIES_GENRES);
+	assert (SbMetadataFormatAvailableFields (&result, display, sizeof (display)));
+	assert (strstr (display, "Original Release: 09/16/2003") != NULL);
+	assert (strstr (display, "Edition Release: 05/10/2004") != NULL);
+	assert (strstr (display, "Country: Europe") != NULL);
 }
 
 static void testMusicBrainzDateFormatting (void) {
@@ -389,23 +772,33 @@ static void testLrclibSearchScoring (void) {
 }
 
 typedef struct { int lyricsCalls, metadataCalls; SbLookupStatus lyricsStatus,
-	metadataStatus; unsigned int lyricsDelayMs; } MockProviders;
+	metadataStatus; unsigned int lyricsDelayMs, metadataDelayMs;
+	char firstLyricsTitle[SB_ENRICH_TEXT_MAX]; } MockProviders;
 
 static bool mockMetadata (const SbTrackIdentity *id, SbMetadataResult *result, void *data) {
-	MockProviders *mock = data; mock->metadataCalls++; SbMetadataResultInit (result);
+	MockProviders *mock = data; mock->metadataCalls++;
+	if (mock->metadataDelayMs > 0) SbPlatformSleepMs (mock->metadataDelayMs);
+	SbMetadataResultInit (result);
 	result->status = mock->metadataStatus; (void) id;
 	return result->status == SB_LOOKUP_AVAILABLE;
 }
 
 static bool mockLyrics (const SbTrackIdentity *id, SbLyricsResult *result, void *data) {
 	MockProviders *mock = data; mock->lyricsCalls++; SbLyricsResultInit (result);
+	if (mock->firstLyricsTitle[0] == '\0')
+		snprintf (mock->firstLyricsTitle, sizeof (mock->firstLyricsTitle), "%s",
+				id->title);
 	if (mock->lyricsDelayMs > 0) SbPlatformSleepMs (mock->lyricsDelayMs);
 	strcpy (result->provider, "MockLyrics"); result->status = mock->lyricsStatus;
 	if (result->status == SB_LOOKUP_AVAILABLE) {
 		strcpy (result->artist, id->artist); strcpy (result->title, id->title);
 		const char fixture[] = "Signal in the static\nGreen phosphor in the night";
+		const char synced[] = "[00:01.00]Signal in the static\n[00:04.00]Green phosphor in the night";
 		result->plainLyrics = malloc (sizeof (fixture));
 		if (result->plainLyrics != NULL) memcpy (result->plainLyrics, fixture, sizeof (fixture));
+		result->syncedLyrics = malloc (sizeof (synced));
+		if (result->syncedLyrics != NULL)
+			memcpy (result->syncedLyrics, synced, sizeof (synced));
 	}
 	return result->status == SB_LOOKUP_AVAILABLE;
 }
@@ -545,11 +938,134 @@ static void testLyricsResolverCacheAndFailures (void) {
 	SbLyricsResultDestroy (&result); SbMetadataResolverDestroy (&resolver);
 }
 
+static SbEnrichmentPrefetchSchedule waitPrefetchComplete (
+		SbMetadataResolver *resolver, const SbTrackIdentity *identity,
+		const SbEnrichmentPriority priority) {
+	const uint64_t deadline = SbPlatformMonotonicMs () + 5000;
+	for (;;) {
+		const SbEnrichmentPrefetchSchedule state =
+				SbMetadataResolverPrefetch (resolver, identity, priority);
+		if (state == SB_ENRICH_PREFETCH_CACHE_HIT ||
+				state == SB_ENRICH_PREFETCH_RECENT_ATTEMPT) return state;
+		assert (SbPlatformMonotonicMs () < deadline);
+		SbPlatformSleepMs (ASYNC_POLL_MS);
+	}
+}
+
+static void testBoundedPrefetchPriorityAndPromotion (void) {
+	SbMetadataResolver resolver;
+	MockProviders mock = {.lyricsStatus = SB_LOOKUP_AVAILABLE,
+			.metadataStatus = SB_LOOKUP_AVAILABLE, .metadataDelayMs = 100};
+	SbTrackIdentity next, next2, current;
+	SbTrackIdentitySet (&next, "Queued Artist", "Next Signal", NULL, NULL, 181);
+	SbTrackIdentitySet (&next2, "Queued Artist", "Second Signal", NULL, NULL, 182);
+	SbTrackIdentitySet (&current, "Visible Artist", "Foreground Signal", NULL,
+			NULL, 183);
+	SbMetadataResolverInit (&resolver);
+	resolver.provider = (SbMetadataProvider) {"mock-metadata", mockMetadata, &mock};
+	resolver.lyricsProvider = (SbLyricsProvider) {"mock-lyrics", mockLyrics, &mock};
+	assert (SbMetadataResolverStart (&resolver));
+
+	assert (SbMetadataResolverPrefetch (&resolver, &next,
+			SB_ENRICH_PRIORITY_NEXT) == SB_ENRICH_PREFETCH_SCHEDULED);
+	/* A copied stable identity deduplicates both queued and active work. */
+	assert (SbMetadataResolverPrefetch (&resolver, &next,
+			SB_ENRICH_PRIORITY_NEXT) == SB_ENRICH_PREFETCH_IN_FLIGHT);
+	/* +2 remains opportunistic while next-track work is outstanding. */
+	assert (SbMetadataResolverPrefetch (&resolver, &next2,
+			SB_ENRICH_PRIORITY_NEXT2) == SB_ENRICH_PREFETCH_HIGHER_PRIORITY);
+
+	/* Foreground work enters the same serialized provider worker at a higher
+	 * priority. It runs before the deferred speculative LRCLIB stage. */
+	SbMetadataResolverRequest (&resolver, &current, 70);
+	SbMetadataResult metadata;
+	SbLyricsResult lyrics;
+	assert (waitMetadata (&resolver, 70, &metadata));
+	assert (waitLyricsFor (&resolver, 70, &lyrics, 5000));
+	assert (strcmp (mock.firstLyricsTitle, current.title) == 0);
+	SbLyricsResultDestroy (&lyrics);
+
+	assert (waitPrefetchComplete (&resolver, &next,
+			SB_ENRICH_PRIORITY_NEXT) == SB_ENRICH_PREFETCH_CACHE_HIT);
+	const int metadataCalls = mock.metadataCalls;
+	const int lyricsCalls = mock.lyricsCalls;
+	/* Promotion rebinds speculative data to the real generation and publishes
+	 * metadata, parsed lyrics, and cached/no-match art without provider work. */
+	SbMetadataResolverRequest (&resolver, &next, 71);
+	assert (SbMetadataResolverPoll (&resolver, 71, &metadata));
+	assert (SbLyricsResolverPoll (&resolver, 71, &lyrics));
+	assert (lyrics.status == SB_LOOKUP_AVAILABLE && lyrics.syncedLyrics != NULL);
+	SbLyricsResultDestroy (&lyrics);
+	SbAlbumArtResult art;
+	assert (SbAlbumArtResolverPoll (&resolver, 71, &art));
+	assert (art.status == SB_LOOKUP_NO_MATCH);
+	SbPlatformSleepMs (30);
+	assert (mock.metadataCalls == metadataCalls && mock.lyricsCalls == lyricsCalls);
+
+	/* Once next is complete and foreground is idle, exactly one +2 identity is
+	 * admitted; the scheduler still never walks beyond this caller-supplied slot. */
+	assert (SbMetadataResolverPrefetch (&resolver, &next2,
+			SB_ENRICH_PRIORITY_NEXT2) == SB_ENRICH_PREFETCH_SCHEDULED);
+	assert (!SbMetadataResolverPoll (&resolver, 999, &metadata));
+	SbMetadataResolverDestroy (&resolver);
+}
+
+static void testPrefetchCancellationWithoutQueuePointers (void) {
+	SbMetadataResolver resolver;
+	SbTrackIdentity next, next2;
+	SbTrackIdentitySet (&next, "Old Station", "Queued One", NULL, NULL, 200);
+	SbTrackIdentitySet (&next2, "Old Station", "Queued Two", NULL, NULL, 201);
+	SbMetadataResolverInit (&resolver);
+	/* No worker is started: cancellation deterministically proves that station
+	 * changes remove copied speculative jobs without touching reusable caches. */
+	assert (SbMetadataResolverPrefetch (&resolver, &next,
+			SB_ENRICH_PRIORITY_NEXT) == SB_ENRICH_PREFETCH_SCHEDULED);
+	assert (SbMetadataResolverPrefetch (&resolver, &next2,
+			SB_ENRICH_PRIORITY_NEXT2) == SB_ENRICH_PREFETCH_HIGHER_PRIORITY);
+	SbMetadataResolverCancelPrefetch (&resolver);
+	assert (!resolver.jobs[SB_ENRICH_PRIORITY_NEXT].pending);
+	assert (!resolver.jobs[SB_ENRICH_PRIORITY_NEXT2].pending);
+	assert (!resolver.artJobs[SB_ENRICH_PRIORITY_NEXT].pending);
+	assert (!resolver.artJobs[SB_ENRICH_PRIORITY_NEXT2].pending);
+	SbMetadataResolverDestroy (&resolver);
+}
+
+static void testRapidCurrentReplacementPublishesNewestOnly (void) {
+	SbMetadataResolver resolver;
+	MockProviders mock = {.lyricsStatus = SB_LOOKUP_AVAILABLE,
+			.metadataStatus = SB_LOOKUP_AVAILABLE, .metadataDelayMs = 75};
+	SbTrackIdentity tracks[4];
+	SbMetadataResolverInit (&resolver);
+	resolver.provider = (SbMetadataProvider) {"mock-metadata", mockMetadata, &mock};
+	resolver.lyricsProvider = (SbLyricsProvider) {"mock-lyrics", mockLyrics, &mock};
+	assert (SbMetadataResolverStart (&resolver));
+	for (size_t i = 0; i < 4; i++) {
+		char title[32]; snprintf (title, sizeof (title), "Rapid %zu", i + 1);
+		SbTrackIdentitySet (&tracks[i], "Skip Artist", title, NULL, NULL,
+				200 + (unsigned int) i);
+		SbMetadataResolverRequest (&resolver, &tracks[i], 80 + i);
+	}
+	SbMetadataResult metadata;
+	SbLyricsResult lyrics;
+	assert (waitMetadata (&resolver, 83, &metadata));
+	assert (waitLyricsFor (&resolver, 83, &lyrics, 5000));
+	assert (strcmp (lyrics.title, "Rapid 4") == 0);
+	SbLyricsResultDestroy (&lyrics);
+	assert (!SbMetadataResolverPoll (&resolver, 80, &metadata));
+	assert (mock.metadataCalls <= 2 && mock.lyricsCalls == 1);
+	SbMetadataResolverDestroy (&resolver);
+}
+
 int main (void) {
 	testNormalization (); testRetainedModalScroll (); testRetainedModalScrollBounds ();
 	testCursesWheelStateMapping (); testMouseBitNames (); testUpcomingHeight ();
 	testMusicBrainzHttpStates (); testLrclibTransientPolicy ();
-	testCacheKey (); testBestMatch (); testAlbumAwareArtRelease ();
+	testCacheKey (); testBestMatch (); testRichMusicBrainzMetadata ();
+	testAlbumDateSemanticsRegressions (); testDeathCabFallbackAndJackKaysHappyPath ();
+	testProgressiveMetadataPublication ();
+	testDeluxeDatesAndDetailMerge (); testWeakMetadataAndTransientDetail ();
+	testTagFallbackAndMetadataCacheRoundTrip (); testAlbumAwareArtRelease ();
+	testAlbumFamilyFallbackAndCompletion ();
 	testMusicBrainzDateFormatting ();
 	testErrorsAndNoMatch (); testStaleResult (); testLrclibPlainAndSynced ();
 	testLrclibSyncedOnlyAndInstrumental (); testLrclibErrorsAndFallback ();
@@ -557,5 +1073,8 @@ int main (void) {
 	testLyricsResolverCacheAndFailures ();
 	testProviderStatesAreIndependent ();
 	testTransientMetadataIsNotCached ();
+	testBoundedPrefetchPriorityAndPromotion ();
+	testPrefetchCancellationWithoutQueuePointers ();
+	testRapidCurrentReplacementPublishesNewestOnly ();
 	puts ("enrichment tests passed"); return 0;
 }

@@ -17,6 +17,8 @@ SbTuiTextRole SbTuiPresentationFieldRole (const char *label) {
 		return SB_TUI_TEXT_ALBUM;
 	if (strcmp (label, "Station") == 0) return SB_TUI_TEXT_STATION;
 	if (strcmp (label, "Length") == 0 || strcmp (label, "Release Date") == 0 ||
+			strcmp (label, "Original Release") == 0 ||
+			strcmp (label, "Edition Release") == 0 ||
 			strcmp (label, "Rating") == 0) return SB_TUI_TEXT_TIME;
 	if (strcmp (label, "Provider") == 0) return SB_TUI_TEXT_PROVIDER;
 	if (strcmp (label, "Confidence") == 0) return SB_TUI_TEXT_CONFIDENCE;
@@ -356,11 +358,17 @@ bool SbTuiPresentationRectsIntersect (const SbTuiRect left,
 			left.y < right.y + right.height && right.y < left.y + left.height;
 }
 
+SbTuiCellOwner SbTuiPresentationCellOwner (const SbTuiRect art,
+		const SbTuiRect overlay, const int y, const int x) {
+	/* The topmost overlay owns its complete outer rectangle.  ANSI art may
+	 * paint only cells that remain owned by the art layer. */
+	if (SbTuiPresentationRectContains (overlay, y, x))
+		return SB_TUI_CELL_OVERLAY;
+	if (SbTuiPresentationRectContains (art, y, x)) return SB_TUI_CELL_ART;
+	return SB_TUI_CELL_BASE;
+}
+
 bool SbTuiPresentationArtCellVisible (const SbTuiRect overlay,
 		const int y, const int x) {
 	return !SbTuiPresentationRectContains (overlay, y, x);
-}
-
-void SbTuiPresentationArtDidPaint (SbTuiArtCompositor *compositor) {
-	if (compositor != NULL) compositor->painted = true;
 }

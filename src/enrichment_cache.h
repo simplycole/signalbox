@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <time.h>
 
-enum { SB_CACHE_SCHEMA_VERSION = 2, SB_CACHE_MAX_ENTRIES = 4096 };
+enum { SB_CACHE_SCHEMA_VERSION = 5, SB_CACHE_MAX_ENTRIES = 4096 };
 typedef enum { SB_CACHE_METADATA, SB_CACHE_LYRICS, SB_CACHE_ART } SbCacheKind;
 typedef struct { char *provider, *key, *payload; int state; time_t fetched, used; } SbCacheEntry;
 typedef struct { SbCacheEntry *entries; size_t count, capacity; char *path; } SbPersistentCache;

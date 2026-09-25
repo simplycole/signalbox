@@ -53,17 +53,10 @@ THE SOFTWARE.
 /*	helper to _really_ skip a song (unlock mutex, quit player)
  *	@param player handle
  */
-static inline void BarUiDoSkipSong (player_t * const player) {
+static inline void BarUiDoSkipSong (player_t * const player,
+		const SbPlayerStopReason reason) {
 	assert (player != NULL);
-
-	pthread_mutex_lock (&player->lock);
-	player->doQuit = true;
-	player->doPause = false;
-	pthread_cond_broadcast (&player->cond);
-	pthread_mutex_unlock (&player->lock);
-	pthread_mutex_lock (&player->aoplayLock);
-	pthread_cond_broadcast (&player->aoplayCond);
-	pthread_mutex_unlock (&player->aoplayLock);
+	BarPlayerRequestStop (player, reason);
 }
 
 static size_t BarUiCountStations (const PianoStation_t *item) {
@@ -230,7 +223,7 @@ BarUiActCallback(BarUiActBanSong) {
 	BarUiMsg (&app->settings, MSG_INFO, "Banning song... ");
 	if (BarUiActDefaultPianoCall (PIANO_REQUEST_RATE_SONG, &reqData) &&
 			selSong == app->playlist) {
-		BarUiDoSkipSong (&app->player);
+		BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_NEXT);
 	}
 	BarUiActDefaultEventcmd ("songban");
 }
@@ -331,7 +324,10 @@ BarUiActCallback(BarUiActAddSharedStation) {
 }
 
 static void drainPlaylist (BarApp_t * const app) {
-	BarUiDoSkipSong (&app->player);
+	/* Pending identities are copied, so cancellation never follows freed queue
+	 * nodes. Completed cache entries remain reusable across stations. */
+	SbMetadataResolverCancelPrefetch (&app->metadataResolver);
+	BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_STATION_CHANGE);
 	if (app->playlist != NULL) {
 		/* drain playlist */
 		PianoDestroyPlaylist (PianoListNextP (app->playlist));
@@ -588,7 +584,7 @@ BarUiActCallback(BarUiActLoveSong) {
 /*	skip song
  */
 BarUiActCallback(BarUiActSkipSong) {
-	BarUiDoSkipSong (&app->player);
+	BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_NEXT);
 	if (app->useTui) {
 		BarUiMsg (&app->settings, MSG_INFO, "Skipping track\n");
 	}
@@ -710,7 +706,7 @@ BarUiActCallback(BarUiActTempBanSong) {
 	BarUiMsg (&app->settings, MSG_INFO, "Putting song on shelf... ");
 	if (BarUiActDefaultPianoCall (PIANO_REQUEST_ADD_TIRED_SONG, selSong) &&
 			selSong == app->playlist) {
-		BarUiDoSkipSong (&app->player);
+		BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_NEXT);
 	}
 	BarUiActDefaultEventcmd ("songshelf");
 }
@@ -858,7 +854,7 @@ BarUiActCallback(BarUiActSelectQuickMix) {
  */
 BarUiActCallback(BarUiActQuit) {
 	app->doQuit = true;
-	BarUiDoSkipSong (&app->player);
+	BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_QUIT);
 }
 
 static void BarUiActHistorySong (BarApp_t *app, PianoSong_t *histSong,

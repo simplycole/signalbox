@@ -39,6 +39,7 @@ THE SOFTWARE.
 
 #include "settings.h"
 #include "spectrum.h"
+#include "player_lifecycle.h"
 
 typedef enum {
 	/* not running */
@@ -56,6 +57,7 @@ typedef struct {
 	pthread_mutex_t lock, aoplayLock;
 	pthread_cond_t cond, aoplayCond; /* broadcast changes to doPause */
 	bool doQuit, doPause;
+	SbPlayerStopReason stopReason;
 
 	/* measured in seconds */
 	unsigned int songDuration;
@@ -76,7 +78,12 @@ typedef struct {
 	int64_t lastTimestamp;
 	sig_atomic_t interrupted;
 
+	/* Serialized ownership: the current player/output-thread pair may use this
+	 * handle; main starts no successor until both have exited. On macOS live
+	 * output survives BarPlayerReset and is reused by the successor pair. */
 	ao_device *aoDev;
+	SbAudioOutputFormat aoFormat;
+	bool aoFormatValid;
 	SbSpectrum spectrum;
 	bool spectrumReady;
 
@@ -100,3 +107,4 @@ void BarPlayerDestroy (player_t * const p);
 BarPlayerMode BarPlayerGetMode (player_t * const player);
 void BarPlayerGetSpectrum (player_t *, SbSpectrumSnapshot *);
 void BarPlayerSetSpectrumEnabled (player_t *, bool);
+void BarPlayerRequestStop (player_t *, SbPlayerStopReason);

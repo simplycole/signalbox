@@ -49,11 +49,21 @@ int main (void) {
 	SbPersistentCacheDestroy (&cache);
 
 	file = fopen (path, "wb");
-	fputs ("{\"schema_version\":2,\"entries\":[{\"provider\":\"lrclib\","
+	fputs ("{\"schema_version\":5,\"entries\":[{\"provider\":\"lrclib\","
 			"\"key\":\"bad\",\"payload\":\"{}\",\"state\":3}]}", file);
 	fclose (file);
 	SbPersistentCacheInit (&cache, strdup (path));
 	assert (SbPersistentCacheLoad (&cache, now));
+	assert (cache.count == 0);
+	SbPersistentCacheDestroy (&cache);
+
+	/* The previous rich-metadata schema expires cleanly so cached category text
+	 * cannot retain the old ambiguous Genres label. */
+	file = fopen (path, "wb");
+	fputs ("{\"schema_version\":4,\"entries\":[]}", file);
+	fclose (file);
+	SbPersistentCacheInit (&cache, strdup (path));
+	assert (!SbPersistentCacheLoad (&cache, now));
 	assert (cache.count == 0);
 	SbPersistentCacheDestroy (&cache);
 

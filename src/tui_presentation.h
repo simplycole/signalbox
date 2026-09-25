@@ -39,15 +39,15 @@ typedef struct {
 	bool configured;
 } SbTuiHelpEntry;
 
-/* ANSI album art bypasses curses' physical-screen bookkeeping.  Track whether
- * those cells need to be explicitly invalidated before an overlay is drawn. */
-typedef struct {
-	bool painted;
-} SbTuiArtCompositor;
-
 typedef struct {
 	int y, x, height, width;
 } SbTuiRect;
+
+typedef enum {
+	SB_TUI_CELL_BASE = 0,
+	SB_TUI_CELL_ART,
+	SB_TUI_CELL_OVERLAY,
+} SbTuiCellOwner;
 
 typedef enum {
 	SB_TUI_MODAL_HELP = 0,
@@ -102,5 +102,6 @@ SbTuiRect SbTuiPresentationPopupRect (int rows, int cols, int wantedHeight);
 bool SbTuiPresentationRectValid (SbTuiRect);
 bool SbTuiPresentationRectContains (SbTuiRect, int y, int x);
 bool SbTuiPresentationRectsIntersect (SbTuiRect, SbTuiRect);
+SbTuiCellOwner SbTuiPresentationCellOwner (SbTuiRect art,
+		SbTuiRect overlay, int y, int x);
 bool SbTuiPresentationArtCellVisible (SbTuiRect overlay, int y, int x);
-void SbTuiPresentationArtDidPaint (SbTuiArtCompositor *);

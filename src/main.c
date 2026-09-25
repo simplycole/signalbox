@@ -106,7 +106,7 @@ static void BarMainAppendField (char *text, const size_t size,
 static char *BarMainTrackInfoText (BarApp_t *app) {
 	if (app->playlist == NULL) return strdup ("No song playing");
 	const SbMetadataResult *m = &app->metadata; const PianoSong_t *song = app->playlist;
-	char text[3000] = "PANDORA";
+	char text[6144] = "PANDORA";
 	BarMainAppendField (text, sizeof (text), "Artist", app->trackIdentity.artist);
 	BarMainAppendField (text, sizeof (text), "Track", app->trackIdentity.title);
 	BarMainAppendField (text, sizeof (text), "Album", app->trackIdentity.album);
@@ -120,14 +120,11 @@ static char *BarMainTrackInfoText (BarApp_t *app) {
 	BarMainAppendField (text, sizeof (text), "Metadata", BarMainMetadataState (m->status));
 	BarMainAppendField (text, sizeof (text), "Provider", m->provider);
 	if (m->status == SB_LOOKUP_AVAILABLE) {
-		char confidence[32]; snprintf (confidence, sizeof (confidence), "%.0f%%", m->confidence * 100.0);
-		BarMainAppendField (text, sizeof (text), "Canonical Artist", m->artist);
-		BarMainAppendField (text, sizeof (text), "Canonical Track", m->title);
-		BarMainAppendField (text, sizeof (text), "Release", m->release);
-		char releaseDate[16];
-		if (SbMusicBrainzFormatDate (m->releaseDate, releaseDate, sizeof (releaseDate)))
-			BarMainAppendField (text, sizeof (text), "Release Date", releaseDate);
-		BarMainAppendField (text, sizeof (text), "Confidence", confidence);
+		char fields[3072];
+		if (SbMetadataFormatAvailableFields (m, fields, sizeof (fields)) && fields[0]) {
+			strncat (text, "\n", sizeof (text) - strlen (text) - 1);
+			strncat (text, fields, sizeof (text) - strlen (text) - 1);
+		}
 	}
 	strncat (text, "\n\nLYRICS", sizeof (text) - strlen (text) - 1);
 	BarMainAppendField (text, sizeof (text), "State",
@@ -595,6 +592,35 @@ static void BarMainMaybePrefetch (BarApp_t *app) {
 			(unsigned long long) app->playlistGeneration);
 }
 
+static void BarMainTrackIdentity (const BarApp_t *app,
+		const PianoSong_t *song, SbTrackIdentity *identity) {
+	const PianoStation_t *station = app->curStation != NULL &&
+			app->curStation->isQuickMix ? PianoFindStationById (app->ph.stations,
+			song->stationId) : app->curStation;
+	SbTrackIdentitySet (identity, song->artist, song->title, song->album,
+			station != NULL ? station->name : NULL, song->length);
+	SbTrackIdentitySetPandoraId (identity, song->musicId != NULL ?
+			song->musicId : song->trackToken);
+}
+
+static void BarMainMaybePrefetchEnrichment (BarApp_t *app) {
+	if (!app->metadataResolver.started || app->playlist == NULL ||
+			app->curStation == NULL || app->nextStation != app->curStation ||
+			BarPlayerGetMode (&app->player) == PLAYER_DEAD) return;
+	const PianoSong_t *next = PianoListNextP (app->playlist);
+	if (next == NULL) return;
+	SbTrackIdentity identity;
+	BarMainTrackIdentity (app, next, &identity);
+	(void) SbMetadataResolverPrefetch (&app->metadataResolver, &identity,
+			SB_ENRICH_PRIORITY_NEXT);
+	const PianoSong_t *next2 = PianoListNextP (next);
+	if (next2 != NULL) {
+		BarMainTrackIdentity (app, next2, &identity);
+		(void) SbMetadataResolverPrefetch (&app->metadataResolver, &identity,
+				SB_ENRICH_PRIORITY_NEXT2);
+	}
+}
+
 /*	start new player thread
  */
 static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
@@ -606,11 +632,7 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 
 	SbUiModelSetSong (&app->uiModel, curSong, app->curStation->isQuickMix ?
 			PianoFindStationById (app->ph.stations, curSong->stationId) : NULL);
-	const PianoStation_t *identityStation = app->curStation->isQuickMix ?
-			PianoFindStationById (app->ph.stations, curSong->stationId) : app->curStation;
-	SbTrackIdentitySet (&app->trackIdentity, curSong->artist, curSong->title,
-			curSong->album, identityStation != NULL ? identityStation->name : NULL,
-			curSong->length);
+	BarMainTrackIdentity (app, curSong, &app->trackIdentity);
 	app->enrichmentGeneration++;
 	SbMetadataResultInit (&app->metadata);
 	app->metadata.status = SB_LOOKUP_LOADING;
@@ -758,6 +780,7 @@ static void BarMainLoop (BarApp_t *app) {
 
 	while (!app->doQuit) {
 		BarMainMaybePrefetch (app);
+		BarMainMaybePrefetchEnrichment (app);
 		SbMetadataResult enriched;
 		if (SbMetadataResolverPoll (&app->metadataResolver,
 				app->enrichmentGeneration, &enriched)) {

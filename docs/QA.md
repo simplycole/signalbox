@@ -157,6 +157,13 @@ for authenticated QA.
   (Pandora may count a skip under its service rules, but no library/profile
   object is edited). **Real account:** Yes, if one skip is acceptable.
   **Cleanup:** None.
+- **Action:** On macOS, let at least five songs end naturally, then issue four
+  skips at short intervals. Mix in a station change and opening/closing a modal.
+  **Expected:** every transition advances to the next correct song, stale audio
+  does not continue, input remains responsive, and debug output shows one live
+  libao open followed by compatible-format reuse rather than per-track close.
+  **Account:** SAFE/read-only except for Pandora's normal skip accounting.
+  **Real account:** Yes. **Cleanup:** None.
 - **Action:** Open song info/explanation only if exposed by configured bindings.
   **Expected:** readable data or a clear failure notice. **Account:**
   SAFE/read-only. **Real account:** Yes. **Cleanup:** Cancel/close.
@@ -271,10 +278,41 @@ allows every application.
   for enrichment; the next playlist is prefetched once near exhaustion and is
   used only for the same station/generation. A station switch must discard stale
   prefetched or enrichment results.
+- **Action:** Let at least five tracks advance naturally, then rapidly skip four
+  tracks and switch stations. **Expected:** debug output schedules only `next`
+  and opportunistic `next2`, reports cache/in-flight deduplication and promotion,
+  and records lyrics/metadata/art readiness at song start. Completed prefetches
+  appear immediately; an outrun track loads normally without delaying playback.
+  No old-station or wrong-track lyrics, metadata, or art may publish.
 - **Action:** Press `i` (or `I`) before, during, and after enrichment completes.
   **Expected:** Track Info updates in place and uses `Available`, `No match`, or
   `Temporarily unavailable` for metadata; album art uses `Loading`, `Ready`,
   `None`, or `Unavailable`. Provider errors do not interrupt playback.
+- **Action:** Inspect Track Info for a normal album and for a deluxe, anniversary,
+  or reissue release. **Expected:** Available MusicBrainz release title, type,
+  country, label/catalog, ISRC, and a concise category list appear in stable order;
+  official categories use `Genres`, while tag fallback uses `Tags`;
+  absent values are omitted. Equal original/edition dates appear once as
+  `Release Date`; differing dates appear as `Original Release` and `Edition
+  Release` without invented precision. MBIDs and provider URLs are not shown.
+- **Action:** Inspect a recording match whose release detail is sparse or make an
+  optional detail endpoint transiently unavailable. **Expected:** canonical
+  artist/title remain `Available`; only unsupported rich fields disappear, and
+  the optional failure does not become a permanent no-match.
+- **Action:** Exercise Dashboard Confessional / `Screaming Infidelities`, Death
+  Cab for Cutie / `I Will Follow You into the Dark`, Brand New / `I Will Play My
+  Game Beneath The Spin Light`, and Jack Kays / `Drinking Song` when available.
+  **Expected:** recording-level dates never appear as album Original Release;
+  one transient album-search failure can recover on its single retry; two
+  transient failures retain canonical metadata without album fields; Brand
+  New cannot show a 2017 original date beside its 2003 edition; and Jack Kays
+  retains its 2024 date, Album type, Columbia label, and `Worldwide` country.
+- **Action:** Exercise Story Of The Year / `Anthem of Our Dying Day` from `Page
+  Avenue` and AFI / `Girl's Not Grey` from `Sing The Sorrow (Deluxe)` when
+  available. **Expected:** an album-selected release still receives its
+  release-group first date; an exact deluxe-title miss gets at most one family
+  query for `Sing The Sorrow`, and any chosen candidate receives the same
+  bounded downstream detail completion.
 - **Action:** Observe a track with cover art, one with no match, and a narrow or
   low-color terminal. **Expected:** art loads once, remains stable during
   progress redraws, resizes only when its source/layout/color key changes, and
@@ -282,7 +320,8 @@ allows every application.
 - **Action:** Open Help, Track Info, Lyrics, and a confirmation or text prompt
   over visible art; repeat while art changes from Loading to Ready, while the
   spectrum/progress redraws, and across a resize. **Expected:** every modal
-  remains topmost with no art pixels inside it, while non-overlapping art stays
+  remains topmost with no art pixels or rectangular holes inside it; borders,
+  body text, and instruction rows stay intact while non-overlapping art remains
   visible. Closing the modal immediately restores correctly sized art without
   requiring another resize.
 - **Action:** Press `L` (or `l`) for synced, plain-only, instrumental, no-match,
@@ -299,8 +338,9 @@ allows every application.
   change, resize, modal toggle, or next timestamp.
 - **Action:** Quit after enrichment, relaunch, and revisit the same track if
   practical. **Expected:** valid metadata/lyrics/art cache entries are reused;
-  corrupt or incompatible cache files are ignored; transient failures are not
-  persisted as permanent misses.
+  rich release fields return without another provider request; corrupt or
+  incompatible cache files are ignored; transient failures are not persisted as
+  permanent misses.
 
 ## H. History/upcoming
 
@@ -427,6 +467,11 @@ allows every application.
   shell accepts normal input. **Account:** SAFE/local. **Real account:** Yes.
   **Cleanup:** If the shell is visibly damaged, run `reset` and preserve the
   diagnostic log for the bug report.
+- **Action:** On macOS, also press `q` during active playback, immediately after
+  a skip, immediately after a natural transition, and after a station switch.
+  **Expected:** each run exits promptly; the debug log records the player stop
+  and thread exit, then the narrowly scoped CoreAudio/libao close guard. No run
+  remains blocked in `pthread_join` or `ao_close`.
 
 ## Disposable station strategy
 

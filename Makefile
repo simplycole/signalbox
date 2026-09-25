@@ -48,6 +48,7 @@ PIANOBAR_SRC:=\
 		${PIANOBAR_DIR}/album_art.c \
 		${PIANOBAR_DIR}/art_renderer.c \
 		${PIANOBAR_DIR}/tui_presentation.c \
+		${PIANOBAR_DIR}/player_lifecycle.c \
 		${PIANOBAR_DIR}/player.c \
 		${PIANOBAR_DIR}/settings.c \
 		${PIANOBAR_DIR}/settings_values.c \
@@ -207,13 +208,14 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 
 TEST_TARGETS:=spectrum-test enrichment-test enrichment-cache-test album-art-test \
 	art-renderer-test lyrics-sync-test tui-presentation-test \
-	playlist-prefetch-test station-browser-test settings-values-test
+	playlist-prefetch-test station-browser-test settings-values-test \
+	player-lifecycle-test
 
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
 		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
-		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe station-browser-test station-browser-test.exe settings-values-test settings-values-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
+		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe station-browser-test station-browser-test.exe settings-values-test settings-values-test.exe player-lifecycle-test player-lifecycle-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
 all: ${PROGRAM}
 
@@ -224,6 +226,10 @@ package-linux:
 	MAKE="$(MAKE)" ${PACKAGE_SCRIPT} linux
 
 test: ${TEST_TARGETS}
+
+player-lifecycle-test: tests/player_lifecycle_test.c src/player_lifecycle.c src/player_lifecycle.h
+	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/player_lifecycle_test.c src/player_lifecycle.c
+	./$@$(EXEEXT)
 
 settings-values-test: tests/settings_values_test.c src/settings_values.c src/settings_values.h
 	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/settings_values_test.c src/settings_values.c

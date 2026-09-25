@@ -117,13 +117,17 @@ typedef struct {
 	SbPreparedArt preparedArt;
 	SbTuiArtStatus artStatus;
 	SbArtColorMode artColorMode;
-	SbTuiArtCompositor artCompositor;
 	int preparedArtSetting;
 	bool artOverlayVisible;
 	char artOverlayPath[1024];
 	unsigned int artOverlayColumns, artOverlayRows;
-	int artOverlayY, artOverlayX;
 	SbTuiRect retainedRect, popupRect;
+	char popupTitle[80];
+	bool occlusionLogInitialized;
+	bool modalPhysicalRedraw;
+	SbTuiRect currentArtRect;
+	SbTuiRect loggedArtRect, loggedOverlayRect;
+	char loggedOverlayTitle[80];
 	SbLyricCursor lyricCursor;
 	uint64_t lyricCursorGeneration;
 	size_t loggedLyricIndex;
@@ -539,12 +543,14 @@ static bool SbUiCursesResize (SbUiCursesData *data) {
 	data->sizeState = nextState;
 	/* Route the first frame at every new geometry through wnoutrefresh/doupdate. */
 	data->recoveryPending = true;
+	data->modalPhysicalRedraw = true;
 	if (data->textModalWindow != NULL) {
 		delwin (data->textModalWindow);
 		data->textModalWindow = NULL;
 	}
 	data->retainedRect = (SbTuiRect) {0};
 	data->popupRect = (SbTuiRect) {0};
+	data->occlusionLogInitialized = false;
 	/* Every adopted geometry invalidates the physical cell map. */
 	erase ();
 	clearok (stdscr, TRUE);
@@ -1068,33 +1074,41 @@ static SbTuiRect SbUiCursesActiveOverlayRect (const SbUiCursesData *data) {
 			rows, cols, 0);
 }
 
-static void SbUiCursesClearArtOverlap (SbUiCursesData *data,
-		const SbTuiRect overlay) {
-	if (!data->artCompositor.painted ||
-			!SbTuiPresentationRectValid (overlay)) return;
-	const SbTuiRect art = {data->artOverlayY, data->artOverlayX,
-			(int) data->preparedArt.rows, (int) data->preparedArt.columns};
-	if (!SbTuiPresentationRectsIntersect (art, overlay)) return;
-	const int top = art.y > overlay.y ? art.y : overlay.y;
-	const int left = art.x > overlay.x ? art.x : overlay.x;
-	const int bottom = art.y + art.height < overlay.y + overlay.height ?
-			art.y + art.height : overlay.y + overlay.height;
-	const int right = art.x + art.width < overlay.x + overlay.width ?
-			art.x + art.width : overlay.x + overlay.width;
-	int savedY, savedX;
-	getsyx (savedY, savedX);
-	for (int row = top; row < bottom; row++) {
-		fprintf (stdout, "\033[%d;%dH\033[0m", row + 1, left + 1);
-		for (int col = left; col < right; col++) fputc (' ', stdout);
-	}
-	fprintf (stdout, "\033[%d;%dH", savedY + 1, savedX + 1);
-	fflush (stdout);
+static bool SbUiCursesRectEqual (const SbTuiRect left,
+		const SbTuiRect right) {
+	return left.y == right.y && left.x == right.x &&
+			left.height == right.height && left.width == right.width;
+}
+
+static const char *SbUiCursesActiveOverlayTitle (const SbUiCursesData *data) {
+	if (SbTuiPresentationRectValid (data->popupRect)) return data->popupTitle;
+	if (data->helpVisible) return "SIGNALBOX HELP";
+	if (data->textModalContent != NULL) return data->textModalTitle;
+	return "none";
+}
+
+static void SbUiCursesLogArtOcclusion (SbUiCursesData *data,
+		const SbTuiRect art, const SbTuiRect overlay) {
+	const char *title = SbUiCursesActiveOverlayTitle (data);
+	if (data->occlusionLogInitialized &&
+			SbUiCursesRectEqual (art, data->loggedArtRect) &&
+			SbUiCursesRectEqual (overlay, data->loggedOverlayRect) &&
+			strcmp (title, data->loggedOverlayTitle) == 0) return;
+	data->occlusionLogInitialized = true;
+	data->loggedArtRect = art; data->loggedOverlayRect = overlay;
+	snprintf (data->loggedOverlayTitle, sizeof (data->loggedOverlayTitle),
+			"%s", title);
+	tuiDebugPrint ("art occlusion art_rect=%d,%d,%d,%d modal_rect=%d,%d,%d,%d overlap=%s modal_title=\"%s\"\n",
+			art.x, art.y, art.width, art.height,
+			overlay.x, overlay.y, overlay.width, overlay.height,
+			SbTuiPresentationRectsIntersect (art, overlay) ? "yes" : "no", title);
 }
 
 static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model) {
 	SbUiCursesData *data = renderer->data; int y, x;
 	const SbArtLayout layout = SbUiCursesArtLayout (renderer, model, &y, &x);
 	if (!layout.visible || data->artColorMode == SB_ART_COLOR_NONE) return;
+	data->currentArtRect = (SbTuiRect) {0};
 	const SbTuiRect overlay = SbUiCursesActiveOverlayRect (data);
 	const unsigned int builds = data->preparedArt.builds;
 	const unsigned int hits = data->preparedArt.hits;
@@ -1105,6 +1119,10 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 					model->artCachedPath);
 		return;
 	}
+	const SbTuiRect art = {y, x, (int) data->preparedArt.rows,
+			(int) data->preparedArt.columns};
+	data->currentArtRect = art;
+	SbUiCursesLogArtOcclusion (data, art, overlay);
 	if (data->preparedArt.builds != builds)
 		tuiDebugPrint ("art prepare cache=miss art decode=ok source=%ux%u requested=%ux%u prepared=%ux%u color=%s\n",
 				data->preparedArt.sourceWidth, data->preparedArt.sourceHeight,
@@ -1120,8 +1138,8 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 	for (unsigned int row = 0; row < data->preparedArt.rows; row++) {
 		bool positioned = false;
 		for (unsigned int col = 0; col < data->preparedArt.columns; col++) {
-			if (!SbTuiPresentationArtCellVisible (overlay, y + (int) row,
-					x + (int) col)) {
+			if (SbTuiPresentationCellOwner (art, overlay, y + (int) row,
+					x + (int) col) != SB_TUI_CELL_ART) {
 				positioned = false;
 				continue;
 			}
@@ -1137,9 +1155,6 @@ static void SbUiCursesRenderArt (SbUiRenderer *renderer, const SbUiModel *model)
 		}
 	}
 	fprintf (stdout, "\033[0m\033[%d;%dH", savedY + 1, savedX + 1); fflush (stdout);
-	data->artOverlayY = y;
-	data->artOverlayX = x;
-	SbTuiPresentationArtDidPaint (&data->artCompositor);
 }
 
 static void SbUiCursesSpectrum (const SbUiCursesData *data,
@@ -1421,7 +1436,6 @@ static void SbUiCursesUpcoming (const SbUiCursesData *data,
 static void SbUiCursesFrame (SbUiRenderer *renderer,
 		const SbUiModel *model) {
 	SbUiCursesData * const data = renderer->data;
-	SbUiCursesClearArtOverlap (data, SbUiCursesActiveOverlayRect (data));
 	int rows, cols;
 	getmaxyx (stdscr, rows, cols);
 	erase ();
@@ -1598,16 +1612,26 @@ static void SbUiCursesFrame (SbUiRenderer *renderer,
 		const SbTuiRect rect = SbTuiPresentationModalRect (SB_TUI_MODAL_HELP,
 				rows, cols, helpRowCount);
 		const int height = rect.height, width = rect.width;
-		WINDOW * const help = newwin (height, width, rect.y, rect.x);
+		if (data->textModalWindow != NULL) {
+			const SbTuiRect existing =
+					SbUiCursesWindowRect (data->textModalWindow);
+			if (!SbUiCursesRectEqual (existing, rect)) {
+				delwin (data->textModalWindow);
+				data->textModalWindow = NULL;
+			}
+		}
+		if (data->textModalWindow == NULL)
+			data->textModalWindow = newwin (height, width, rect.y, rect.x);
+		WINDOW * const help = data->textModalWindow;
 		if (help != NULL) {
 			data->retainedRect = SbUiCursesWindowRect (help);
-			SbUiCursesClearArtOverlap (data, data->retainedRect);
 			/* Keep the penultimate row for navigation help at every size. */
 			const size_t visibleRows = height > 5 ? (size_t) height - 5 : 0;
 			const size_t maxOffset = helpRowCount > visibleRows ?
 					helpRowCount - visibleRows : 0;
 			if (data->helpOffset > maxOffset) data->helpOffset = maxOffset;
 			wbkgdset (help, SbUiCursesRole (data, SB_TUI_COLOR_PRIMARY));
+			werase (help);
 			SbUiCursesWAttrOn (help, data, SB_TUI_COLOR_BORDER, 0);
 			SbUiCursesBox (help);
 			SbUiCursesWAttrOff (help, data, SB_TUI_COLOR_BORDER, 0);
@@ -1639,11 +1663,13 @@ static void SbUiCursesFrame (SbUiRenderer *renderer,
 			wnoutrefresh (help);
 			doupdate ();
 			SbUiCursesRenderArt (renderer, model);
-			/* Direct ANSI output bypasses curses' physical cache. Reassert the
-			 * complete framed window after art without repainting the terminal. */
-			touchwin (help);
+			/* Help now follows the same retained final-writer model as Track Info
+			 * and Lyrics. wredrawln invalidates curses' physical-cache assumption,
+			 * so this remains correct even if an external ANSI write occurred. */
+			if (data->modalPhysicalRedraw) wredrawln (help, 0, height);
+			else touchwin (help);
 			wrefresh (help);
-			delwin (help);
+			data->modalPhysicalRedraw = false;
 			if (data->recoveryPending) {
 				data->recoveryPending = false;
 			}
@@ -1705,15 +1731,15 @@ static WINDOW *SbUiCursesModal (SbUiCursesData *data,
 	getmaxyx (stdscr, rows, cols);
 	if (rows < 15 || cols < 50) return NULL;
 	data->popupRect = SbTuiPresentationPopupRect (rows, cols, wantedHeight);
-	/* ANSI art is absent from curses' physical-screen cache. Clear only the
-	 * cells actually covered by this popup; the remaining cover stays intact. */
-	SbUiCursesClearArtOverlap (data, data->popupRect);
+	snprintf (data->popupTitle, sizeof (data->popupTitle), "%s", title);
 	WINDOW * const window = SbUiCursesModalWindow (data, title, prompt,
 			data->popupRect);
 	if (window == NULL) data->popupRect = (SbTuiRect) {0};
 	else {
 		data->popupRect = SbUiCursesWindowRect (window);
-		SbUiCursesClearArtOverlap (data, data->popupRect);
+		if (SbTuiPresentationRectValid (data->currentArtRect))
+			SbUiCursesLogArtOcclusion (data, data->currentArtRect,
+					data->popupRect);
 	}
 	return window;
 }
@@ -1724,6 +1750,7 @@ static void SbUiCursesPopupClosed (SbUiRenderer *renderer,
 	 * direct ANSI art at the current geometry. */
 	SbUiCursesData * const data = renderer->data;
 	data->popupRect = (SbTuiRect) {0};
+	data->popupTitle[0] = '\0';
 	clearok (stdscr, TRUE);
 	SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 }
@@ -2402,7 +2429,6 @@ static void SbUiCursesDrawTextModal (const SbUiRenderer *renderer,
 		SbUiCursesModalLinesDestroy (lines, lineCount); free (copy); return;
 	}
 	data->retainedRect = SbUiCursesWindowRect (window);
-	SbUiCursesClearArtOverlap (data, data->retainedRect);
 	SbUiModalScrollObserveIdentity (&data->textModalScroll,
 			model->songGeneration);
 	int wh, ww; getmaxyx (window, wh, ww); const int lineWidth = ww - 4;
@@ -2596,8 +2622,8 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 			data->artOverlayColumns != desired.columns ||
 			data->artOverlayRows != desired.rows));
 	if (artChanged) {
-		data->artCompositor.painted = false;
 		clearok (stdscr, TRUE);
+		data->modalPhysicalRedraw = true;
 	}
 	if (visible != data->artOverlayVisible)
 		tuiDebugPrint ("art render=%s reason=%s target=%ux%u color=%s\n",
@@ -2608,8 +2634,8 @@ static void SbUiCursesRender (SbUiRenderer *renderer,
 				data->artColorMode == SB_ART_COLOR_TRUECOLOR ? "truecolor" :
 				data->artColorMode == SB_ART_COLOR_256 ? "xterm-256" : "disabled");
 	data->artOverlayVisible = visible;
+	if (!visible) data->currentArtRect = (SbTuiRect) {0};
 	data->artOverlayColumns = desired.columns; data->artOverlayRows = desired.rows;
-	data->artOverlayY = artY; data->artOverlayX = artX;
 	snprintf (data->artOverlayPath, sizeof (data->artOverlayPath), "%s",
 			visible ? model->artCachedPath : "");
 	SbUiCursesFrame (renderer, model);
@@ -2927,6 +2953,11 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 	if (data->helpVisible && key == 27) {
 		data->helpVisible = false;
 		data->helpOffset = 0;
+		if (data->textModalWindow != NULL) {
+			delwin (data->textModalWindow);
+			data->textModalWindow = NULL;
+		}
+		data->retainedRect = (SbTuiRect) {0};
 		SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 		return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 	}
@@ -3040,11 +3071,22 @@ static SbUiCommandEvent SbUiCursesReadCommand (SbUiRenderer *renderer,
 		if (command == SB_UI_CMD_HELP) {
 			data->helpVisible = !data->helpVisible;
 			data->helpOffset = 0;
+			if (data->helpVisible) data->modalPhysicalRedraw = true;
+			if (!data->helpVisible && data->textModalWindow != NULL) {
+				delwin (data->textModalWindow);
+				data->textModalWindow = NULL;
+				data->retainedRect = (SbTuiRect) {0};
+			}
 			SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}
 		if (data->helpVisible) {
 			data->helpVisible = false;
+			if (data->textModalWindow != NULL) {
+				delwin (data->textModalWindow);
+				data->textModalWindow = NULL;
+			}
+			data->retainedRect = (SbTuiRect) {0};
 			SbUiCursesRender (renderer, model, SB_UI_RENDER_STATE);
 			return (SbUiCommandEvent) {SB_UI_CMD_NONE, NULL};
 		}

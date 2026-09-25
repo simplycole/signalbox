@@ -36,6 +36,91 @@ static bool CommandHasReachableKey (const BarSettings_t *settings,
 	return false;
 }
 
+enum { COMPOSITOR_ROWS = 50, COMPOSITOR_COLS = 120 };
+
+static void CompositorReset (char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS]) {
+	memset (cells, '.', COMPOSITOR_ROWS * COMPOSITOR_COLS);
+}
+
+static void CompositorPaintArt (
+		char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS], const SbTuiRect art,
+		const SbTuiRect overlay) {
+	for (int y = 0; y < COMPOSITOR_ROWS; y++)
+		for (int x = 0; x < COMPOSITOR_COLS; x++)
+			if (SbTuiPresentationCellOwner (art, overlay, y, x) == SB_TUI_CELL_ART)
+				cells[y][x] = 'A';
+}
+
+static void CompositorDrawModal (
+		char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS], const SbTuiRect modal,
+		const char *title) {
+	const char instruction[] = "Up/Down scroll; Enter/Esc closes this dialog safely";
+	const char body[] = "Pandora Artist: AFI / Track: Bleed Black";
+	for (int x = modal.x; x < modal.x + modal.width; x++) {
+		cells[modal.y][x] = '#';
+		cells[modal.y + modal.height - 1][x] = '#';
+	}
+	for (int y = modal.y; y < modal.y + modal.height; y++) {
+		cells[y][modal.x] = '#';
+		cells[y][modal.x + modal.width - 1] = '#';
+	}
+	memcpy (&cells[modal.y + 1][modal.x + 2], title, strlen (title));
+	memcpy (&cells[modal.y + 3][modal.x + 2], instruction,
+			strlen (instruction));
+	memcpy (&cells[modal.y + 5][modal.x + 2], body, strlen (body));
+}
+
+static void CompositorAssertModal (
+		const char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS],
+		const SbTuiRect modal, const char *title) {
+	const char instruction[] = "Up/Down scroll; Enter/Esc closes this dialog safely";
+	const char body[] = "Pandora Artist: AFI / Track: Bleed Black";
+	assert (memcmp (&cells[modal.y + 1][modal.x + 2], title,
+			strlen (title)) == 0);
+	assert (memcmp (&cells[modal.y + 3][modal.x + 2], instruction,
+			strlen (instruction)) == 0);
+	assert (memcmp (&cells[modal.y + 5][modal.x + 2], body,
+			strlen (body)) == 0);
+	for (int x = modal.x; x < modal.x + modal.width; x++) {
+		assert (cells[modal.y][x] == '#');
+		assert (cells[modal.y + modal.height - 1][x] == '#');
+	}
+}
+
+static void TestCompositorModalOwnership (const SbTuiRect modal,
+		const char *title) {
+	char cells[COMPOSITOR_ROWS][COMPOSITOR_COLS];
+	const SbTuiRect partialArt = {modal.y > 2 ? modal.y - 2 : 0,
+			modal.x + modal.width / 2, modal.height + 4,
+			modal.width / 2 + 8};
+	CompositorReset (cells);
+	CompositorPaintArt (cells, partialArt, modal);
+	CompositorDrawModal (cells, modal, title);
+	CompositorAssertModal (cells, modal, title);
+	assert (cells[partialArt.y][partialArt.x] == 'A');
+	assert (cells[modal.y][partialArt.x] == '#');
+
+	/* Async arrival paints after an already-visible modal, but passive clipping
+	 * leaves every modal-owned body/instruction/border cell untouched. */
+	CompositorReset (cells);
+	CompositorDrawModal (cells, modal, title);
+	CompositorPaintArt (cells, partialArt, modal);
+	CompositorAssertModal (cells, modal, title);
+
+	/* Full overlap still gives every cell to the modal. */
+	CompositorReset (cells);
+	CompositorPaintArt (cells, modal, modal);
+	CompositorDrawModal (cells, modal, title);
+	CompositorAssertModal (cells, modal, title);
+
+	/* Closing removes the clip and restores the complete art rectangle. */
+	CompositorReset (cells);
+	CompositorPaintArt (cells, modal, (SbTuiRect) {0});
+	for (int y = modal.y; y < modal.y + modal.height; y++)
+		for (int x = modal.x; x < modal.x + modal.width; x++)
+			assert (cells[y][x] == 'A');
+}
+
 int main (void) {
 	/* Primary modals share width, centering, clamping, and chrome policy while
 	 * retaining content-appropriate preferred heights. */
@@ -108,9 +193,30 @@ int main (void) {
 	assert (!SbTuiPresentationArtCellVisible (lyricsRect, lyricsRect.y,
 			lyricsRect.x));
 	assert (!SbTuiPresentationArtCellVisible (dialog, dialog.y, dialog.x));
-	SbTuiArtCompositor compositor = {0};
-	SbTuiPresentationArtDidPaint (&compositor);
-	assert (compositor.painted);
+	assert (SbTuiPresentationCellOwner (artRect, partial, 8, 76) ==
+			SB_TUI_CELL_OVERLAY);
+	assert (SbTuiPresentationCellOwner (artRect, partial, 7, 76) ==
+			SB_TUI_CELL_ART);
+	assert (SbTuiPresentationCellOwner (artRect, partial, 30, 30) ==
+			SB_TUI_CELL_BASE);
+	/* Inspect final cell contents for every retained overlay family and one
+	 * blocking dialog, including partial/full overlap, async arrival, and close. */
+	const SbTuiRect testHelp = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_HELP, 40, 90, 24);
+	const SbTuiRect testTrack = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_TRACK_INFO, 40, 90, 12);
+	const SbTuiRect testLyrics = SbTuiPresentationModalRect (
+			SB_TUI_MODAL_LYRICS, 40, 90, 24);
+	const SbTuiRect testDialog = SbTuiPresentationPopupRect (40, 90, 10);
+	TestCompositorModalOwnership (testHelp, "SIGNALBOX HELP");
+	TestCompositorModalOwnership (testTrack, "TRACK INFO");
+	TestCompositorModalOwnership (testLyrics, "LYRICS");
+	TestCompositorModalOwnership (testDialog, "CONFIRM");
+	/* Resized retained modals recompute ownership with no stale old clip. */
+	TestCompositorModalOwnership (SbTuiPresentationModalRect (
+			SB_TUI_MODAL_HELP, 30, 76, 40), "SIGNALBOX HELP RESIZED");
+	TestCompositorModalOwnership (SbTuiPresentationModalRect (
+			SB_TUI_MODAL_TRACK_INFO, 30, 76, 10), "TRACK INFO RESIZED");
 
 	/* Half-open outer rectangles own every border cell, but no adjacent cell. */
 	const SbTuiRect frame = {10, 20, 6, 8};
@@ -228,6 +334,9 @@ int main (void) {
 	assert (SbTuiPresentationFieldRole ("Artist") == SB_TUI_TEXT_ARTIST);
 	assert (SbTuiPresentationFieldRole ("Canonical Track") == SB_TUI_TEXT_TRACK);
 	assert (SbTuiPresentationFieldRole ("Release") == SB_TUI_TEXT_ALBUM);
+	assert (SbTuiPresentationFieldRole ("Original Release") == SB_TUI_TEXT_TIME);
+	assert (SbTuiPresentationFieldRole ("Edition Release") == SB_TUI_TEXT_TIME);
+	assert (SbTuiPresentationFieldRole ("Genres") == SB_TUI_TEXT_PRIMARY);
 	assert (SbTuiPresentationFieldRole ("State") == SB_TUI_TEXT_STATE);
 	assert (SbTuiPresentationFieldRole ("Provider") == SB_TUI_TEXT_PROVIDER);
 	size_t labelLength = 0; const char *value = NULL; SbTuiTextRole role;
@@ -235,6 +344,10 @@ int main (void) {
 			&value, &role));
 	assert (labelLength == strlen ("Artist") && strcmp (value, "Deftones") == 0);
 	assert (role == SB_TUI_TEXT_ARTIST);
+	assert (SbTuiPresentationSplitField ("Release: A Very Long Deluxe Release Title That Wraps", &labelLength,
+			&value, &role));
+	assert (labelLength == strlen ("Release"));
+	assert (role == SB_TUI_TEXT_ALBUM);
 	assert (!SbTuiPresentationSplitField ("ALBUM ART", NULL, NULL, NULL));
 	assert (!SbTuiPresentationSplitField ("Provider: ", NULL, NULL, NULL));
 	assert (SbTuiPresentationIsSection ("LYRICS"));

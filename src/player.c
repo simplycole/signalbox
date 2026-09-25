@@ -66,6 +66,16 @@ const enum AVSampleFormat avformat = AV_SAMPLE_FMT_S16;
 
 static bool avLogTui;
 
+static SbAudioPlatform audioPlatform (void) {
+#ifdef __APPLE__
+	return SB_AUDIO_PLATFORM_MACOS;
+#elif defined(_WIN32)
+	return SB_AUDIO_PLATFORM_WINDOWS;
+#else
+	return SB_AUDIO_PLATFORM_LINUX;
+#endif
+}
+
 static void BarPlayerAvLog (void *context, int level, const char *format,
 		va_list args) {
 	if (!avLogTui) {
@@ -114,12 +124,27 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 	pthread_cond_init (&p->cond, NULL);
 	pthread_mutex_init (&p->aoplayLock, NULL);
 	pthread_cond_init (&p->aoplayCond, NULL);
+	p->aoDev = NULL;
+	p->aoFormat = (SbAudioOutputFormat) {0};
+	p->aoFormatValid = false;
 	p->spectrumReady = SbSpectrumInit (&p->spectrum);
 	BarPlayerReset (p);
 	p->settings = settings;
 }
 
 void BarPlayerDestroy (player_t * const p) {
+	bool skipAoShutdown = false;
+	if (p->aoDev != NULL) {
+		if (SbAudioOutputCloseAtShutdown (audioPlatform (), p->aoFormat.live)) {
+			tuiDebugPrint ("audio output close begin reason=shutdown\n");
+			ao_close (p->aoDev);
+			p->aoDev = NULL; p->aoFormatValid = false;
+			tuiDebugPrint ("audio output close complete reason=shutdown\n");
+		} else {
+			skipAoShutdown = true;
+			tuiDebugPrint ("audio output close skipped platform=macos reason=libao_coreaudio_deadlock_guard\n");
+		}
+	}
 	if (p->spectrumReady) SbSpectrumDestroy (&p->spectrum);
 	pthread_cond_destroy (&p->cond);
 	pthread_mutex_destroy (&p->lock);
@@ -129,13 +154,17 @@ void BarPlayerDestroy (player_t * const p) {
 #ifdef HAVE_AVFORMAT_NETWORK_INIT
 	avformat_network_deinit ();
 #endif
-	ao_shutdown ();
+	/* Unloading libao while its deliberately retained CoreAudio device is live
+	 * is teardown by another name. The process immediately exits and macOS
+	 * reclaims both the AudioUnit and plugin resources. */
+	if (!skipAoShutdown) ao_shutdown ();
 }
 
 void BarPlayerReset (player_t * const p) {
 	if (p->spectrumReady) SbSpectrumReset (&p->spectrum);
 	p->doQuit = false;
 	p->doPause = false;
+	p->stopReason = SB_PLAYER_STOP_NONE;
 	p->songDuration = 0;
 	p->songPlayed = 0;
 	p->mode = PLAYER_DEAD;
@@ -149,7 +178,6 @@ void BarPlayerReset (player_t * const p) {
 	p->streamIdx = -1;
 	p->lastTimestamp = 0;
 	p->interrupted = 0;
-	p->aoDev = NULL;
 }
 
 /*	Update volume filter
@@ -195,9 +223,7 @@ static int intCb (void * const data) {
 	assert (player != NULL);
 	if (player->interrupted > 1) {
 		/* got a sigint multiple times, quit pianobar (handled by main.c). */
-		pthread_mutex_lock (&player->lock);
-		player->doQuit = true;
-		pthread_mutex_unlock (&player->lock);
+		BarPlayerRequestStop (player, SB_PLAYER_STOP_QUIT);
 		return 1;
 	} else if (player->interrupted != 0) {
 		/* the request is retried with the same player context */
@@ -292,6 +318,27 @@ static int getSampleRate (const player_t * const player) {
 			player->settings->sampleRate;
 }
 
+static SbAudioOutputFormat decodedOutputFormat (const player_t * const player) {
+	SbAudioOutputFormat format = {
+			.bits = av_get_bytes_per_sample (avformat) * 8,
+			.channels = player->st->codecpar->ch_layout.nb_channels,
+			.rate = getSampleRate (player),
+			.byteFormat = AO_FMT_NATIVE,
+			.live = player->settings->audioPipe == NULL,
+	};
+	/* The live CoreAudio device is opened as stereo once. FFmpeg down/up-mixes
+	 * later Pandora streams before ao_play, making channel count stable too. */
+	if (audioPlatform () == SB_AUDIO_PLATFORM_MACOS && format.live)
+		format.channels = 2;
+	return format;
+}
+
+static SbAudioOutputFormat trackOutputFormat (const player_t * const player) {
+	return SbAudioOutputTarget (audioPlatform (),
+			player->aoDev != NULL && player->aoFormatValid, player->aoFormat,
+			decodedOutputFormat (player));
+}
+
 /*	setup filter chain
  */
 static bool openFilter (player_t * const player) {
@@ -327,10 +374,18 @@ static bool openFilter (player_t * const player) {
 		softfail ("create_filter volume");
 	}
 
-	/* aformat: convert float samples into something more usable */
+	/* aformat: normalize every macOS live track to the one process-lived
+	 * CoreAudio device; other platforms retain their prior per-track format. */
 	AVFilterContext *fafmt = NULL;
-	snprintf (strbuf, sizeof (strbuf), "sample_fmts=%s:sample_rates=%d",
-			av_get_sample_fmt_name (avformat), getSampleRate (player));
+	const SbAudioOutputFormat output = trackOutputFormat (player);
+	if (audioPlatform () == SB_AUDIO_PLATFORM_MACOS && output.live) {
+		snprintf (strbuf, sizeof (strbuf),
+				"sample_fmts=%s:sample_rates=%d:channel_layouts=stereo",
+				av_get_sample_fmt_name (avformat), output.rate);
+	} else {
+		snprintf (strbuf, sizeof (strbuf), "sample_fmts=%s:sample_rates=%d",
+				av_get_sample_fmt_name (avformat), output.rate);
+	}
 	if ((ret = avfilter_graph_create_filter (&fafmt,
 					avfilter_get_by_name ("aformat"), "format", strbuf, NULL,
 					player->fgraph)) < 0) {
@@ -361,15 +416,37 @@ static bool openFilter (player_t * const player) {
 /*	setup libao
  */
 static bool openDevice (player_t * const player) {
-	const AVCodecParameters * const cp = player->st->codecpar;
-
+	const SbAudioOutputFormat requested = trackOutputFormat (player);
+	const SbAudioOutputAction action = SbAudioOutputPlan (player->aoDev != NULL,
+			player->aoFormat, requested);
+	if (action == SB_AUDIO_OUTPUT_REUSE) {
+		tuiDebugPrint ("audio output reuse reason=compatible_format format=s16/%dch/%dHz\n",
+				requested.channels, requested.rate);
+		return true;
+	}
+	if (action == SB_AUDIO_OUTPUT_REOPEN) {
+		tuiDebugPrint ("audio output reopen reason=format_change old=s16/%dch/%dHz new=s16/%dch/%dHz\n",
+				player->aoFormat.channels, player->aoFormat.rate,
+				requested.channels, requested.rate);
+		/* This branch is unreachable for macOS live playback because its filter
+		 * targets the existing format. Keep the safety invariant explicit. */
+		if (!SbAudioOutputCloseOnTrackEnd (audioPlatform (), player->aoFormat.live)) {
+			BarUiMsg (player->settings, MSG_ERR,
+					"Cannot change the active macOS audio format safely.\n");
+			return false;
+		}
+		tuiDebugPrint ("audio output close begin reason=format_change\n");
+		ao_close (player->aoDev);
+		player->aoDev = NULL; player->aoFormatValid = false;
+		tuiDebugPrint ("audio output close complete reason=format_change\n");
+	}
 	ao_sample_format aoFmt;
 	memset (&aoFmt, 0, sizeof (aoFmt));
-	aoFmt.bits = av_get_bytes_per_sample (avformat) * 8;
+	aoFmt.bits = requested.bits;
 	assert (aoFmt.bits > 0);
-	aoFmt.channels = cp->ch_layout.nb_channels;
-	aoFmt.rate = getSampleRate (player);
-	aoFmt.byte_format = AO_FMT_NATIVE;
+	aoFmt.channels = requested.channels;
+	aoFmt.rate = requested.rate;
+	aoFmt.byte_format = requested.byteFormat;
 
 	int driver = -1;
 	if (player->settings->audioPipe) {
@@ -408,7 +485,9 @@ static bool openDevice (player_t * const player) {
 			return false;
 		}
 	}
-
+	player->aoFormat = requested; player->aoFormatValid = true;
+	tuiDebugPrint ("audio output open backend=libao kind=%s format=s16/%dch/%dHz\n",
+			requested.live ? "live" : "pipe", requested.channels, requested.rate);
 	return true;
 }
 
@@ -420,6 +499,25 @@ static bool shouldQuit (player_t * const player) {
 	const bool ret = player->doQuit;
 	pthread_mutex_unlock (&player->lock);
 	return ret;
+}
+
+void BarPlayerRequestStop (player_t * const player,
+		const SbPlayerStopReason reason) {
+	assert (player != NULL);
+	bool changed = false;
+	pthread_mutex_lock (&player->lock);
+	player->doQuit = true;
+	player->doPause = false;
+	if (reason > player->stopReason) {
+		player->stopReason = reason; changed = true;
+	}
+	pthread_cond_broadcast (&player->cond);
+	pthread_mutex_unlock (&player->lock);
+	pthread_mutex_lock (&player->aoplayLock);
+	pthread_cond_broadcast (&player->aoplayCond);
+	pthread_mutex_unlock (&player->aoplayLock);
+	if (changed) tuiDebugPrint ("player stop reason=%s\n",
+			SbPlayerStopReasonName (reason));
 }
 
 static void changeMode (player_t * const player, unsigned int mode) {
@@ -587,8 +685,6 @@ static int play (player_t * const player) {
 }
 
 static void finish (player_t * const player) {
-	ao_close (player->aoDev);
-	player->aoDev = NULL;
 	if (player->fgraph != NULL) {
 		avfilter_graph_free (&player->fgraph);
 		player->fgraph = NULL;
@@ -599,6 +695,18 @@ static void finish (player_t * const player) {
 	}
 	if (player->fctx != NULL) {
 		avformat_close_input (&player->fctx);
+	}
+	pthread_mutex_lock (&player->lock);
+	const SbPlayerStopReason reason = player->stopReason;
+	pthread_mutex_unlock (&player->lock);
+	if (player->aoDev != NULL && SbAudioOutputCloseForStop (
+			audioPlatform (), player->aoFormat.live, reason)) {
+		tuiDebugPrint ("audio output close begin reason=%s\n",
+				SbPlayerStopReasonName (reason));
+		ao_close (player->aoDev);
+		player->aoDev = NULL; player->aoFormatValid = false;
+		tuiDebugPrint ("audio output close complete reason=%s\n",
+				SbPlayerStopReasonName (reason));
 	}
 }
 
@@ -631,11 +739,18 @@ void *BarPlayerThread (void *data) {
 			/* stream not found */
 			pret = PLAYER_RET_SOFTFAIL;
 		}
+		pthread_mutex_lock (&player->lock);
+		const bool naturalEnd = !retry && player->stopReason == SB_PLAYER_STOP_NONE &&
+				pret == PLAYER_RET_OK;
+		if (naturalEnd) player->stopReason = SB_PLAYER_STOP_END_OF_TRACK;
+		pthread_mutex_unlock (&player->lock);
+		if (naturalEnd) tuiDebugPrint ("player stop reason=end_of_track\n");
 		changeMode (player, PLAYER_WAITING);
 		finish (player);
 	} while (retry);
 
 	changeMode (player, PLAYER_FINISHED);
+	tuiDebugPrint ("player thread exiting result=%lu\n", (unsigned long) pret);
 
 	return (void *) pret;
 }

@@ -77,7 +77,10 @@ view. Resize redraws the active view without starting a nested renderer loop.
 Help, Track Info, and Lyrics use one centered responsive modal family with a
 preferred width of 72 columns. Help targets a compact half-height viewport,
 Lyrics a generous three-fifths-height viewport, and Track Info sizes to its
-wrapped content within a bounded maximum.
+wrapped content within a bounded maximum. All three retain their actual curses
+window and full outer rectangle until close. Direct ANSI album art clips against
+that rectangle, then the modal is the final physical writer; async art and resize
+therefore cannot overwrite Help's border or body.
 
 ## Layout and accessibility
 
@@ -124,6 +127,27 @@ current track. User-facing metadata states are `Available`, `No match`, and
 match`, and `Temporarily unavailable`; art uses transient `Loading`, then
 `Ready`, `None`, or `Unavailable`.
 
+When MusicBrainz supplies them confidently, Track Info shows the selected
+release, original/first release date, edition date, release-group type, country,
+one label/catalog pair, one ISRC, and at most five categories after the canonical
+artist and track. Official MusicBrainz genres are labeled `Genres`; fallback
+folksonomy values are labeled `Tags`. Empty fields are omitted, and raw MBIDs
+and provider URLs stay internal. Dates preserve MusicBrainz precision:
+`YYYY-MM-DD` displays as
+`MM/DD/YYYY`, `YYYY-MM` as `MM/YYYY`, and `YYYY` remains `YYYY`. Equal original
+and edition dates collapse into one `Release Date`; differing dates are labeled
+`Original Release` and `Edition Release`. Original Release is shown only from a
+validated release group, and an original date later than the selected edition
+is omitted. MusicBrainz country `XW` displays as `Worldwide`, `XE` as `Europe`;
+ordinary codes such as `US`, `GB`, and `JP` remain concise. Long values use the
+same wrapped, value-aligned, semantically colored field rendering as the other
+modal rows.
+
+Metadata can update progressively while Track Info is open: canonical identity
+appears after recording match, then release-family and optional detail rows are
+added for the same track generation. Transient detail failure leaves the
+already-published core result visible.
+
 Synchronized lyrics are parsed once on publication. Sequential redraws advance
 a cursor, while playback discontinuities recover with binary search.
 `lyrics_display = three-line|line|off` controls only the inline strip; the full
@@ -132,7 +156,21 @@ Lyrics view remains available for plain text and when inline display is off.
 The schema-versioned persistent cache lives under the platform cache/data path.
 Successful results and genuine misses are reusable; transient provider failures
 are never persisted as permanent misses. Encoded art is stored separately from
-the JSON metadata/lyrics cache.
+the JSON metadata/lyrics cache. Rich metadata is restored with the successful
+recording result until its TTL expires; an incompatible older schema is ignored
+without requiring manual cache deletion.
+
+While a track plays, the same serialized enrichment workers prefetch copied
+identities for the next queued track and, only when higher-priority work is idle,
+track +2. Priority is current, next, then +2. Completed metadata, parsed lyrics,
+and source art are promoted by a copied Pandora identity plus
+artist/title/album/duration and rebound to the new current generation. Playback
+never waits; rapid skips may
+outrun prefetch. MusicBrainz foreground and speculative requests share one
+global one-request-per-second gate and the same per-track request cap.
+Transient speculative failures are not promoted or persisted: they cool down
+for 60 seconds to prevent retry floods, while a track becoming current retries
+missing work immediately.
 
 ## Station model and queue prefetch
 

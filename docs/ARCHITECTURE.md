@@ -14,29 +14,85 @@ painted into the reserved Now Playing rectangle with standard ANSI color and
 Unicode half blocks. Cache identity includes path, target geometry, and color
 mode, so normal progress redraws do not decode or resize artwork. Because the
 ANSI cells bypass curses' physical-screen cache, the compositor uses the actual
-topmost `WINDOW` origin and dimensions to clear and clip every cell in the
-half-open outer frame rectangle. Uncovered art remains visible immediately
-outside that frame, and closing or resizing an overlay immediately recomposes
-the full cover at the current geometry. Retained overlays are touched and
-repainted after direct ANSI emission so their complete frame remains physically
-authoritative without forcing a full-terminal repaint.
+topmost `WINDOW` origin and dimensions as a passive clip rectangle: it never
+emits art or clearing spaces into cells owned by an overlay. Uncovered art
+remains visible immediately outside that half-open frame, and closing or
+resizing an overlay immediately recomposes the full cover at the current
+geometry. Retained overlays are repainted after direct ANSI emission; Help also
+explicitly invalidates its physical curses rows, so its complete frame is the
+final physical writer without forcing a full-terminal repaint.
 
 `src/enrichment.c` implements a provider-neutral enrichment boundary. A Pandora
 song is copied into a `SbTrackIdentity`; original display strings are retained
 while separately normalized artist/title values form a provider-tagged cache
 key. The main loop submits that identity to one bounded worker, never the audio
-thread. A newer track replaces a queued request, and generation checking rejects
-completed results belonging to an older track.
+thread. Current work has priority over a copied next-track identity and one
+opportunistic track-+2 identity; generation checking rejects completed results
+belonging to an older track.
+
+Upcoming enrichment uses the same metadata/LRCLIB worker and art worker rather
+than adding provider concurrency. Provider caches are checked before network
+access and duplicate pending/active keys are coalesced. A prefetched bundle
+remains cache-only until its stable artist/title/album/duration key becomes
+current. A hashed Pandora track token, when available, also prevents two queued
+recordings with otherwise identical display fields from sharing speculative
+state; provider caches remain reusable by normalized recording fields. Metadata,
+parsed lyrics, and source-art state are then rebound to the
+actual current generation. Station changes drop queued speculative jobs but keep
+reusable cache entries. All MusicBrainz paths, including art release fallback,
+continue through the process-wide one-request-per-second gate and existing
+per-track request budget.
 
 The first metadata adapter queries the public MusicBrainz recording search API
-with artist and title, a descriptive User-Agent, a short timeout, and at most
-one uncached request per second. Conservative normalized artist/title scoring
-reports available, no-match, or non-fatal error state. Results use a generic
-model containing canonical names, release information, external IDs, provider,
-and confidence. A 32-entry provider-aware in-memory cache avoids duplicate
-requests during a run, while the schema-versioned persistent cache reuses
-eligible results across launches through atomic writes in the platform data
-directory.
+with artist and title, a descriptive User-Agent, a short timeout, and no more
+than one request per second. Conservative normalized artist/title scoring
+reports available, no-match, or non-fatal error state. Its provider-neutral
+result retains canonical names; selected release and release-group identity;
+edition and first-release dates at their source precision; release-group type;
+country; one coherent label/catalog pair; one normalized ISRC; up to five
+deduplicated categories with explicit official-genre or folksonomy-tag
+provenance; provider; and confidence. Missing optional values remain
+empty rather than acquiring placeholders. Album-level `firstReleaseDate` comes
+only from the selected release group's `first-release-date`; a recording search
+date is never promoted to album Original Release. If a supplied group date is
+later than the selected edition date at their shared precision, it is rejected
+rather than displayed or silently swapped.
+
+Release choice uses the same album-family, artist, status, type, and compilation
+scoring used by album-art resolution. Every selected candidate—whether embedded
+in the recording, chosen from a release-group browse, or found by album
+search—passes through the same release and release-group completion stage.
+When recording data has no suitable release identity, Signalbox performs an
+exact artist+album search and, only if that produces no useful candidate, one
+conservatively edition-normalized family search. Clear trailing qualifiers such
+as `(Deluxe)` or `(20th Anniversary Deluxe)` may be removed; genuine subtitles
+and unrelated punctuation are preserved. The metadata path is capped at five
+logical MusicBrainz requests per uncached track (the initial search plus four
+bounded lookups). Each logical lookup retries the same request once after 429,
+500, 502, 503, 504, timeout, or transport failure; 404 is not retried. Metadata
+therefore has a hard maximum of ten HTTP attempts. Cover-art recovery
+can independently add at most two MusicBrainz release-list lookups when the
+selected edition has no cover, so the complete enrichment path remains bounded
+at seven logical lookups and fourteen HTTP attempts when every lookup retries.
+All calls run on playback-independent workers and retain one-second spacing.
+A fully populated embedded release needs only the recording search. The usual
+matched-recording path takes two or three logical metadata requests: recording
+search plus whichever selected-release and release-group details are actually
+absent.
+
+A 32-entry provider-aware in-memory cache avoids duplicate requests during a
+run, while the schema-versioned persistent cache reuses eligible results across
+launches through atomic writes in the platform data directory. A successful
+recording match remains `Available` when an optional release or release-group
+detail request fails; partial rich metadata can still be cached, while transient
+top-level provider failures are not persisted.
+
+The worker publishes generation-tagged metadata progressively: canonical
+recording identity first, a validated release family next, and optional detail
+as it arrives. The retained Track Info view can therefore update without waiting
+for the complete ladder. A failed optional request never replaces an already
+published successful core result, and normal generation checks reject stale
+intermediate publications.
 
 Lyrics have their own provider-neutral result and provider interfaces rather
 than sharing the metadata provider shape. LRCLIB is the current community
@@ -70,8 +126,12 @@ and failures leave Pandora playback unchanged.
 The enrichment worker also owns a schema-versioned JSON cache which survives
 restarts. Metadata and lyrics use provider-separated keys in the shared file;
 corrupt or incompatible files are ignored, transient failures are excluded,
-and flushed temporary files are atomically replaced. Successful MusicBrainz
-results retain recording, release, and release-group MBIDs internally. The
+and flushed temporary files are atomically replaced. Cache schema 5 persists
+the complete rich metadata result, including category provenance; older cache
+files are ignored and replaced without manual deletion. Deserialization also
+rechecks the date invariant.
+Successful MusicBrainz results retain recording,
+release, and release-group MBIDs internally. The
 release MBID drives Cover Art Archive lookup, preferring a front 500px image.
 Encoded JPEG, PNG, or WebP data (at most 5 MiB) is stored separately under
 `art/`. A generic result and renderer contract expose status, provider, URL,
@@ -116,11 +176,27 @@ constructs the audio-filter graph; libao sends decoded samples to the selected
 audio output. The player state exposes pause, quit, elapsed time, duration,
 volume, and lifecycle information to the rest of the application.
 
+Each track still owns fresh stream, decoder, filter, and worker-thread state.
+The main loop joins a player only after it reports `PLAYER_FINISHED`, then may
+start the next track. Audio-device policy is separate and testable. Linux,
+Windows/WMM, and explicit audio pipes preserve their per-track libao close/open
+lifecycle. macOS live output is process-lived because libao's CoreAudio plugin
+can block indefinitely inside `ao_close()` even after its writer thread exits.
+Normal end, skip, and station change therefore reuse the compatible device.
+At final macOS shutdown Signalbox deliberately skips both `ao_close()` and
+`ao_shutdown()` while that live device exists and lets immediate process exit
+reclaim it; this avoids moving the same AudioUnit deadlock into the quit path.
+The decoder/filter and audio-output threads are always stopped and joined first,
+and no concurrent track accesses the retained handle.
+
 `src/spectrum.c` is a platform-neutral observational branch at the final PCM
 boundary. FFmpeg decoding runs on the per-track player thread. Its filter graph
 applies the existing volume and `aformat` stages and produces packed,
-native-endian signed 16-bit PCM at the configured/stream sample rate and source
-channel count. The per-track audio-output thread pulls each `AVFrame`; directly
+native-endian signed 16-bit PCM. Linux, Windows, and audio-pipe output retain
+the configured/stream sample rate and source channel count. On macOS, live
+libao output opens once as stereo at the first track's configured/stream rate;
+later FFmpeg graphs resample and mix to that stored format. The per-track
+audio-output thread pulls each `AVFrame`; directly
 before the unchanged synchronous `ao_play()` call it gives the analyzer a
 read-only view of that frame. Decoder frames, output format, pointer, byte count,
 gain, and timing are not changed.
