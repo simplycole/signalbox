@@ -113,8 +113,8 @@ reduced with aspect-preserving Lanczos filtering, gently normalized and
 sharpened at the effective pixel grid, and converted to ANSI half-block cells.
 The treatment is deliberately restrained: art stays chunky, with no saturation
 boost or default dithering. A sufficiently wide/tall Now Playing pane requests
-24×12 terminal cells directly from the encoded source; medium and compact panes
-fall back through 20×10, 16×8, 12×6, and 10×5. Resolution prefers the selected release,
+20×10 terminal cells directly from the encoded source; compact panes fall back
+through 16×8, 12×6, and 10×5. Resolution prefers the selected release,
 then the direct canonical release-group front image, then compatible alternate
 releases and bounded album-family recovery. Track Info reports the selected
 provider as `Cover Art Archive`; raw URLs and identities remain internal.

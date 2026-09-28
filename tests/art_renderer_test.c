@@ -111,13 +111,10 @@ int main (void) {
 	SbArtCell cell={{1,2,3},{4,5,6},16,231}; char ansi[96];
 	assert(SbArtCellAnsi(&cell,SB_ART_COLOR_TRUECOLOR,ansi,sizeof(ansi))>0);
 	assert(strstr(ansi,"38;2;1;2;3;48;2;4;5;6m")!=NULL && strstr(ansi,"▀")!=NULL);
-	const SbArtLayout wide=SbArtChooseLayout(88,12,true);
-	const SbArtLayout medium=SbArtChooseLayout(80,10,true);
-	const SbArtLayout compact=SbArtChooseLayout(71,8,true);
-	assert(wide.visible && wide.columns==24 && wide.rows==12);
-	assert(medium.visible && medium.columns==20 && medium.rows==10);
-	assert(compact.visible && compact.columns==16 && compact.rows==8);
-	assert(SbArtChooseLayout(87,12,true).columns==20);
+	const SbArtLayout large=SbArtChooseLayout(80,10,true);
+	const SbArtLayout medium=SbArtChooseLayout(71,8,true);
+	assert(large.visible && large.columns==20 && large.rows==10);
+	assert(medium.visible && medium.columns==16 && medium.rows==8);
 	assert(SbArtChooseLayout(59,8,true).columns==12);
 	assert(SbArtChooseLayout(48,8,true).columns==10);
 	assert(!SbArtChooseLayout(40,8,true).visible); assert(!SbArtChooseLayout(80,16,false).visible);
@@ -139,8 +136,8 @@ int main (void) {
 	cache.cells=calloc(20*9,sizeof(*cache.cells));
 	assert(cache.cells); assert(SbPreparedArtGet(&cache,path,20,10,SB_ART_COLOR_TRUECOLOR));
 	assert(cache.builds==0 && cache.hits==1 && cache.columns==20 && cache.rows==9);
-	assert(SbPreparedArtGet(&cache,path,24,12,SB_ART_COLOR_TRUECOLOR));
-	assert(cache.builds==1 && cache.columns==24 && cache.rows==12);
+	assert(SbPreparedArtGet(&cache,path,16,8,SB_ART_COLOR_TRUECOLOR));
+	assert(cache.builds==1 && cache.columns==16 && cache.rows==8);
 	assert(SbPreparedArtGet(&cache,path,20,10,SB_ART_COLOR_TRUECOLOR));
 	assert(cache.builds==2 && cache.columns==20 && cache.rows==10);
 	const unsigned int resizedBuilds=cache.builds;

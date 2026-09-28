@@ -12,8 +12,8 @@ pixel grid, conservative tonal enhancement, terminal color conversion, and an
 in-memory prepared-art cache. Tonal preparation caps percentile-based contrast
 expansion at 16%, applies only a tiny lift to dark covers, and follows with a
 capped one-eighth-strength four-neighbour unsharp mask. Wide layouts request a
-24-column by 12-terminal-row grid directly from the encoded source; smaller
-layouts retain 20×10, 16×8, 12×6, and 10×5 fallbacks. It does not boost
+20-column by 10-terminal-row grid directly from the encoded source; smaller
+layouts retain 16×8, 12×6, and 10×5 fallbacks. It does not boost
 saturation, dither, or upscale an already prepared grid. The curses renderer remains authoritative
 for layout and input; after its atomic screen update, the prepared cells are
 painted into the reserved Now Playing rectangle with standard ANSI color and

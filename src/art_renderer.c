@@ -225,8 +225,7 @@ bool SbPreparedArtGet (SbPreparedArt *art, const char *path, unsigned int column
 
 SbArtLayout SbArtChooseLayout (unsigned int width, unsigned int height, bool enabled) {
 	SbArtLayout out={0}; if(!enabled || width < 48 || height < 8) return out;
-	out.columns = width >= 88 && height >= 12 ? 24 :
-			width >= 80 && height >= 10 ? 20 :
+	out.columns = width >= 80 && height >= 10 ? 20 :
 			width >= 68 && height >= 8 ? 16 : width >= 56 ? 12 : 10;
 	if (out.columns + 24 > width) return (SbArtLayout){0};
 	out.rows = (out.columns + 1) / 2; if(out.rows > height) out.rows=height;

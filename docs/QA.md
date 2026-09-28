@@ -330,9 +330,9 @@ allows every application.
   are modestly clearer, dark covers retain useful detail, colors do not smear,
   clean edges have no conspicuous halos, tiny text remains naturally unreadable,
   and the art remains intentionally pixelated.
-- **Action:** Resize a sufficiently wide terminal between at least 45 rows,
-  39–44 rows, and fewer than 39 rows; also cross the wide-pane width threshold.
-  **Expected:** square covers request 24×12, 20×10, then compact geometry from
+- **Action:** Resize a sufficiently wide terminal above and below 45 rows, and
+  also cross the wide-pane width threshold.
+  **Expected:** square covers request 20×10, then compact geometry from
   the encoded source, with no stale-sized prepared buffer, crowded metadata,
   modal bleed-through, or incomplete redraw-band restoration.
 - **Action:** Navigate Stations with both `j`/`k` and rapid mouse-wheel input;

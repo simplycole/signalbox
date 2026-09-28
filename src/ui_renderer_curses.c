@@ -1044,8 +1044,7 @@ static SbArtLayout SbUiCursesArtLayout (const SbUiRenderer *renderer,
 	if (cols < 80 || rows < 24 || model->artState != SB_LOOKUP_AVAILABLE ||
 			renderer->settings->albumArtMode == SB_ALBUM_ART_OFF) return (SbArtLayout) {0};
 	const int split = cols / 3, rightWidth = cols - (split + 2) - 2; *x = split + 2;
-	const unsigned int nowPlayingHeight =
-			SbTuiPresentationNowPlayingHeight (rows);
+	const unsigned int nowPlayingHeight = rows >= 45 ? 11 : 8;
 	return SbArtChooseLayout ((unsigned int) rightWidth, nowPlayingHeight, true);
 }
 
@@ -1526,8 +1525,7 @@ static void SbUiCursesFrame (SbUiRenderer *renderer,
 	if (cols >= 80 && rows >= 24) {
 		const int split = cols / 3;
 		SbUiCursesVLine (stdscr, 3, split, statusY - 4);
-		const int nowPlayingHeight = (int)
-				SbTuiPresentationNowPlayingHeight (rows);
+		const int nowPlayingHeight = rows >= 45 ? 11 : 8;
 		const size_t upcomingCount = SbUiCursesUpcomingCount (model);
 		const int rightWidth = cols - (split + 2) - 2;
 		const int spectrumRows = model->visualizerEnabled && rightWidth >= 38 ?
