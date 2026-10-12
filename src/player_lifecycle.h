@@ -37,3 +37,13 @@ bool SbAudioOutputCloseAtShutdown (SbAudioPlatform, bool live);
 bool SbAudioOutputCloseForStop (SbAudioPlatform, bool live,
 		SbPlayerStopReason);
 const char *SbPlayerStopReasonName (SbPlayerStopReason);
+
+typedef enum {
+	PLAYER_RET_OK = 0,
+	PLAYER_RET_HARDFAIL = 1,
+	PLAYER_RET_SOFTFAIL = 2,
+	PLAYER_RET_STREAMFAIL = 3,
+	PLAYER_RET_DECODEFAIL = 4,
+} BarPlayerResult;
+const char *BarPlayerResultName (BarPlayerResult);
+bool BarPlayerResultRecoverable (BarPlayerResult, SbPlayerStopReason);

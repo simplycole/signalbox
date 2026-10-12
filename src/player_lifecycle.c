@@ -55,3 +55,19 @@ const char *SbPlayerStopReasonName (const SbPlayerStopReason reason) {
 	}
 	return "unknown";
 }
+
+const char *BarPlayerResultName (const BarPlayerResult result) {
+	switch (result) {
+		case PLAYER_RET_OK: return "PLAYER_RET_OK";
+		case PLAYER_RET_HARDFAIL: return "PLAYER_RET_HARDFAIL";
+		case PLAYER_RET_SOFTFAIL: return "PLAYER_RET_SOFTFAIL";
+		case PLAYER_RET_STREAMFAIL: return "PLAYER_RET_STREAMFAIL";
+		case PLAYER_RET_DECODEFAIL: return "PLAYER_RET_DECODEFAIL";
+	}
+	return "PLAYER_RET_UNKNOWN";
+}
+
+bool BarPlayerResultRecoverable (BarPlayerResult result, SbPlayerStopReason stop) {
+	return stop == SB_PLAYER_STOP_NONE && (result == PLAYER_RET_SOFTFAIL ||
+			result == PLAYER_RET_STREAMFAIL);
+}

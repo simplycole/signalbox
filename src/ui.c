@@ -184,9 +184,20 @@ static bool temporaryCurlError (const CURLcode code) {
 	httpret = curl_easy_setopt (http, k, v); \
 	assert (httpret == CURLE_OK);
 
+static int playlistProgressCb (void *data, curl_off_t dltotal,
+		curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+	(void) dltotal; (void) dlnow; (void) ultotal; (void) ulnow;
+	BarApp_t *app = data;
+	pthread_mutex_lock (&app->prefetch.lock);
+	const bool cancel = app->prefetch.cancel;
+	pthread_mutex_unlock (&app->prefetch.lock);
+	return cancel;
+}
+
 static CURLcode BarPianoHttpRequest (CURL * const http,
 		const BarSettings_t * const settings, PianoRequest_t * const req,
-		const bool quiet) {
+		BarApp_t *background) {
+	const bool quiet = background != NULL;
 	buffer buffer = {NULL, 0};
 	sig_atomic_t lint = 0, *prevint;
 
@@ -217,11 +228,16 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 	setAndCheck (CURLOPT_POSTFIELDS, req->postData);
 	setAndCheck (CURLOPT_WRITEFUNCTION, httpFetchCb);
 	setAndCheck (CURLOPT_WRITEDATA, &buffer);
-	setAndCheck (CURLOPT_XFERINFOFUNCTION, progressCb);
-	setAndCheck (CURLOPT_XFERINFODATA, &lint);
+	setAndCheck (CURLOPT_XFERINFOFUNCTION, quiet ? playlistProgressCb : progressCb);
+	setAndCheck (CURLOPT_XFERINFODATA, quiet ? (void *) background : (void *) &lint);
 	setAndCheck (CURLOPT_NOPROGRESS, 0);
 	setAndCheck (CURLOPT_POST, 1);
-	setAndCheck (CURLOPT_TIMEOUT, settings->timeout);
+	/* A background playlist transaction is bounded even if timeout=0 was
+	 * configured. Cancellation is polled by curl while the TUI keeps running. */
+	setAndCheck (CURLOPT_TIMEOUT, quiet ?
+			(settings->timeout > 0 && settings->timeout < 15 ? settings->timeout : 15) :
+			settings->timeout);
+	setAndCheck (CURLOPT_NOSIGNAL, 1L);
 #ifdef _WIN32
 	char *bundledCa = NULL;
 #endif
@@ -274,9 +290,12 @@ static CURLcode BarPianoHttpRequest (CURL * const http,
 			free (buffer.data);
 			buffer.data = NULL;
 			buffer.pos = 0;
-			if (retry >= settings->maxRetry) {
+			if (retry >= settings->maxRetry ||
+					(quiet && playlistProgressCb (background, 0, 0, 0, 0))) {
 				break;
 			}
+			if (quiet) tuiDebugPrint ("playlist refresh transport retry attempt=%u limit=%u curl=%d\n",
+					retry + 1, settings->maxRetry, (int) httpret);
 			if (!quiet && SbUiRendererIsCurses (SbUiRendererGetActive ())) {
 				BarUiMsg (settings, MSG_QUESTION,
 						"Warning: request failed — retrying (%u/%u)",
@@ -327,7 +346,7 @@ bool BarUiPianoCall (BarApp_t * const app, const PianoRequestType_t type,
 			goto cleanup;
 		}
 
-		wRetLocal = BarPianoHttpRequest (app->http, &app->settings, &req, false);
+		wRetLocal = BarPianoHttpRequest (app->http, &app->settings, &req, NULL);
 		if (wRetLocal == CURLE_ABORTED_BY_CALLBACK) {
 			BarUiMsg (&app->settings, MSG_NONE, "Interrupted.\n");
 			goto cleanup;
@@ -390,27 +409,48 @@ cleanup:
 	return ret;
 }
 
-/* Playlist prefetch uses a snapshot of the authenticated piano handle and its
- * own curl easy handle. GET_PLAYLIST only reads handle authentication state
- * and returns an independently-owned song list. */
+/* Prepare and parse under the authentication lock; never hold it during
+ * background network I/O. Requests own their serialized authentication data.
+ * Preserve reauthentication, bounded to one login and one playlist retry. */
 bool BarUiPianoCallQuiet (BarApp_t * const app, CURL * const http,
 		const PianoRequestType_t type, void * const data,
 		PianoReturn_t * const pRet, CURLcode * const wRet) {
-	pthread_mutex_lock (&app->pianoLock);
-	PianoHandle_t ph = app->ph;
-	PianoRequest_t req = {.data = data, .responseData = NULL};
-	*pRet = PianoRequest (&ph, &req, type);
-	if (*pRet == PIANO_RET_OK) {
-		*wRet = BarPianoHttpRequest (http, &app->settings, &req, true);
-		if (*wRet == CURLE_OK) *pRet = PianoResponse (&ph, &req);
-	} else {
+	PianoRequestDataLogin_t login = {.user = app->settings.username,
+			.password = app->settings.password, .step = 0};
+	PianoRequestType_t current = type;
+	bool reauthenticated = false;
+	for (unsigned int attempt = 0; attempt < 4; attempt++) {
+		if (playlistProgressCb (app, 0, 0, 0, 0)) {
+			*wRet = CURLE_ABORTED_BY_CALLBACK;
+			return false;
+		}
+		PianoRequest_t req = {.data = current == PIANO_REQUEST_LOGIN ?
+				(void *) &login : data, .responseData = NULL};
+		pthread_mutex_lock (&app->pianoLock);
+		*pRet = PianoRequest (&app->ph, &req, current);
+		pthread_mutex_unlock (&app->pianoLock);
 		*wRet = CURLE_OK;
+		if (*pRet == PIANO_RET_OK) {
+			*wRet = BarPianoHttpRequest (http, &app->settings, &req, app);
+			if (*wRet == CURLE_OK) {
+				pthread_mutex_lock (&app->pianoLock);
+				*pRet = PianoResponse (&app->ph, &req);
+				pthread_mutex_unlock (&app->pianoLock);
+			}
+		}
+		free (req.responseData);
+		PianoDestroyRequest (&req);
+		if (*wRet != CURLE_OK) return false;
+		if (current == PIANO_REQUEST_LOGIN) {
+			if (*pRet == PIANO_RET_CONTINUE_REQUEST) continue;
+			if (*pRet != PIANO_RET_OK) return false;
+			current = type;
+		} else if (*pRet == PIANO_RET_P_INVALID_AUTH_TOKEN && !reauthenticated) {
+			reauthenticated = true;
+			current = PIANO_REQUEST_LOGIN;
+		} else return *pRet == PIANO_RET_OK;
 	}
-	free (req.responseData);
-	PianoDestroyRequest (&req);
-	const bool success = *pRet == PIANO_RET_OK && *wRet == CURLE_OK;
-	pthread_mutex_unlock (&app->pianoLock);
-	return success;
+	return false;
 }
 
 /*	Station sorting functions */

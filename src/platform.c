@@ -213,6 +213,19 @@ uint64_t SbPlatformMonotonicMs (void) {
 #endif
 }
 
+/* Real-world URL age includes system sleep. Keep the existing monotonic clock
+ * for scheduling and enrichment timings; media timestamps drive playback. */
+uint64_t SbPlatformRealtimeMs (void) {
+#ifdef _WIN32
+	return (uint64_t) time (NULL) * 1000;
+#else
+	struct timespec now;
+	if (clock_gettime (CLOCK_REALTIME, &now) != 0)
+		return (uint64_t) time (NULL) * 1000;
+	return (uint64_t) now.tv_sec * 1000 + (uint64_t) now.tv_nsec / 1000000;
+#endif
+}
+
 #ifdef SIGNALBOX_PDCURSES_VT
 bool SbPlatformWaitForConsoleInput (const int timeoutMs) {
 	const HANDLE input = GetStdHandle (STD_INPUT_HANDLE);

@@ -209,11 +209,12 @@ libpiano.so.0: ${LIBPIANO_RELOBJ} ${LIBPIANO_OBJ}
 TEST_TARGETS:=spectrum-test enrichment-test enrichment-cache-test album-art-test \
 	art-renderer-test lyrics-sync-test tui-presentation-test \
 	playlist-prefetch-test station-browser-test settings-values-test \
-	player-lifecycle-test
+	player-lifecycle-test playlist-recovery-test
 
 clean:
 	${SILENTECHO} " CLEAN"
 	${SILENTCMD}${RM} ${PIANOBAR_OBJ} ${LIBPIANO_OBJ} \
+		playlist-recovery-test playlist-recovery-test.exe \
 		${LIBPIANO_RELOBJ} ${PROGRAM_BASE} ${PROGRAM_BASE}.exe spectrum-test spectrum-test.exe enrichment-test enrichment-test.exe enrichment-cache-test enrichment-cache-test.exe album-art-test album-art-test.exe playlist-prefetch-test playlist-prefetch-test.exe pianobar libpiano.so* \
 		libpiano.a art-renderer-test art-renderer-test.exe tui-presentation-test tui-presentation-test.exe lyrics-sync-test lyrics-sync-test.exe station-browser-test station-browser-test.exe settings-values-test settings-values-test.exe player-lifecycle-test player-lifecycle-test.exe $(PIANOBAR_SRC:.c=.d) $(LIBPIANO_SRC:.c=.d)
 
@@ -226,6 +227,10 @@ package-linux:
 	MAKE="$(MAKE)" ${PACKAGE_SCRIPT} linux
 
 test: ${TEST_TARGETS}
+
+playlist-recovery-test: tests/playlist_recovery_test.c src/main.c src/ui.c src/playback_queue.h src/main.h src/player.h $(filter-out src/main.o src/ui.o,${PIANOBAR_OBJ}) ${LIBPIANO_OBJ}
+	${CC} ${CPPFLAGS} ${ALL_CFLAGS} -UNDEBUG -I src -o $@$(EXEEXT) tests/playlist_recovery_test.c $(filter-out src/main.o src/ui.o,${PIANOBAR_OBJ}) ${LIBPIANO_OBJ} ${ALL_LDFLAGS}
+	./$@$(EXEEXT)
 
 player-lifecycle-test: tests/player_lifecycle_test.c src/player_lifecycle.c src/player_lifecycle.h
 	${CC} ${CPPFLAGS} -std=c99 -O2 -I src -o $@$(EXEEXT) tests/player_lifecycle_test.c src/player_lifecycle.c

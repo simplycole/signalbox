@@ -88,6 +88,11 @@ static void BarPlayerAvLog (void *context, int level, const char *format,
 		char line[512]; int prefix = 1;
 		av_log_format_line (context, level, format, args, line, sizeof (line),
 				&prefix);
+		/* FFmpeg may include signed stream URLs in errors. */
+		if (strstr (line, "http://") || strstr (line, "https://")) {
+			tuiDebugPrint ("libav level=%d detail=redacted_url\n", level);
+			return;
+		}
 		tuiDebugPrint ("libav level=%d %s", level, line);
 	}
 }
@@ -164,6 +169,7 @@ void BarPlayerReset (player_t * const p) {
 	if (p->spectrumReady) SbSpectrumReset (&p->spectrum);
 	p->doQuit = false;
 	p->doPause = false;
+	p->pausedAtMs = 0;
 	p->stopReason = SB_PLAYER_STOP_NONE;
 	p->songDuration = 0;
 	p->songPlayed = 0;
@@ -178,6 +184,7 @@ void BarPlayerReset (player_t * const p) {
 	p->streamIdx = -1;
 	p->lastTimestamp = 0;
 	p->interrupted = 0;
+	p->streamSetupResult = PLAYER_RET_SOFTFAIL;
 }
 
 /*	Update volume filter
@@ -213,6 +220,7 @@ void BarPlayerSetVolume (player_t * const player) {
 }
 
 #define softfail(msg) \
+	tuiDebugPrint ("player setup failure stage=%s av_error=%d\n", msg, ret); \
 	printError (player->settings, msg, ret); \
 	return false;
 
@@ -221,6 +229,10 @@ void BarPlayerSetVolume (player_t * const player) {
 static int intCb (void * const data) {
 	player_t * const player = data;
 	assert (player != NULL);
+	pthread_mutex_lock (&player->lock);
+	const bool quit = player->doQuit;
+	pthread_mutex_unlock (&player->lock);
+	if (quit) return 1;
 	if (player->interrupted > 1) {
 		/* got a sigint multiple times, quit pianobar (handled by main.c). */
 		BarPlayerRequestStop (player, SB_PLAYER_STOP_QUIT);
@@ -240,9 +252,14 @@ static bool openStream (player_t * const player) {
 	assert (player->fctx == NULL);
 
 	int ret;
+	player->streamSetupResult = PLAYER_RET_SOFTFAIL;
 
 	/* stream setup */
 	player->fctx = avformat_alloc_context ();
+	if (player->fctx == NULL) {
+		player->streamSetupResult = PLAYER_RET_HARDFAIL;
+		return false;
+	}
 	player->fctx->interrupt_callback.callback = intCb;
 	player->fctx->interrupt_callback.opaque = player;
 
@@ -255,7 +272,9 @@ static bool openStream (player_t * const player) {
 	av_dict_set (&options, "timeout", timeoutStr, 0);
 
 	assert (player->url != NULL);
-	if ((ret = avformat_open_input (&player->fctx, player->url, NULL, &options)) < 0) {
+	ret = avformat_open_input (&player->fctx, player->url, NULL, &options);
+	av_dict_free (&options);
+	if (ret < 0) {
 		softfail ("Unable to open audio file");
 	}
 
@@ -271,6 +290,9 @@ static bool openStream (player_t * const player) {
 	player->streamIdx = av_find_best_stream (player->fctx, AVMEDIA_TYPE_AUDIO,
 			-1, -1, NULL, 0);
 	if (player->streamIdx < 0) {
+		ret = player->streamIdx;
+		if (ret == AVERROR_DECODER_NOT_FOUND)
+			player->streamSetupResult = PLAYER_RET_DECODEFAIL;
 		softfail ("find_best_stream");
 	}
 
@@ -278,7 +300,10 @@ static bool openStream (player_t * const player) {
 	player->st->discard = AVDISCARD_DEFAULT;
 
 	/* decoder setup */
+	player->streamSetupResult = PLAYER_RET_DECODEFAIL;
 	if ((player->cctx = avcodec_alloc_context3 (NULL)) == NULL) {
+		player->streamSetupResult = PLAYER_RET_HARDFAIL;
+		ret = AVERROR (ENOMEM);
 		softfail ("avcodec_alloc_context3");
 	}
 	const AVCodecParameters * const cp = player->st->codecpar;
@@ -288,6 +313,7 @@ static bool openStream (player_t * const player) {
 
 	const AVCodec * const decoder = avcodec_find_decoder (cp->codec_id);
 	if (decoder == NULL) {
+		ret = AVERROR_DECODER_NOT_FOUND;
 		softfail ("find_decoder");
 	}
 
@@ -564,7 +590,7 @@ static int closeFilterSource (player_t * const player) {
 
 /*	decode and play stream. returns 0 or av error code.
  */
-static int play (player_t * const player) {
+static int play (player_t * const player, bool *decodeFailed) {
 	assert (player != NULL);
 	const int64_t minBufferHealth = player->settings->bufferSecs;
 	AVCodecContext * const cctx = player->cctx;
@@ -656,7 +682,7 @@ static int play (player_t * const player) {
 			do {
 				pthread_mutex_lock (&player->aoplayLock);
 				bufferHealth = timeBase * (double) (frame->pts - player->lastTimestamp);
-				if (bufferHealth > minBufferHealth) {
+				if (bufferHealth > minBufferHealth && !shouldQuit (player)) {
 					debugPrint (DEBUG_AUDIO, "decoding buffer filled health %"PRIi64" minHealth %"PRIi64"\n",
 							bufferHealth, minBufferHealth);
 					/* Buffer get healthy, resume */
@@ -667,7 +693,7 @@ static int play (player_t * const player) {
 							bufferHealth, minBufferHealth);
 				}
 				pthread_mutex_unlock (&player->aoplayLock);
-			} while (bufferHealth > minBufferHealth);
+			} while (bufferHealth > minBufferHealth && !shouldQuit (player));
 		}
 
 		av_packet_unref (pkt);
@@ -680,6 +706,7 @@ static int play (player_t * const player) {
 	av_packet_free (&pkt);
 	debugPrint (DEBUG_AUDIO, "decoder is done, waiting for ao player\n");
 	pthread_join (aoplaythread, NULL);
+	*decodeFailed = decoderError;
 
 	return ret;
 }
@@ -720,37 +747,37 @@ void *BarPlayerThread (void *data) {
 	player_t * const player = data;
 	uintptr_t pret = PLAYER_RET_OK;
 
-	bool retry;
-	do {
-		retry = false;
+	{
 		if (openStream (player)) {
 			if (openFilter (player) && openDevice (player)) {
 				changeMode (player, PLAYER_PLAYING);
 				BarPlayerSetVolume (player);
-				const int ret = play (player);
-				retry = (ret == AVERROR_INVALIDDATA ||
-						 ret == -ECONNRESET) &&
-						!player->interrupted;
+				bool decodeFailed = false;
+				const int ret = play (player, &decodeFailed);
+				if (decodeFailed) pret = PLAYER_RET_DECODEFAIL;
+				else if (ret < 0 && ret != AVERROR_EOF && ret != AVERROR (EAGAIN))
+					pret = PLAYER_RET_STREAMFAIL;
 			} else {
 				/* filter missing or audio device busy */
 				pret = PLAYER_RET_HARDFAIL;
 			}
 		} else {
 			/* stream not found */
-			pret = PLAYER_RET_SOFTFAIL;
+			pret = player->streamSetupResult;
 		}
 		pthread_mutex_lock (&player->lock);
-		const bool naturalEnd = !retry && player->stopReason == SB_PLAYER_STOP_NONE &&
+		const bool naturalEnd = player->stopReason == SB_PLAYER_STOP_NONE &&
 				pret == PLAYER_RET_OK;
 		if (naturalEnd) player->stopReason = SB_PLAYER_STOP_END_OF_TRACK;
 		pthread_mutex_unlock (&player->lock);
 		if (naturalEnd) tuiDebugPrint ("player stop reason=end_of_track\n");
 		changeMode (player, PLAYER_WAITING);
 		finish (player);
-	} while (retry);
+	}
 
 	changeMode (player, PLAYER_FINISHED);
-	tuiDebugPrint ("player thread exiting result=%lu\n", (unsigned long) pret);
+	tuiDebugPrint ("player thread exiting result=%lu(%s)\n", (unsigned long) pret,
+			BarPlayerResultName ((BarPlayerResult) pret));
 
 	return (void *) pret;
 }

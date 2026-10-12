@@ -38,6 +38,8 @@ THE SOFTWARE.
 #include "ui_dispatch.h"
 #include "ui_act.h"
 #include "debug.h"
+#include "playback_queue.h"
+#include "platform.h"
 
 /*	standard eventcmd call
  */
@@ -327,12 +329,12 @@ static void drainPlaylist (BarApp_t * const app) {
 	/* Pending identities are copied, so cancellation never follows freed queue
 	 * nodes. Completed cache entries remain reusable across stations. */
 	SbMetadataResolverCancelPrefetch (&app->metadataResolver);
+	BarMainCancelLongPauseRecovery (app, "station_change");
+	app->playbackBlocked = false;
+	app->recoveryAttempted = app->recoveryPending = false;
+	BarMainInvalidatePlaybackQueue (app, BarPlayerGetMode (&app->player) != PLAYER_DEAD,
+			"station_change");
 	BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_STATION_CHANGE);
-	if (app->playlist != NULL) {
-		/* drain playlist */
-		PianoDestroyPlaylist (PianoListNextP (app->playlist));
-		app->playlist->head.next = NULL;
-	}
 }
 
 /*	delete current station
@@ -584,47 +586,59 @@ BarUiActCallback(BarUiActLoveSong) {
 /*	skip song
  */
 BarUiActCallback(BarUiActSkipSong) {
+	app->playbackBlocked = false;
+	if (app->longPause.state == SB_LONG_PAUSE_STARTING_FRESH)
+		BarMainCancelLongPauseRecovery (app, "next");
+	if (app->longPause.state == SB_LONG_PAUSE_NONE) {
+		app->recoveryAttempted = app->recoveryPending = false;
+		app->playlistRefreshReason = "next";
+	}
 	BarUiDoSkipSong (&app->player, SB_PLAYER_STOP_NEXT);
-	if (app->useTui) {
-		BarUiMsg (&app->settings, MSG_INFO, "Skipping track\n");
-	}
+	if (app->useTui) BarUiMsg (&app->settings, MSG_INFO, "Skipping track\n");
 }
 
-/*	play
- */
+static void setPause (BarApp_t *app, bool paused) {
+	const uint64_t now = SbPlatformRealtimeMs ();
+	pthread_mutex_lock (&app->player.lock);
+	const bool wasPaused = app->player.doPause;
+	const uint64_t started = app->player.pausedAtMs;
+	if (paused && !wasPaused) app->player.pausedAtMs = now;
+	app->player.doPause = paused;
+	pthread_cond_broadcast (&app->player.cond);
+	pthread_mutex_unlock (&app->player.lock);
+	if (!paused) {
+		if (app->playbackBlocked) {
+			app->playbackBlocked = false;
+			BarMainCancelLongPauseRecovery (app, "play");
+			app->recoveryAttempted = app->recoveryPending = false;
+			app->playlistRefreshReason = "stream_failure";
+		}
+		if (wasPaused) {
+			const uint64_t age = SbPlaybackAgeMs (started, now);
+			tuiDebugPrint ("resume pause_age_ms=%llu\n", (unsigned long long) age);
+			if (age >= SB_PLAYBACK_URL_MAX_AGE_MS || now < started) {
+				BarMainBeginLongPauseRecovery (app, age);
+			}
+		}
+	}
+	if (app->useTui) BarUiMsg (&app->settings, MSG_INFO,
+			paused ? "Paused\n" : "Resumed\n");
+}
+
+/* Play/resume also restarts an explicitly stopped recovery. */
 BarUiActCallback(BarUiActPlay) {
-	pthread_mutex_lock (&app->player.lock);
-	app->player.doPause = false;
-	pthread_cond_broadcast (&app->player.cond);
-	pthread_mutex_unlock (&app->player.lock);
-	if (app->useTui) {
-		BarUiMsg (&app->settings, MSG_INFO, "Resumed\n");
-	}
+	setPause (app, false);
 }
 
-/*	pause
- */
 BarUiActCallback(BarUiActPause) {
-	pthread_mutex_lock (&app->player.lock);
-	app->player.doPause = true;
-	pthread_cond_broadcast (&app->player.cond);
-	pthread_mutex_unlock (&app->player.lock);
-	if (app->useTui) {
-		BarUiMsg (&app->settings, MSG_INFO, "Paused\n");
-	}
+	setPause (app, true);
 }
 
-/*	toggle pause
- */
 BarUiActCallback(BarUiActTogglePause) {
 	pthread_mutex_lock (&app->player.lock);
-	app->player.doPause = !app->player.doPause;
 	const bool paused = app->player.doPause;
-	pthread_cond_broadcast (&app->player.cond);
 	pthread_mutex_unlock (&app->player.lock);
-	if (app->useTui) {
-		BarUiMsg (&app->settings, MSG_INFO, paused ? "Paused\n" : "Resumed\n");
-	}
+	setPause (app, app->playbackBlocked ? false : !paused);
 }
 
 /*	rename current station

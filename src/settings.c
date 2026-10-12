@@ -224,7 +224,7 @@ void BarSettingsRead (BarSettings_t *settings) {
 	settings->volume = 0;
 	settings->timeout = 30; /* seconds */
 	settings->gainMul = 1.0;
-	/* should be > 4, otherwise expired audio urls (403) can stop playback */
+	/* Foreground network retry limit. Playback refresh is independently bounded. */
 	settings->maxRetry = 5;
 	settings->bufferSecs = 5;
 	settings->sortOrder = BAR_SORT_NAME_AZ;

@@ -57,6 +57,7 @@ typedef struct {
 	pthread_mutex_t lock, aoplayLock;
 	pthread_cond_t cond, aoplayCond; /* broadcast changes to doPause */
 	bool doQuit, doPause;
+	uint64_t pausedAtMs;
 	SbPlayerStopReason stopReason;
 
 	/* measured in seconds */
@@ -68,6 +69,7 @@ typedef struct {
 	/* private attributes _not_ protected by mutex */
 
 	/* libav */
+	BarPlayerResult streamSetupResult;
 	AVFilterContext *fvolume;
 	AVFilterGraph *fgraph;
 	AVFormatContext *fctx;
@@ -92,8 +94,6 @@ typedef struct {
 	char *url;
 	const BarSettings_t *settings;
 } player_t;
-
-enum {PLAYER_RET_OK = 0, PLAYER_RET_HARDFAIL = 1, PLAYER_RET_SOFTFAIL = 2};
 
 /* Install before curses takes ownership of the terminal. */
 void BarPlayerConfigureAvLogging (bool);

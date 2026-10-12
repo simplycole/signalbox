@@ -33,6 +33,14 @@ THE SOFTWARE.
 #include "ui_renderer.h"
 #include "enrichment.h"
 
+typedef enum {
+	SB_LONG_PAUSE_NONE = 0,
+	SB_LONG_PAUSE_REFRESH_NEEDED,
+	SB_LONG_PAUSE_REFRESH_PENDING,
+	SB_LONG_PAUSE_REFRESH_READY,
+	SB_LONG_PAUSE_STARTING_FRESH,
+} SbLongPauseRecovery;
+
 typedef struct {
 	PianoHandle_t ph;
 	CURL *http;
@@ -60,11 +68,19 @@ typedef struct {
 	bool visualizerEnabled;
 	SbTuiTheme tuiTheme;
 	unsigned int playerErrors;
+	bool recoveryAttempted, recoveryPending, playbackBlocked;
+	struct {
+		SbLongPauseRecovery state;
+		/* Only this suspended player may bypass a terminal decode failure. */
+		bool currentPlayer;
+	} longPause;
+	const char *playlistRefreshReason;
 	pthread_mutex_t pianoLock;
 	struct {
 		pthread_t thread;
 		pthread_mutex_t lock;
-		bool inFlight, complete;
+		bool inFlight, complete, cancel, required;
+		const char *reason;
 		PianoSong_t *result;
 		PianoReturn_t pianoResult;
 		CURLcode curlResult;
@@ -74,6 +90,11 @@ typedef struct {
 	} prefetch;
 	uint64_t playlistGeneration;
 } BarApp_t;
+
+size_t BarMainInvalidatePlaybackQueue (BarApp_t *, bool keepCurrent,
+		const char *reason);
+void BarMainBeginLongPauseRecovery (BarApp_t *, uint64_t pauseAgeMs);
+void BarMainCancelLongPauseRecovery (BarApp_t *, const char *reason);
 
 #include <signal.h>
 extern sig_atomic_t *interrupted;

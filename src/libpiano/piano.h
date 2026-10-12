@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "../config.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #ifdef __FreeBSD__
 #define _GCRYPT_IN_LIBGCRYPT
 #endif
@@ -96,6 +97,8 @@ typedef struct PianoSong {
 	char *feedbackId;
 	char *detailUrl;
 	char *trackToken;
+	/* Client wall-clock request time, independent of audio playback elapsed. */
+	uint64_t audioUrlFetchedAtMs;
 	float fileGain;
 	unsigned int length; /* song length in seconds */
 	PianoSongRating_t rating;
@@ -386,4 +389,3 @@ void PianoDestroyRequest (PianoRequest_t *);
 PianoStation_t *PianoFindStationById (PianoStation_t * const,
 		const char * const);
 const char *PianoErrorToStr (PianoReturn_t);
-

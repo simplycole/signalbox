@@ -65,7 +65,7 @@ THE SOFTWARE.
 #include "platform.h"
 #include "credential.h"
 #include "debug.h"
-#include "playlist_prefetch.h"
+#include "playback_queue.h"
 #include "terminal.h"
 #include "tui_presentation.h"
 #include "ui.h"
@@ -479,39 +479,85 @@ static void BarMainHandleUserInput (BarApp_t *app) {
 	}
 }
 
-/*	fetch new playlist
- */
-static void BarMainGetPlaylist (BarApp_t *app) {
-	PianoReturn_t pRet;
-	CURLcode wRet;
-	PianoRequestDataGetPlaylist_t reqData;
-	reqData.station = app->nextStation;
-	reqData.quality = app->settings.audioQuality;
+/* Invalidate only Pandora playback objects. Do not cancel enrichment work or
+ * discard its caches: stable track identity can promote the same work later. */
+size_t BarMainInvalidatePlaybackQueue (BarApp_t *app, bool keepCurrent,
+		const char *reason) {
+	const uint64_t now = SbPlatformRealtimeMs ();
+	const PianoSong_t *entry = keepCurrent && app->playlist != NULL ?
+			PianoListNextP (app->playlist) : app->playlist;
+	PianoListForeachP (entry) tuiDebugPrint (
+			"playback_queue item_age_ms=%llu stale=%s reason=%s\n",
+			(unsigned long long) SbPlaybackAgeMs (entry->audioUrlFetchedAtMs, now),
+			SbPlaybackUrlStale (entry, now) || strcmp (reason, "stream_failure") == 0 ||
+			strcmp (reason, "long_pause") == 0 ? "yes" : "no", reason);
+	const size_t count = SbPlaybackDiscard (&app->playlist, keepCurrent);
+	app->playlistGeneration++;
+	app->prefetch.lastAttemptRemaining = SIZE_MAX;
+	pthread_mutex_lock (&app->prefetch.lock);
+	app->prefetch.cancel = true;
+	pthread_mutex_unlock (&app->prefetch.lock);
+	app->playlistRefreshReason = reason;
+	tuiDebugPrint ("stale_queue invalidate count=%zu\n", count);
+	return count;
+}
 
-	BarUiMsg (&app->settings, MSG_INFO, "Receiving new playlist... ");
-	SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_WAITING_PLAYLIST);
-	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
-	if (!BarUiPianoCall (app, PIANO_REQUEST_GET_PLAYLIST,
-			&reqData, &pRet, &wRet)) {
-		app->nextStation = NULL;
-	} else {
-		app->playlist = reqData.retPlaylist;
-		app->playlistGeneration++;
-		app->prefetch.lastAttemptRemaining = SIZE_MAX;
-		if (app->playlist == NULL) {
-			BarUiMsg (&app->settings, MSG_INFO, "No tracks left.\n");
-			app->nextStation = NULL;
-		}
+void BarMainCancelLongPauseRecovery (BarApp_t *app, const char *reason) {
+	if (app->longPause.state != SB_LONG_PAUSE_NONE)
+		tuiDebugPrint ("long_pause recovery cancelled reason=%s\n", reason);
+	app->longPause.state = SB_LONG_PAUSE_NONE;
+	app->longPause.currentPlayer = false;
+}
+
+static void BarMainLongPauseComplete (BarApp_t *app, bool success) {
+	if (app->longPause.state != SB_LONG_PAUSE_NONE)
+		tuiDebugPrint ("long_pause recovery complete result=%s\n",
+				success ? "success" : "failure");
+	app->longPause.state = SB_LONG_PAUSE_NONE;
+	app->longPause.currentPlayer = false;
+}
+
+static void BarMainRecoveryFailed (BarApp_t *app) {
+	const BarPlayerMode mode = BarPlayerGetMode (&app->player);
+	const bool keepCurrent = app->longPause.currentPlayer &&
+			(mode == PLAYER_PLAYING || mode == PLAYER_WAITING) &&
+			app->playlist != NULL;
+	app->playbackBlocked = true;
+	if (app->recoveryAttempted || app->recoveryPending)
+		tuiDebugPrint ("playback recovery result=failure\n");
+	app->recoveryPending = false;
+	BarMainLongPauseComplete (app, false);
+	if (!keepCurrent) {
+		app->enrichmentGeneration++;
+		SbUiModelSetSong (&app->uiModel, NULL, NULL);
+		app->uiModel.artState = SB_LOOKUP_UNAVAILABLE;
+		app->uiModel.artCachedPath[0] = '\0';
+		SbUiModelSetProgress (&app->uiModel, 0, 0, SB_UI_PLAYBACK_STOPPED);
 	}
-	app->curStation = app->nextStation;
-	SbUiModelSetStation (&app->uiModel, app->curStation);
-	BarUiStartEventCmd (&app->settings, "stationfetchplaylist",
-			app->curStation, app->playlist, &app->player, app->ph.stations,
-			pRet, wRet);
+	SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_AUDIO_UNAVAILABLE);
+	BarUiMsg (&app->settings, MSG_ERR,
+			keepCurrent ? "Playlist refresh failed. Current track can finish; press next or play to retry.\n" :
+			"Playback unavailable. Press next or play to retry.\n");
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+}
+
+static void BarMainHandlePlaybackFailure (BarApp_t *app, BarPlayerResult result,
+		SbPlayerStopReason stop) {
+	tuiDebugPrint ("playback failure result=%s\n", BarPlayerResultName (result));
+	if (BarPlayerResultRecoverable (result, stop) && !app->recoveryAttempted) {
+		app->recoveryAttempted = true;
+		app->recoveryPending = true;
+		tuiDebugPrint ("playback recovery attempt=1\n");
+		BarMainInvalidatePlaybackQueue (app, false, "stream_failure");
+	} else {
+		BarMainInvalidatePlaybackQueue (app, false, "stream_failure");
+		BarMainRecoveryFailed (app);
+	}
 }
 
 static void *BarMainPrefetchThread (void *data) {
 	BarApp_t *app = data;
+	const uint64_t fetchedAt = SbPlatformRealtimeMs ();
 	CURL *http = curl_easy_init ();
 	PianoSong_t *result = NULL;
 	PianoReturn_t pRet = PIANO_RET_P_INTERNAL;
@@ -524,6 +570,7 @@ static void *BarMainPrefetchThread (void *data) {
 		(void) BarUiPianoCallQuiet (app, http, PIANO_REQUEST_GET_PLAYLIST,
 				&request, &pRet, &wRet);
 		result = request.retPlaylist;
+		SbPlaybackStamp (result, fetchedAt);
 		curl_easy_cleanup (http);
 	}
 	pthread_mutex_lock (&app->prefetch.lock);
@@ -539,57 +586,146 @@ static void BarMainPollPrefetch (BarApp_t *app) {
 	if (!app->prefetch.inFlight) return;
 	pthread_mutex_lock (&app->prefetch.lock);
 	const bool complete = app->prefetch.complete;
+	const bool cancelled = app->prefetch.cancel;
 	pthread_mutex_unlock (&app->prefetch.lock);
 	if (!complete) return;
 	pthread_join (app->prefetch.thread, NULL);
-	const bool current = app->prefetch.generation == app->playlistGeneration &&
-			app->curStation != NULL && app->nextStation == app->curStation &&
-			app->curStation->id != NULL && strcmp (app->curStation->id,
+	const bool current = !cancelled &&
+			app->prefetch.generation == app->playlistGeneration &&
+			app->nextStation != NULL && app->nextStation == app->curStation &&
+			app->nextStation->id != NULL && strcmp (app->nextStation->id,
 			app->prefetch.stationId) == 0;
-	if (app->prefetch.pianoResult == PIANO_RET_OK &&
-			app->prefetch.curlResult == CURLE_OK && current) {
-		const size_t added = SbPlaylistAppendUnique (&app->playlist,
-				app->prefetch.result);
+	bool fresh = true;
+	const PianoSong_t *entry = app->prefetch.result;
+	PianoListForeachP (entry) if (SbPlaybackUrlStale (entry,
+			SbPlatformRealtimeMs ())) fresh = false;
+	bool success = app->prefetch.pianoResult == PIANO_RET_OK &&
+			app->prefetch.curlResult == CURLE_OK && current && fresh &&
+			app->prefetch.result != NULL;
+	size_t added = 0;
+	if (success) {
+		added = SbPlaylistAppendUnique (&app->playlist, app->prefetch.result);
 		app->prefetch.result = NULL;
-		tuiDebugPrint ("prefetch complete added=%zu generation=%llu\n", added,
-				(unsigned long long) app->playlistGeneration);
-		SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+		if (app->prefetch.required && added == 0) success = false;
+		if (app->prefetch.required && success) {
+			SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_READY);
+			BarUiStartEventCmd (&app->settings, "stationfetchplaylist",
+					app->curStation, app->playlist, &app->player, app->ph.stations,
+					app->prefetch.pianoResult, app->prefetch.curlResult);
+		}
 	} else {
-		if (!current) tuiDebugPrint ("prefetch discarded stale_station generation=%llu current_generation=%llu\n",
-				(unsigned long long) app->prefetch.generation,
-				(unsigned long long) app->playlistGeneration);
-		else tuiDebugPrint ("prefetch failed piano=%d curl=%d\n",
-				(int) app->prefetch.pianoResult, (int) app->prefetch.curlResult);
 		PianoDestroyPlaylist (app->prefetch.result);
 		app->prefetch.result = NULL;
 	}
+	if (current && strcmp (app->prefetch.reason, "long_pause") == 0 &&
+			app->longPause.state == SB_LONG_PAUSE_REFRESH_PENDING) {
+		tuiDebugPrint ("long_pause refresh result=%s added=%zu\n",
+				success ? "success" : "failure", added);
+		tuiDebugPrint ("long_pause fresh_queue ready=%s\n", success ? "yes" : "no");
+		if (success) app->longPause.state = SB_LONG_PAUSE_REFRESH_READY;
+	}
+	if (!success && current && app->prefetch.required)
+		BarMainRecoveryFailed (app);
+	tuiDebugPrint ("playlist refresh result=%s added=%zu reason=%s current=%s piano=%d curl=%d\n",
+			success ? "success" : "failure", added, app->prefetch.reason,
+			current ? "yes" : "no", (int) app->prefetch.pianoResult,
+			(int) app->prefetch.curlResult);
 	free (app->prefetch.stationId); app->prefetch.stationId = NULL;
-	app->prefetch.complete = false; app->prefetch.inFlight = false;
+	pthread_mutex_lock (&app->prefetch.lock);
+	app->prefetch.complete = false; app->prefetch.cancel = false;
+	pthread_mutex_unlock (&app->prefetch.lock);
+	app->prefetch.inFlight = false;
 }
 
-static void BarMainMaybePrefetch (BarApp_t *app) {
-	BarMainPollPrefetch (app);
-	if (app->prefetch.inFlight || app->playlist == NULL ||
-			app->curStation == NULL || app->nextStation != app->curStation) return;
-	const size_t queued = SbPlaylistCount (app->playlist);
-	const size_t remaining = BarPlayerGetMode (&app->player) == PLAYER_DEAD ?
-			queued : queued > 0 ? queued - 1 : 0;
-	if (!SbPlaylistPrefetchNeeded (remaining, app->prefetch.inFlight,
-			app->prefetch.lastAttemptRemaining)) return;
-	app->prefetch.lastAttemptRemaining = remaining;
-	app->prefetch.stationId = strdup (app->curStation->id);
-	if (app->prefetch.stationId == NULL) return;
+static bool BarMainStartPlaylistRequest (BarApp_t *app, bool required,
+		const char *reason) {
+	if (app->prefetch.inFlight || app->nextStation == NULL || app->doQuit ||
+			app->playbackBlocked) return false;
+	app->prefetch.stationId = strdup (app->nextStation->id);
+	if (app->prefetch.stationId == NULL) {
+		if (required) BarMainRecoveryFailed (app);
+		return false;
+	}
+	if (required) {
+		app->curStation = app->nextStation;
+		SbUiModelSetStation (&app->uiModel, app->curStation);
+		/* A proactive refill owns failure handling but not the current player. */
+		if (BarPlayerGetMode (&app->player) == PLAYER_DEAD) {
+			SbUiModelSetProgress (&app->uiModel, 0, 0, SB_UI_PLAYBACK_STOPPED);
+			SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_WAITING_PLAYLIST);
+		}
+		BarUiMsg (&app->settings, MSG_INFO, "Refreshing playlist...\n");
+		SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+	}
 	app->prefetch.generation = app->playlistGeneration;
-	app->prefetch.complete = false; app->prefetch.inFlight = true;
+	app->prefetch.required = required;
+	app->prefetch.reason = reason;
+	pthread_mutex_lock (&app->prefetch.lock);
+	app->prefetch.cancel = false; app->prefetch.complete = false;
+	pthread_mutex_unlock (&app->prefetch.lock);
+	app->prefetch.inFlight = true;
 	if (pthread_create (&app->prefetch.thread, NULL,
 			BarMainPrefetchThread, app) != 0) {
 		free (app->prefetch.stationId); app->prefetch.stationId = NULL;
 		app->prefetch.inFlight = false;
+		if (required) BarMainRecoveryFailed (app);
+		return false;
+	}
+	app->playlistRefreshReason = NULL;
+	tuiDebugPrint ("playlist refresh reason=%s\n", reason);
+	return true;
+}
+
+static void BarMainScheduleLongPauseRefresh (BarApp_t *app) {
+	if (app->longPause.state != SB_LONG_PAUSE_REFRESH_NEEDED ||
+			app->prefetch.inFlight || app->doQuit || app->playbackBlocked) return;
+	if (app->nextStation == NULL) {
+		BarMainRecoveryFailed (app);
 		return;
 	}
-	tuiDebugPrint ("prefetch started queue_remaining=%zu station=%s generation=%llu\n",
-			remaining, app->curStation->id,
-			(unsigned long long) app->playlistGeneration);
+	/* Ownership is published before creating the worker. A failure cannot leave
+	 * a second caller free to launch another independent recovery request. */
+	app->longPause.state = SB_LONG_PAUSE_REFRESH_PENDING;
+	if (BarMainStartPlaylistRequest (app, true, "long_pause"))
+		tuiDebugPrint ("long_pause refresh scheduled=yes\n");
+}
+
+void BarMainBeginLongPauseRecovery (BarApp_t *app, uint64_t pauseAgeMs) {
+	if (app->longPause.state != SB_LONG_PAUSE_NONE || app->doQuit) return;
+	app->longPause.state = SB_LONG_PAUSE_REFRESH_NEEDED;
+	app->longPause.currentPlayer = app->playlist != NULL &&
+			BarPlayerGetMode (&app->player) != PLAYER_DEAD;
+	app->recoveryAttempted = app->recoveryPending = true;
+	tuiDebugPrint ("long_pause recovery begin pause_age_ms=%llu\n",
+			(unsigned long long) pauseAgeMs);
+	tuiDebugPrint ("playback recovery attempt=1\n");
+	const size_t count = BarMainInvalidatePlaybackQueue (app,
+			app->longPause.currentPlayer, "long_pause");
+	tuiDebugPrint ("long_pause future_queue invalidated count=%zu\n", count);
+	/* If an old prefetch is being cancelled, retain NEEDED and launch as soon
+	 * as that worker publishes completion. Never join it from the resume action. */
+	if (app->prefetch.inFlight)
+		tuiDebugPrint ("long_pause refresh scheduled=no reason=awaiting_cancelled_request\n");
+	BarMainScheduleLongPauseRefresh (app);
+}
+
+static void BarMainMaybePrefetch (BarApp_t *app) {
+	BarMainPollPrefetch (app);
+	BarMainScheduleLongPauseRefresh (app);
+	if (app->longPause.state != SB_LONG_PAUSE_NONE) return;
+	if (app->prefetch.inFlight || app->playlist == NULL ||
+			app->curStation == NULL || app->nextStation != app->curStation ||
+			app->playbackBlocked || app->playlistRefreshReason != NULL ||
+			BarPlayerGetMode (&app->player) != PLAYER_PLAYING) return;
+	/* Do not append new playback objects to a queue known to be expired. */
+	const PianoSong_t *next = PianoListNextP (app->playlist);
+	if (SbPlaybackUrlStale (next, SbPlatformRealtimeMs ())) return;
+	const size_t queued = SbPlaylistCount (app->playlist);
+	const size_t remaining = queued > 0 ? queued - 1 : 0;
+	if (!SbPlaylistPrefetchNeeded (remaining, false,
+			app->prefetch.lastAttemptRemaining)) return;
+	app->prefetch.lastAttemptRemaining = remaining;
+	BarMainStartPlaylistRequest (app, false, "prefetch");
 }
 
 static void BarMainTrackIdentity (const BarApp_t *app,
@@ -600,7 +736,7 @@ static void BarMainTrackIdentity (const BarApp_t *app,
 	SbTrackIdentitySet (identity, song->artist, song->title, song->album,
 			station != NULL ? station->name : NULL, song->length);
 	SbTrackIdentitySetPandoraId (identity, song->musicId != NULL ?
-			song->musicId : song->trackToken);
+			song->musicId : NULL);
 }
 
 static void BarMainMaybePrefetchEnrichment (BarApp_t *app) {
@@ -629,6 +765,8 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 
 	const PianoSong_t * const curSong = app->playlist;
 	assert (curSong != NULL);
+	if (app->longPause.state == SB_LONG_PAUSE_REFRESH_READY)
+		app->longPause.state = SB_LONG_PAUSE_STARTING_FRESH;
 
 	SbUiModelSetSong (&app->uiModel, curSong, app->curStation->isQuickMix ?
 			PianoFindStationById (app->ph.stations, curSong->stationId) : NULL);
@@ -657,13 +795,18 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 		snprintf (app->metadata.error, sizeof (app->metadata.error),
 				"Metadata worker unavailable");
 	}
+	SbUiModelSetProgress (&app->uiModel, 0, curSong->length, SB_UI_PLAYBACK_STOPPED);
+	SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_READY);
 	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_SONG);
 
 	static const char httpPrefix[] = "http://";
 	/* avoid playing local files */
 	if (curSong->audioUrl == NULL ||
-			strncmp (curSong->audioUrl, httpPrefix, strlen (httpPrefix)) != 0) {
+			(strncmp (curSong->audioUrl, httpPrefix, strlen (httpPrefix)) != 0 &&
+			strncmp (curSong->audioUrl, "https://", 8) != 0)) {
 		BarUiMsg (&app->settings, MSG_ERR, "Invalid song url.\n");
+		SbUiModelSetSong (&app->uiModel, NULL, NULL);
+		BarMainHandlePlaybackFailure (app, PLAYER_RET_SOFTFAIL, SB_PLAYER_STOP_NONE);
 	} else {
 		player_t * const player = &app->player;
 		BarPlayerReset (player);
@@ -684,8 +827,14 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
 		 * thread has been started */
 		app->player.mode = PLAYER_WAITING;
 		/* start player */
-		pthread_create (playerThread, NULL, BarPlayerThread,
-				&app->player);
+		if (pthread_create (playerThread, NULL, BarPlayerThread,
+				&app->player) != 0) {
+			app->player.mode = PLAYER_DEAD;
+			interrupted = &app->doQuit;
+			SbUiModelSetSong (&app->uiModel, NULL, NULL);
+			BarMainInvalidatePlaybackQueue (app, false, "stream_failure");
+			BarMainRecoveryFailed (app);
+		}
 	}
 }
 
@@ -693,31 +842,123 @@ static void BarMainStartPlayback (BarApp_t *app, pthread_t *playerThread) {
  */
 static void BarMainPlayerCleanup (BarApp_t *app, pthread_t *playerThread) {
 	void *threadRet;
-
-	BarUiStartEventCmd (&app->settings, "songfinish", app->curStation,
-			app->playlist, &app->player, app->ph.stations, PIANO_RET_OK,
-			CURLE_OK);
-
-	/* FIXME: pthread_join blocks everything if network connection
-	 * is hung up e.g. */
+	/* PLAYER_FINISHED is published after decoder/output cleanup. */
 	pthread_join (*playerThread, &threadRet);
-
-	if (threadRet == (void *) PLAYER_RET_OK) {
-		app->playerErrors = 0;
-	} else if (threadRet == (void *) PLAYER_RET_SOFTFAIL) {
-		++app->playerErrors;
-		if (app->playerErrors >= app->settings.maxRetry) {
-			/* don't continue playback if thread reports too many error */
-			app->nextStation = NULL;
-		}
-	} else {
-		app->nextStation = NULL;
-	}
-
+	const BarPlayerResult result = (BarPlayerResult) (uintptr_t) threadRet;
+	const SbPlayerStopReason stop = app->player.stopReason;
+	BarUiStartEventCmd (&app->settings, "songfinish", app->curStation,
+			app->playlist, &app->player, app->ph.stations, PIANO_RET_OK, CURLE_OK);
 	assert (interrupted == &app->player.interrupted);
 	interrupted = &app->doQuit;
-
 	app->player.mode = PLAYER_DEAD;
+	SbUiModelSetProgress (&app->uiModel, 0, 0, SB_UI_PLAYBACK_STOPPED);
+	SbUiModelSetSong (&app->uiModel, NULL, NULL);
+	app->enrichmentGeneration++;
+	app->uiModel.artState = SB_LOOKUP_UNAVAILABLE;
+	app->uiModel.artCachedPath[0] = '\0';
+	if (app->playlist != NULL) {
+		PianoSong_t *finished = app->playlist;
+		app->playlist = PianoListNextP (finished);
+		finished->head.next = NULL;
+		BarUiHistoryPrepend (app, finished);
+	}
+	if (app->longPause.state != SB_LONG_PAUSE_NONE && app->longPause.currentPlayer) {
+		tuiDebugPrint ("long_pause current_player result=%s\n", BarPlayerResultName (result));
+		app->longPause.currentPlayer = false;
+		tuiDebugPrint ("long_pause fresh_queue ready=%s\n",
+				app->longPause.state == SB_LONG_PAUSE_REFRESH_READY ? "yes" : "no");
+		if (!app->doQuit && stop != SB_PLAYER_STOP_QUIT &&
+				stop != SB_PLAYER_STOP_STATION_CHANGE && result != PLAYER_RET_HARDFAIL) {
+			/* This is the old suspended player, not the fresh retry. Its end,
+			 * stream failure, or decode failure cannot discard our owned refill. */
+			SbUiModelSetActivity (&app->uiModel,
+					app->longPause.state == SB_LONG_PAUSE_REFRESH_READY ?
+					SB_UI_ACTIVITY_READY : SB_UI_ACTIVITY_WAITING_PLAYLIST);
+			SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+			return;
+		}
+	}
+	if (app->doQuit || stop == SB_PLAYER_STOP_QUIT ||
+			stop == SB_PLAYER_STOP_STATION_CHANGE || stop == SB_PLAYER_STOP_NEXT) return;
+	if (result != PLAYER_RET_OK) {
+		BarMainHandlePlaybackFailure (app, result, stop);
+	} else {
+		/* A very short fresh track can finish before the loop sees PLAYING. */
+		if (app->longPause.state == SB_LONG_PAUSE_STARTING_FRESH) {
+			BarMainLongPauseComplete (app, true);
+			app->recoveryPending = false;
+			tuiDebugPrint ("playback recovery result=success\n");
+		}
+		app->recoveryAttempted = false;
+		app->playerErrors = 0;
+	}
+	SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+}
+
+/* Called once per loop, never waits for a playlist network transaction. */
+static void BarMainAdvancePlayback (BarApp_t *app, pthread_t *playerThread) {
+	if (BarPlayerGetMode (&app->player) != PLAYER_DEAD || app->doQuit ||
+			app->playbackBlocked) return;
+	if (app->longPause.state == SB_LONG_PAUSE_REFRESH_NEEDED ||
+			app->longPause.state == SB_LONG_PAUSE_REFRESH_PENDING) {
+		BarMainScheduleLongPauseRefresh (app);
+		if (!app->playbackBlocked) {
+			SbUiModelSetProgress (&app->uiModel, 0, 0, SB_UI_PLAYBACK_STOPPED);
+			SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_WAITING_PLAYLIST);
+			SbUiRendererRender (&app->uiRenderer, &app->uiModel, SB_UI_RENDER_STATE);
+		}
+		return;
+	}
+	if (app->playlist != NULL) {
+		const uint64_t now = SbPlatformRealtimeMs ();
+		const bool stale = SbPlaybackUrlStale (app->playlist, now);
+		tuiDebugPrint ("playback_queue item_age_ms=%llu stale=%s reason=%s\n",
+				(unsigned long long) SbPlaybackAgeMs (
+				app->playlist->audioUrlFetchedAtMs, now), stale ? "yes" : "no",
+				stale ? "url_age" : "within_age_limit");
+		if (stale) {
+			const char *reason = app->playlistRefreshReason != NULL ?
+					app->playlistRefreshReason : "long_pause";
+			BarMainInvalidatePlaybackQueue (app, false, reason);
+			if (app->longPause.state == SB_LONG_PAUSE_REFRESH_READY) {
+				BarMainRecoveryFailed (app);
+				return;
+			}
+			app->recoveryPending = true;
+		}
+	}
+	if (app->playlist == NULL && app->nextStation != NULL) {
+		if (!app->prefetch.inFlight) {
+			const char *reason = app->playlistRefreshReason != NULL ?
+					app->playlistRefreshReason : "queue_empty";
+			if (strcmp (reason, "long_pause") == 0 || strcmp (reason, "next") == 0)
+				app->recoveryPending = true;
+			if (app->recoveryPending && !app->recoveryAttempted) {
+				app->recoveryAttempted = true;
+				tuiDebugPrint ("playback recovery attempt=1\n");
+			}
+			BarMainStartPlaylistRequest (app, true, reason);
+		} else {
+			/* A normal prefetch can become the required transition fetch. */
+			app->prefetch.required = true;
+			SbUiModelSetActivity (&app->uiModel, SB_UI_ACTIVITY_WAITING_PLAYLIST);
+		}
+	} else if (app->playlist != NULL && app->nextStation != NULL) {
+		app->playlistRefreshReason = NULL;
+		BarMainStartPlayback (app, playerThread);
+	}
+}
+
+static void BarMainObservePlayback (BarApp_t *app) {
+	if (BarPlayerGetMode (&app->player) != PLAYER_PLAYING) return;
+	if (app->longPause.state == SB_LONG_PAUSE_STARTING_FRESH) {
+		BarMainLongPauseComplete (app, true);
+		app->recoveryPending = false;
+		tuiDebugPrint ("playback recovery result=success\n");
+	} else if (app->longPause.state == SB_LONG_PAUSE_NONE && app->recoveryPending) {
+		app->recoveryPending = false;
+		tuiDebugPrint ("playback recovery result=success\n");
+	}
 }
 
 /*	print song duration
@@ -841,30 +1082,7 @@ static void BarMainLoop (BarApp_t *app) {
 			BarMainPlayerCleanup (app, &playerThread);
 		}
 
-		/* check whether player finished playing and start playing new
-		 * song */
-		if (BarPlayerGetMode (player) == PLAYER_DEAD) {
-			/* what's next? */
-			if (app->playlist != NULL) {
-				PianoSong_t *histsong = app->playlist;
-				app->playlist = PianoListNextP (app->playlist);
-				SbUiModelSetSong (&app->uiModel, NULL, NULL);
-				histsong->head.next = NULL;
-				BarUiHistoryPrepend (app, histsong);
-			}
-			if (app->playlist == NULL && app->nextStation != NULL && !app->doQuit) {
-				if (app->nextStation != app->curStation) {
-					SbUiModelSetStation (&app->uiModel, app->nextStation);
-					SbUiRendererRender (&app->uiRenderer, &app->uiModel,
-							SB_UI_RENDER_STATION);
-				}
-				BarMainGetPlaylist (app);
-			}
-			/* song ready to play */
-			if (app->playlist != NULL) {
-				BarMainStartPlayback (app, &playerThread);
-			}
-		}
+		BarMainAdvancePlayback (app, &playerThread);
 
 		BarMainHandleUserInput (app);
 		if (app->useTui && app->visualizerEnabled) {
@@ -875,14 +1093,19 @@ static void BarMainLoop (BarApp_t *app) {
 
 		/* show time */
 		if (BarPlayerGetMode (player) == PLAYER_PLAYING) {
+			BarMainObservePlayback (app);
 			BarMainPrintTime (app);
 		}
 	}
 
+	BarMainCancelLongPauseRecovery (app, "quit");
 	if (BarPlayerGetMode (player) != PLAYER_DEAD) {
 		pthread_join (playerThread, NULL);
 	}
 	if (app->prefetch.inFlight) {
+		pthread_mutex_lock (&app->prefetch.lock);
+		app->prefetch.cancel = true;
+		pthread_mutex_unlock (&app->prefetch.lock);
 		pthread_join (app->prefetch.thread, NULL);
 		PianoDestroyPlaylist (app->prefetch.result);
 		free (app->prefetch.stationId);
