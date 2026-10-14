@@ -40,6 +40,7 @@ THE SOFTWARE.
 #include "settings.h"
 #include "spectrum.h"
 #include "player_lifecycle.h"
+#include "player_input.h"
 
 typedef enum {
 	/* not running */
@@ -58,6 +59,7 @@ typedef struct {
 	pthread_cond_t cond, aoplayCond; /* broadcast changes to doPause */
 	bool doQuit, doPause;
 	uint64_t pausedAtMs;
+	bool resumedAfterPause;
 	SbPlayerStopReason stopReason;
 
 	/* measured in seconds */
@@ -70,6 +72,9 @@ typedef struct {
 
 	/* libav */
 	BarPlayerResult streamSetupResult;
+	int decoderError;
+	SbPlayerInput *input; /* access from UI/stop paths requires lock */
+	AVIOContext *avio;
 	AVFilterContext *fvolume;
 	AVFilterGraph *fgraph;
 	AVFormatContext *fctx;

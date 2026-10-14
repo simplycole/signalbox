@@ -130,6 +130,8 @@ void BarPlayerInit (player_t * const p, const BarSettings_t * const settings) {
 	pthread_mutex_init (&p->aoplayLock, NULL);
 	pthread_cond_init (&p->aoplayCond, NULL);
 	p->aoDev = NULL;
+	p->input = NULL;
+	p->avio = NULL;
 	p->aoFormat = (SbAudioOutputFormat) {0};
 	p->aoFormatValid = false;
 	p->spectrumReady = SbSpectrumInit (&p->spectrum);
@@ -170,6 +172,8 @@ void BarPlayerReset (player_t * const p) {
 	p->doQuit = false;
 	p->doPause = false;
 	p->pausedAtMs = 0;
+	p->resumedAfterPause = false;
+	p->decoderError = 0;
 	p->stopReason = SB_PLAYER_STOP_NONE;
 	p->songDuration = 0;
 	p->songPlayed = 0;
@@ -263,17 +267,30 @@ static bool openStream (player_t * const player) {
 	player->fctx->interrupt_callback.callback = intCb;
 	player->fctx->interrupt_callback.opaque = player;
 
-	/* in microseconds */
-	unsigned long int timeout = player->settings->timeout*1000000;
-	char timeoutStr[16];
-	ret = snprintf (timeoutStr, sizeof (timeoutStr), "%lu", timeout);
-	assert (ret < sizeof (timeoutStr));
-	AVDictionary *options = NULL;
-	av_dict_set (&options, "timeout", timeoutStr, 0);
-
 	assert (player->url != NULL);
-	ret = avformat_open_input (&player->fctx, player->url, NULL, &options);
-	av_dict_free (&options);
+	/* Fetch compressed bytes independently of the five-second PCM buffer. A
+	 * paused output thread must not suspend HTTP reads on this already-open song. */
+	pthread_mutex_lock (&player->lock);
+	player->input = SbPlayerInputOpen (player->url, player->settings, intCb, player);
+	if (player->doQuit) SbPlayerInputCancel (player->input);
+	pthread_mutex_unlock (&player->lock);
+	if (player->input == NULL) {
+		player->streamSetupResult = PLAYER_RET_HARDFAIL;
+		ret = AVERROR (ENOMEM);
+		softfail ("input_spool_open");
+	}
+	uint8_t *avioBuffer = av_malloc (SB_PLAYER_AVIO_BUFFER_SIZE);
+	if (avioBuffer == NULL || (player->avio = avio_alloc_context (avioBuffer,
+			SB_PLAYER_AVIO_BUFFER_SIZE, 0, player->input, SbPlayerInputRead, NULL,
+			SbPlayerInputSeek)) == NULL) {
+		av_free (avioBuffer);
+		player->streamSetupResult = PLAYER_RET_HARDFAIL;
+		ret = AVERROR (ENOMEM);
+		softfail ("avio_alloc_context");
+	}
+	player->fctx->pb = player->avio;
+	player->fctx->flags |= AVFMT_FLAG_CUSTOM_IO;
+	ret = avformat_open_input (&player->fctx, NULL, NULL, NULL);
 	if (ret < 0) {
 		softfail ("Unable to open audio file");
 	}
@@ -534,6 +551,7 @@ void BarPlayerRequestStop (player_t * const player,
 	pthread_mutex_lock (&player->lock);
 	player->doQuit = true;
 	player->doPause = false;
+	SbPlayerInputCancel (player->input);
 	if (reason > player->stopReason) {
 		player->stopReason = reason; changed = true;
 	}
@@ -588,6 +606,18 @@ static int closeFilterSource (player_t * const player) {
 	return ret;
 }
 
+static void decoderFailure (player_t *player, const char *stage, int error,
+		const AVPacket *packet) {
+	player->decoderError = error;
+	SbPlayerInputSnapshot input;
+	SbPlayerInputGetSnapshot (player->input, &input);
+	tuiDebugPrint ("player decoder error stage=%s ffmpeg_error=%d packet_bytes=%d packet_corrupt=%s input_bytes=%llu input_position=%llu input_complete=%s input_error=%d\n",
+			stage, error, packet != NULL ? packet->size : 0,
+			packet != NULL && (packet->flags & AV_PKT_FLAG_CORRUPT) ? "yes" : "no",
+			(unsigned long long) input.received, (unsigned long long) input.position,
+			input.complete ? "yes" : "no", input.error);
+}
+
 /*	decode and play stream. returns 0 or av error code.
  */
 static int play (player_t * const player, bool *decodeFailed) {
@@ -613,16 +643,29 @@ static int play (player_t * const player, bool *decodeFailed) {
 		if (drainMode == FILL) {
 			ret = av_read_frame (player->fctx, pkt);
 			if (ret == AVERROR_EOF) {
+				SbPlayerInputSnapshot input;
+				SbPlayerInputGetSnapshot (player->input, &input);
+				tuiDebugPrint ("player input eof source=demux avio_eof=%d avio_error=%d input_complete=%s input_error=%d\n",
+						avio_feof (player->avio), player->avio->error,
+						input.complete ? "yes" : "no", input.error);
+				if (input.error != 0) {
+					ret = input.error;
+					(void) closeFilterSource (player);
+					break;
+				}
 				/* enter drain mode */
 				drainMode = DRAIN;
 				const int sendRet = avcodec_send_packet (cctx, NULL);
 				if (sendRet < 0 && sendRet != AVERROR_EOF) {
+					decoderFailure (player, "send_flush", sendRet, NULL);
 					ret = sendRet;
 					decoderError = true;
 					drainMode = DONE;
 				}
 				debugPrint (DEBUG_AUDIO, "decoder entering drain mode after EOF\n");
 			} else if (ret < 0) {
+				tuiDebugPrint ("player input error source=demux ffmpeg_error=%d avio_eof=%d avio_error=%d\n",
+						ret, avio_feof (player->avio), player->avio->error);
 				/* error, abort */
 				/* mark the EOF, so that BarAoPlayThread can quit*/
 				char error[AV_ERROR_MAX_STRING_SIZE];
@@ -642,6 +685,7 @@ static int play (player_t * const player, bool *decodeFailed) {
 				/* fill buffer */
 				const int sendRet = avcodec_send_packet (cctx, pkt);
 				if (sendRet < 0) {
+					decoderFailure (player, "send_packet", sendRet, pkt);
 					ret = sendRet;
 					decoderError = true;
 					drainMode = DONE;
@@ -664,6 +708,7 @@ static int play (player_t * const player, bool *decodeFailed) {
 				/* no more output */
 				break;
 			} else if (ret < 0) {
+				decoderFailure (player, drainMode == DRAIN ? "receive_flush" : "receive_frame", ret, pkt);
 				decoderError = true;
 				drainMode = DONE;
 				break;
@@ -723,9 +768,16 @@ static void finish (player_t * const player) {
 	if (player->fctx != NULL) {
 		avformat_close_input (&player->fctx);
 	}
+	if (player->avio != NULL) {
+		av_freep (&player->avio->buffer);
+		avio_context_free (&player->avio);
+	}
 	pthread_mutex_lock (&player->lock);
+	SbPlayerInput *input = player->input;
+	player->input = NULL;
 	const SbPlayerStopReason reason = player->stopReason;
 	pthread_mutex_unlock (&player->lock);
+	SbPlayerInputClose (input);
 	if (player->aoDev != NULL && SbAudioOutputCloseForStop (
 			audioPlatform (), player->aoFormat.live, reason)) {
 		tuiDebugPrint ("audio output close begin reason=%s\n",

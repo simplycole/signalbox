@@ -544,6 +544,18 @@ static void BarMainRecoveryFailed (BarApp_t *app) {
 static void BarMainHandlePlaybackFailure (BarApp_t *app, BarPlayerResult result,
 		SbPlayerStopReason stop) {
 	tuiDebugPrint ("playback failure result=%s\n", BarPlayerResultName (result));
+	/* A malformed packet in an actually resumed current stream gets one
+	 * automatic fallback. Healthy future URLs need not be discarded for it.
+	 * Reset on fresh player creation prevents a decode-failure skip loop. */
+	if (result == PLAYER_RET_DECODEFAIL && stop == SB_PLAYER_STOP_NONE &&
+			app->player.resumedAfterPause && app->player.decoderError == AVERROR_INVALIDDATA &&
+			!app->recoveryAttempted) {
+		app->recoveryAttempted = app->recoveryPending = true;
+		app->playlistRefreshReason = "stream_failure";
+		tuiDebugPrint ("playback recovery attempt=1 context=resumed_decode_failure queued=%zu\n",
+				SbPlaylistCount (app->playlist));
+		return;
+	}
 	if (BarPlayerResultRecoverable (result, stop) && !app->recoveryAttempted) {
 		app->recoveryAttempted = true;
 		app->recoveryPending = true;

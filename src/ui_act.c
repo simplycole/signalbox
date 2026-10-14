@@ -603,9 +603,23 @@ static void setPause (BarApp_t *app, bool paused) {
 	const bool wasPaused = app->player.doPause;
 	const uint64_t started = app->player.pausedAtMs;
 	if (paused && !wasPaused) app->player.pausedAtMs = now;
+	SbPlayerInputSnapshot input;
+	SbPlayerInputGetSnapshot (app->player.input, &input);
+	const char *networkState = app->player.input == NULL ? "inactive" :
+			input.error != 0 ? "failed" : input.complete ? "complete" : "downloading";
+	const unsigned int playbackMs = app->player.songPlayed * 1000;
+	if (!paused && wasPaused && app->player.mode == PLAYER_PLAYING)
+		app->player.resumedAfterPause = true;
 	app->player.doPause = paused;
 	pthread_cond_broadcast (&app->player.cond);
 	pthread_mutex_unlock (&app->player.lock);
+	if (paused && !wasPaused) {
+		tuiDebugPrint ("player pause begin playback_ms=%u\n", playbackMs);
+		tuiDebugPrint ("player pause network_state=%s buffered_bytes=%llu stream_bytes=%llu\n",
+				networkState,
+				(unsigned long long) (input.received > input.position ? input.received - input.position : 0),
+				(unsigned long long) input.received);
+	}
 	if (!paused) {
 		if (app->playbackBlocked) {
 			app->playbackBlocked = false;
@@ -616,6 +630,11 @@ static void setPause (BarApp_t *app, bool paused) {
 		if (wasPaused) {
 			const uint64_t age = SbPlaybackAgeMs (started, now);
 			tuiDebugPrint ("resume pause_age_ms=%llu\n", (unsigned long long) age);
+			tuiDebugPrint ("player resume pause_age_ms=%llu playback_ms=%u buffered_bytes=%llu stream_bytes=%llu network_state=%s\n",
+					(unsigned long long) age, playbackMs,
+					(unsigned long long) (input.received > input.position ? input.received - input.position : 0),
+					(unsigned long long) input.received,
+					networkState);
 			if (age >= SB_PLAYBACK_URL_MAX_AGE_MS || now < started) {
 				BarMainBeginLongPauseRecovery (app, age);
 			}

@@ -389,6 +389,48 @@ static void testLongPauseCancellation (void) {
 	destroyApp (&app, &thread);
 }
 
+static void testShortPauseDecodeRecovery (bool queued) {
+	static BarApp_t app; pthread_t thread;
+	initApp (&app);
+	app.playlist = testSong ("resumed", SbPlatformRealtimeMs ());
+	if (queued) app.playlist->head.next = &testSong ("healthy-next", SbPlatformRealtimeMs ())->head;
+	playerResult = PLAYER_RET_DECODEFAIL;
+	BarMainStartPlayback (&app, &thread); waitMode (&app, PLAYER_PLAYING);
+	callAction (&app, SB_UI_CMD_PAUSE); callAction (&app, SB_UI_CMD_PLAY);
+	assert (app.player.resumedAfterPause && !app.prefetch.inFlight && requests == 0);
+	app.player.decoderError = AVERROR_INVALIDDATA;
+	finishCurrent (&app, &thread, PLAYER_RET_DECODEFAIL);
+	assert (!app.playbackBlocked && app.recoveryAttempted && app.recoveryPending);
+	playerResult = PLAYER_RET_OK;
+	BarMainAdvancePlayback (&app, &thread);
+	if (!queued) { pollRequest (&app); BarMainAdvancePlayback (&app, &thread); }
+	waitMode (&app, PLAYER_PLAYING);
+	assert (!app.player.resumedAfterPause);
+	assert (requests == (queued ? 0U : 1U) && starts == 2);
+	assert (!strcmp (app.playlist->trackToken, queued ? "healthy-next" : stationA.id));
+	BarMainObservePlayback (&app); BarMainPrintTime (&app);
+	assert (!app.recoveryPending && app.uiModel.playback == SB_UI_PLAYBACK_PLAYING);
+	destroyApp (&app, &thread);
+
+	/* The fresh fallback fails before PLAYING: no second automatic attempt. */
+	initApp (&app); playerResult = PLAYER_RET_DECODEFAIL;
+	app.playlist = testSong ("resumed", SbPlatformRealtimeMs ());
+	BarMainStartPlayback (&app, &thread); waitMode (&app, PLAYER_PLAYING);
+	callAction (&app, SB_UI_CMD_PAUSE); callAction (&app, SB_UI_CMD_PLAY);
+	app.player.decoderError = AVERROR_INVALIDDATA;
+	finishCurrent (&app, &thread, PLAYER_RET_DECODEFAIL);
+	BarMainAdvancePlayback (&app, &thread); pollRequest (&app);
+	holdPlayer = false; playerResult = PLAYER_RET_SOFTFAIL;
+	BarMainAdvancePlayback (&app, &thread); waitMode (&app, PLAYER_FINISHED);
+	BarMainPlayerCleanup (&app, &thread);
+	for (unsigned int i = 0; i < 10; i++) {
+		BarMainMaybePrefetch (&app); BarMainAdvancePlayback (&app, &thread);
+	}
+	assert (requests == 1 && app.playbackBlocked && !app.recoveryPending);
+	assert (app.uiModel.song == NULL && app.uiModel.activity == SB_UI_ACTIVITY_AUDIO_UNAVAILABLE);
+	destroyApp (&app, &thread);
+}
+
 int main (void) {
 	const uint64_t now = UINT64_C (100000000);
 	PianoSong_t *entry = testSong ("age", now);
@@ -578,6 +620,8 @@ int main (void) {
 	testLongPauseFailures ();
 	testLongPauseCancellation ();
 	testTransportRetry ();
+	testShortPauseDecodeRecovery (false);
+	testShortPauseDecodeRecovery (true);
 	puts ("playlist recovery tests passed");
 	return 0;
 }
